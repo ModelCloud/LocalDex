@@ -1121,6 +1121,32 @@ impl AccountRequestProcessor {
         &self,
         params: GetAccountRateLimitsParams,
     ) -> Result<GetAccountRateLimitsResponse, JSONRPCErrorError> {
+        // Third-party providers do not have a Codex/ChatGPT usage bucket. The TUI
+        // queries this endpoint in the background, so attempting to authenticate
+        // here would unnecessarily refresh a ChatGPT credential and can surface a
+        // login error in an otherwise healthy local-provider session.
+        if !self.config.model_provider.requires_openai_auth {
+            return Ok(GetAccountRateLimitsResponse {
+                ordinary_usage_allowed: None,
+                rate_limits: codex_app_server_protocol::RateLimitSnapshot {
+                    limit_id: None,
+                    limit_name: None,
+                    normal_model_slug: None,
+                    primary: None,
+                    secondary: None,
+                    credits: None,
+                    individual_limit: None,
+                    spend_control_reached: None,
+                    plan_type: None,
+                    rate_limit_reached_type: None,
+                },
+                rate_limits_by_limit_id: None,
+                rate_limit_reset_credits: None,
+                account_id: None,
+                rate_limit_upsell: None,
+            });
+        }
+
         let Some(auth) = self.auth_manager.auth().await else {
             return Err(invalid_request(
                 "codex account authentication required to read rate limits",
