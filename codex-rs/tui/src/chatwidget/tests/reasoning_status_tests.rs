@@ -1,6 +1,7 @@
 //! Reasoning activity retains the latest usable line through empty items and status-row replacement.
 
 use super::*;
+use codex_app_server_protocol::ReasoningTextDeltaNotification;
 use pretty_assertions::assert_eq;
 
 fn delta(chat: &mut ChatWidget, id: &str, text: &str) {
@@ -11,6 +12,19 @@ fn delta(chat: &mut ChatWidget, id: &str, text: &str) {
             item_id: id.to_string(),
             delta: text.to_string(),
             summary_index: 0,
+        }),
+        /*replay_kind*/ None,
+    );
+}
+
+fn raw_delta(chat: &mut ChatWidget, id: &str, text: &str) {
+    chat.handle_server_notification(
+        ServerNotification::ReasoningTextDelta(ReasoningTextDeltaNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: id.to_string(),
+            delta: text.to_string(),
+            content_index: 0,
         }),
         /*replay_kind*/ None,
     );
@@ -59,6 +73,38 @@ async fn reasoning_status_accepts_bold_text_with_a_plain_suffix() {
         "Checking tests: running suite",
     ]
     "###);
+}
+
+#[tokio::test]
+async fn raw_reasoning_streams_and_commits_without_a_markdown_heading() {
+    let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.config.show_raw_agent_reasoning = true;
+    chat.on_task_started();
+    handle_agent_reasoning_started(&mut chat, "reasoning");
+
+    // This mirrors an OpenAI-compatible server that sends the same trace in
+    // both event families. Raw-thinking mode must show the raw text once.
+    delta(&mut chat, "reasoning", "summary mirror");
+    raw_delta(&mut chat, "reasoning", "plain raw chain of thought");
+
+    let active = chat
+        .transcript
+        .active_cell
+        .as_ref()
+        .expect("raw reasoning cell");
+    let active_text = lines_to_single_string(&active.display_lines(/*width*/ 80));
+    assert!(active_text.contains("plain raw chain of thought"));
+    assert!(!active_text.contains("summary mirror"));
+
+    complete(&mut chat, "reasoning");
+    let committed = match rx.try_recv() {
+        Ok(AppEvent::InsertHistoryCell(cell)) => {
+            lines_to_single_string(&cell.display_lines(/*width*/ 80))
+        }
+        other => panic!("expected InsertHistoryCell, got {other:?}"),
+    };
+    assert!(committed.contains("plain raw chain of thought"));
+    assert!(!committed.contains("summary mirror"));
 }
 
 #[tokio::test]

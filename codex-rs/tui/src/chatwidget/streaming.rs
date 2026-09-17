@@ -335,8 +335,26 @@ impl ChatWidget {
         }
     }
 
+    /// Render provider-supplied raw reasoning as it arrives.
+    ///
+    /// Raw traces commonly begin with ordinary prose rather than a Markdown
+    /// heading. They must therefore use a visible reasoning cell instead of
+    /// the summary helper, whose cells are retained only in the transcript.
+    pub(super) fn on_agent_raw_reasoning_delta(&mut self, delta: String) {
+        self.reasoning_buffer.push_str(&delta);
+        self.transcript.active_cell = Some(Box::new(history_cell::ReasoningSummaryCell::new(
+            "Raw reasoning".to_string(),
+            self.reasoning_buffer.clone(),
+            &self.config.cwd,
+            /*transcript_only*/ false,
+        )));
+        self.bump_active_cell_revision();
+        self.request_redraw();
+    }
+
     pub(super) fn on_agent_reasoning_final(&mut self) {
-        // At the end of a reasoning block, record transcript-only content.
+        // At the end of a reasoning block, commit the displayed raw trace or
+        // retain a summary only for transcript export.
         if !self.reasoning_buffer.is_empty() {
             self.reasoning_summary_parts
                 .push(std::mem::take(&mut self.reasoning_buffer));
@@ -349,7 +367,16 @@ impl ChatWidget {
             .or(self.reasoning_header.take());
         if !self.reasoning_summary_parts.is_empty() {
             let reasoning_parts = std::mem::take(&mut self.reasoning_summary_parts);
-            let cell = history_cell::new_reasoning_summary_block(reasoning_parts, &self.config.cwd);
+            let cell: Box<dyn history_cell::HistoryCell> = if self.config.show_raw_agent_reasoning {
+                Box::new(history_cell::ReasoningSummaryCell::new(
+                    "Raw reasoning".to_string(),
+                    reasoning_parts.join("\n\n"),
+                    &self.config.cwd,
+                    /*transcript_only*/ false,
+                ))
+            } else {
+                history_cell::new_reasoning_summary_block(reasoning_parts, &self.config.cwd)
+            };
             self.add_boxed_history(cell);
         }
         self.reasoning_buffer.clear();
