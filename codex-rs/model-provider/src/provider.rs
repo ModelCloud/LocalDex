@@ -421,6 +421,9 @@ impl ModelProvider for ConfiguredModelProvider {
 
     fn auth(&self) -> ModelProviderFuture<'_, Option<CodexAuth>> {
         Box::pin(async move {
+            if !self.info.requires_openai_auth && self.info.auth.is_none() {
+                return None;
+            }
             match self.auth_manager.as_ref() {
                 Some(auth_manager) => auth_manager.auth().await,
                 None => None,
