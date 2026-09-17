@@ -606,8 +606,8 @@ split-debuginfo = "off"
 # sidecar symbols and stripped the binaries.
 strip = false
 
-# Balance parallel release code generation against binary size.
-codegen-units = 4
+# Favor build throughput on high-core agent hosts over marginal binary-size savings.
+codegen-units = 64
 
 [profile.profiling]
 inherits = "release"
