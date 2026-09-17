@@ -13,6 +13,15 @@ use std::sync::OnceLock;
 use tokio::task::AbortHandle;
 use tokio::task::JoinHandle;
 
+/// Disable the ChatGPT cloud-configuration channel for an explicitly local
+/// provider launch. The loader is unrelated to model inference, but it owns a
+/// ChatGPT auth manager and otherwise may refresh an ambient credential during
+/// startup. Custom providers that do not require OpenAI auth must never enter
+/// that path.
+fn cloud_config_disabled() -> bool {
+    std::env::var_os("CODEX_DISABLE_CLOUD_CONFIG").is_some_and(|value| value != "0")
+}
+
 fn refresher_task_slot() -> &'static Mutex<Option<AbortHandle>> {
     static REFRESHER_TASK: OnceLock<Mutex<Option<AbortHandle>>> = OnceLock::new();
     REFRESHER_TASK.get_or_init(|| Mutex::new(None))
@@ -45,6 +54,9 @@ pub fn cloud_config_bundle_loader(
     codex_home: PathBuf,
     http_client_factory: HttpClientFactory,
 ) -> CloudConfigBundleLoader {
+    if cloud_config_disabled() {
+        return CloudConfigBundleLoader::default();
+    }
     let service = CloudConfigBundleService::new(
         auth_manager,
         Arc::new(BackendBundleClient::new(
@@ -88,6 +100,9 @@ pub async fn cloud_config_bundle_loader_for_storage(
     auth_config: AuthConfig,
     enable_codex_api_key_env: bool,
 ) -> std::io::Result<CloudConfigBundleLoader> {
+    if cloud_config_disabled() {
+        return Ok(CloudConfigBundleLoader::default());
+    }
     let service =
         cloud_config_bundle_service_for_storage(auth_config, enable_codex_api_key_env).await?;
     let (loader, refresh_task) = cloud_config_bundle_loader_for_service(service);
@@ -101,6 +116,9 @@ pub async fn cloud_config_bundle_loader_for_storage_without_cache(
     auth_config: AuthConfig,
     enable_codex_api_key_env: bool,
 ) -> std::io::Result<CloudConfigBundleLoader> {
+    if cloud_config_disabled() {
+        return Ok(CloudConfigBundleLoader::default());
+    }
     let service = Arc::new(
         cloud_config_bundle_service_for_storage(auth_config, enable_codex_api_key_env)
             .await?

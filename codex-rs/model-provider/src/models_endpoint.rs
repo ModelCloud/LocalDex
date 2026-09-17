@@ -60,6 +60,12 @@ impl OpenAiModelsEndpoint {
     }
 
     async fn auth(&self) -> Option<CodexAuth> {
+        if !self.provider_info.requires_openai_auth && self.provider_info.auth.is_none() {
+            return self
+                .auth_manager
+                .as_ref()
+                .and_then(|auth_manager| auth_manager.auth_cached());
+        }
         match self.auth_manager.as_ref() {
             Some(auth_manager) => auth_manager.auth().await,
             None => None,

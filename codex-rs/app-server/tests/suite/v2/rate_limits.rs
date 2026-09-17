@@ -1,6 +1,7 @@
 use anyhow::Result;
 use app_test_support::ChatGptAuthFixture;
 use app_test_support::ChatGptIdTokenClaims;
+use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::write_chatgpt_auth;
 use codex_app_server_protocol::AddCreditsNudgeCreditType;
@@ -64,6 +65,33 @@ async fn get_account_rate_limits_requires_auth() -> Result<()> {
         "codex account authentication required to read rate limits"
     );
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn get_account_rate_limits_skips_chatgpt_for_authless_provider() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let server = MockServer::start().await;
+    MockResponsesConfig::new(&server.uri())
+        .with_provider_config("requires_openai_auth = false")
+        .write(codex_home.path())?;
+
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .without_auto_env()
+        .with_env_overrides(&[("OPENAI_API_KEY", None)])
+        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        .await?;
+
+    let request_id = mcp.send_get_account_rate_limits_request().await?;
+    let received: GetAccountRateLimitsResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
+
+    assert_eq!(received.ordinary_usage_allowed, None);
+    assert_eq!(received.account_id, None);
+    assert_eq!(received.rate_limits.primary, None);
+    assert_eq!(received.rate_limits_by_limit_id, None);
+    server.verify().await;
     Ok(())
 }
 
