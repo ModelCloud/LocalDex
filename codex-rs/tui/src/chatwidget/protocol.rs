@@ -110,11 +110,16 @@ impl ChatWidget {
                 self.on_plan_delta(notification.delta);
             }
             ServerNotification::ReasoningSummaryTextDelta(notification) => {
-                if !self.is_realtime_delegated_reasoning_item(
-                    &notification.turn_id,
-                    &notification.item_id,
-                ) && self.status_state.reasoning_item_id.as_deref()
-                    == Some(&notification.item_id)
+                // A few OpenAI-compatible providers mirror raw reasoning in
+                // their summary stream. Raw-thinking mode displays only the
+                // `reasoning_text` stream so that trace is neither duplicated
+                // nor mistaken for a formatted summary.
+                if !self.config.show_raw_agent_reasoning
+                    && !self.is_realtime_delegated_reasoning_item(
+                        &notification.turn_id,
+                        &notification.item_id,
+                    )
+                    && self.status_state.reasoning_item_id.as_deref() == Some(&notification.item_id)
                 {
                     self.on_agent_reasoning_delta(notification.delta);
                 }
@@ -127,15 +132,16 @@ impl ChatWidget {
                     )
                     && self.status_state.reasoning_item_id.as_deref() == Some(&notification.item_id)
                 {
-                    self.on_agent_reasoning_delta(notification.delta);
+                    self.on_agent_raw_reasoning_delta(notification.delta);
                 }
             }
             ServerNotification::ReasoningSummaryPartAdded(notification) => {
-                if !self.is_realtime_delegated_reasoning_item(
-                    &notification.turn_id,
-                    &notification.item_id,
-                ) && self.status_state.reasoning_item_id.as_deref()
-                    == Some(&notification.item_id)
+                if !self.config.show_raw_agent_reasoning
+                    && !self.is_realtime_delegated_reasoning_item(
+                        &notification.turn_id,
+                        &notification.item_id,
+                    )
+                    && self.status_state.reasoning_item_id.as_deref() == Some(&notification.item_id)
                 {
                     self.on_reasoning_section_break();
                 }
