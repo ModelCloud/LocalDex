@@ -1418,7 +1418,7 @@ async fn cli_main(
                     let exit = codex_app_server::run_main_with_transport_options(
                         arg0_paths.clone(),
                         root_config_overrides,
-                        LoaderOverrides::default(),
+                        loader_overrides_for_profile(interactive.config_profile_v2.as_ref())?,
                         strict_config,
                         analytics_default_enabled,
                         transport,
@@ -2017,11 +2017,14 @@ fn profile_v2_for_subcommand<'a>(
         | Subcommand::Fork(_)
         | Subcommand::Mcp(_)
         | Subcommand::Sandbox(_)
+        | Subcommand::AppServer(AppServerCommand {
+            subcommand: None, ..
+        })
         | Subcommand::Debug(DebugCommand {
             subcommand: DebugSubcommand::PromptInput(_),
         }) => Ok(Some(profile_v2)),
         _ => anyhow::bail!(
-            "--profile only applies to runtime commands and `codex mcp`: `codex`, `codex exec`, `codex review`, `codex resume`, `codex queue`, `codex archive`, `codex delete`, `codex unarchive`, `codex fork`, `codex mcp`, `codex sandbox`, and `codex debug prompt-input`."
+            "--profile only applies to runtime commands and `codex mcp`: `codex`, `codex exec`, `codex review`, `codex resume`, `codex queue`, `codex archive`, `codex delete`, `codex unarchive`, `codex fork`, `codex mcp`, `codex sandbox`, `codex app-server`, and `codex debug prompt-input`."
         ),
     }
 }
@@ -3431,6 +3434,12 @@ mod tests {
         assert_eq!(
             profile_v2_for_args(&["codex", "--profile", "work", "sandbox"])
                 .expect("sandbox supports config profile")
+                .as_deref(),
+            Some("work")
+        );
+        assert_eq!(
+            profile_v2_for_args(&["codex", "--profile", "work", "app-server"])
+                .expect("app-server supports config profile")
                 .as_deref(),
             Some("work")
         );
