@@ -2,6 +2,7 @@ use super::*;
 use crate::ModelsManagerConfig;
 use codex_prompts::render_model_instructions;
 use codex_protocol::config_types::Personality;
+use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::openai_models::ApprovalMessages;
 use codex_protocol::openai_models::AutoReviewMessages;
 use codex_protocol::openai_models::CollaborationModeMessages;
@@ -16,6 +17,7 @@ use codex_protocol::openai_models::MultiAgentToolMessages;
 use codex_protocol::openai_models::PermissionMessages;
 use codex_protocol::openai_models::ToolMessage;
 use codex_protocol::openai_models::ToolMessages;
+use codex_protocol::openai_models::ToolMode;
 use pretty_assertions::assert_eq;
 
 fn config_with_personality(personality: Option<Personality>) -> ModelsManagerConfig {
@@ -237,6 +239,25 @@ fn unknown_model_uses_builtin_instruction_template() {
 
     assert_eq!(render_model_instructions(&model), BASE_INSTRUCTIONS);
     assert!(model.used_fallback_model_metadata);
+}
+
+#[test]
+fn localdex_dsv41_flash_uses_native_metadata() {
+    let model = model_info_from_slug("QB/DSV4.1-Flash");
+
+    assert_eq!(model.display_name, "DeepSeek V4.1 Flash");
+    assert_eq!(model.context_window, Some(524_288));
+    assert_eq!(model.max_context_window, Some(524_288));
+    assert_eq!(model.auto_compact_token_limit, Some(471_859));
+    assert_eq!(model.tool_mode, Some(ToolMode::Direct));
+    assert_eq!(
+        model.apply_patch_tool_type,
+        Some(ApplyPatchToolType::Freeform)
+    );
+    assert_eq!(model.input_modalities, vec![InputModality::Text]);
+    assert!(model.include_skills_usage_instructions);
+    assert!(!model.supports_search_tool);
+    assert!(!model.used_fallback_model_metadata);
 }
 
 #[test]
