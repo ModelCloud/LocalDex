@@ -104,6 +104,8 @@ pub(crate) struct SessionConfiguration {
 
     /// Desired configured inputs inherited by future turns.
     pub(super) step_settings: Arc<StepSettings>,
+    /// Ordered environments inherited by future turns.
+    pub(super) environments: Vec<TurnEnvironmentSelection>,
     /// Explicit startup overrides used when resolving effective model metadata.
     pub(super) model_info_overrides: ModelInfoOverrides,
 
@@ -177,6 +179,7 @@ impl SessionConfiguration {
             permission_profile: self.permission_profile_state.snapshot(),
             shell_environment_policy: self.shell_environment_policy.clone(),
             windows_sandbox_level: self.windows_sandbox_level,
+            windows_sandbox_type: self.windows_sandbox_type,
             windows_sandbox_private_desktop: self.windows_sandbox_private_desktop,
             use_legacy_landlock: self.use_legacy_landlock,
             exec_policy: None,
@@ -418,6 +421,7 @@ impl SessionConfiguration {
         let current_cwd = self.cwd().clone();
         if let Some(environments) = &updates.environments {
             next_configuration.legacy_fallback_cwd = environments.legacy_fallback_cwd.clone();
+            next_configuration.environments = environments.environments.clone();
         }
         let cwd_changed = next_configuration.legacy_fallback_cwd != current_cwd;
         if let Some(runtime_workspace_roots) = &updates.runtime_workspace_roots {
@@ -1126,7 +1130,7 @@ impl Session {
                         session_source: &mcp_session_source,
                         originator: &mcp_originator,
                         disabled_plugin_ids: &mcp_disabled_plugin_ids,
-                        environments: McpEnvironmentScope::Initial(environment_selections),
+                        environments: McpEnvironmentScope::Selected(environment_selections),
                     },
                     /*ready_selected_capability_roots*/ &[],
                     /*executor_capability_discovery*/ None,
@@ -1401,6 +1405,7 @@ impl Session {
                 environment_selections,
                 &session_configuration.inferred_environment_config(),
             );
+            session_configuration.environments = turn_environments.selections();
             let resolved_environments = turn_environments.snapshot().await;
             let agents_md_manager = Arc::new(AgentsMdManager::new(instructions));
             let plugin_skill_warmup = warm_plugins_and_skills_for_session_init(
@@ -1676,6 +1681,7 @@ impl Session {
                     session_configuration.originator.clone(),
                     config.model_verbosity,
                     config.features.enabled(Feature::ContentItemKinds),
+                    config.features.enabled(Feature::ReasoningEffortOverride),
                     config.features.enabled(Feature::EnableRequestCompression),
                     config.features.enabled(Feature::RuntimeMetrics),
                     Self::build_model_client_beta_features_header(config.as_ref()),
@@ -1794,8 +1800,10 @@ impl Session {
                 mcp_auth_changes.mark_unchanged();
             }
             let latest_auth = sess.services.auth_manager.auth().await;
+            let resolved_environment_selections = resolved_environments.all_selections();
             let mcp_projection = if startup_auth_changed
                 || mcp_auth_changes.has_changed().unwrap_or(false)
+                || resolved_environment_selections.as_slice() != environment_selections
             {
                 sess.services
                     .mcp_manager
@@ -1807,9 +1815,7 @@ impl Session {
                             session_source: &session_configuration.session_source,
                             originator: &session_configuration.originator,
                             disabled_plugin_ids: &session_configuration.disabled_plugin_ids,
-                            environments: McpEnvironmentScope::Live(
-                                &sess.services.turn_environments,
-                            ),
+                            environments: McpEnvironmentScope::Selected(&resolved_environment_selections),
                         },
                         /*ready_selected_capability_roots*/ &[],
                         /*executor_capability_discovery*/ None,

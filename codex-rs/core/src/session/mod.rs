@@ -107,6 +107,7 @@ use codex_protocol::approvals::NetworkPolicyRuleAction;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
+use codex_protocol::config_types::ServiceTier;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::dynamic_tools::DynamicToolResponse;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
@@ -121,6 +122,7 @@ use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::BaseInstructionsProvenance;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ContentItemKind;
+use codex_protocol::models::ImageReference;
 use codex_protocol::models::InternalChatMessageMetadataPassthrough;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::SandboxEnforcement;
@@ -833,6 +835,7 @@ impl Session {
                 approval_policy: config.permissions.approval_policy.clone(),
                 approvals_reviewer: config.approvals_reviewer,
             }),
+            environments: environment_selections.clone(),
             model_info_overrides: config.to_models_manager_config().into(),
             developer_instructions: config.developer_instructions.clone(),
             base_instructions,
@@ -1076,13 +1079,17 @@ fn get_service_tier(
     fast_mode_enabled: bool,
     model_info: &ModelInfo,
 ) -> Option<String> {
-    if !fast_mode_enabled {
-        return None;
+    let service_tier = configured_service_tier?;
+    if service_tier == ServiceTier::Flex.request_value() {
+        return Some(service_tier);
     }
-    configured_service_tier.filter(|service_tier| {
-        service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
-            || model_info.supports_service_tier(service_tier)
-    })
+    if fast_mode_enabled
+        && (service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
+            || model_info.supports_service_tier(&service_tier))
+    {
+        return Some(service_tier);
+    }
+    None
 }
 
 fn unsupported_service_tier_warning(
@@ -1876,22 +1883,15 @@ impl Session {
             let updated_permission_profile = updated.permission_profile();
             let permission_profile_changed =
                 previous_permission_profile != updated_permission_profile;
-            let mcp_inputs_changed =
-                self.mcp_inputs_differ(&state.session_configuration, &updated, &updates);
             let root_service_tier_changed = updated.parent_thread_id.is_none()
                 && state.session_configuration.step_settings.service_tier
                     != updated.step_settings.service_tier;
+            let environment_config = updated.inferred_environment_config();
+            let mcp_inputs_changed = self.mcp_inputs_differ(&state.session_configuration, &updated);
             if mcp_inputs_changed {
                 self.mark_mcp_runtime_dirty();
             }
-            let environment_config = updated.inferred_environment_config();
-            if let Some(environments) = &updates.environments {
-                self.services
-                    .turn_environments
-                    .update_selections(&environments.environments, &environment_config);
-            } else if state.session_configuration.inferred_environment_config()
-                != environment_config
-            {
+            if state.session_configuration.inferred_environment_config() != environment_config {
                 self.services
                     .turn_environments
                     .update_thread_config(&environment_config);
@@ -1912,7 +1912,7 @@ impl Session {
                 configuration: state.session_configuration.clone(),
                 snapshot: state
                     .session_configuration
-                    .thread_settings_snapshot(&self.services.turn_environments.selections()),
+                    .thread_settings_snapshot(&state.session_configuration.environments),
             };
             (
                 commit,
@@ -1939,32 +1939,33 @@ impl Session {
     ) -> ConstraintResult<ThreadConfigSnapshot> {
         let state = self.state.lock().await;
         let configuration = self.apply_session_settings(&state.session_configuration, updates)?;
-        let environments = updates.environments.as_ref().map_or_else(
-            || self.services.turn_environments.selections(),
-            |environments| environments.environments.clone(),
-        );
-        Ok(configuration.thread_config_snapshot(environments))
+        Ok(configuration.thread_config_snapshot(configuration.environments.clone()))
     }
 
     pub(crate) async fn thread_config_snapshot(&self) -> ThreadConfigSnapshot {
         let state = self.state.lock().await;
         state
             .session_configuration
-            .thread_config_snapshot(self.services.turn_environments.selections())
+            .thread_config_snapshot(state.session_configuration.environments.clone())
+    }
+
+    pub(crate) async fn configured_environment_selections(&self) -> Vec<TurnEnvironmentSelection> {
+        let state = self.state.lock().await;
+        state.session_configuration.environments.clone()
     }
 
     pub(crate) async fn thread_settings_snapshot(&self) -> ThreadSettingsSnapshot {
         let state = self.state.lock().await;
         state
             .session_configuration
-            .thread_settings_snapshot(&self.services.turn_environments.selections())
+            .thread_settings_snapshot(&state.session_configuration.environments)
     }
 
     pub(crate) async fn restorable_thread_settings(&self) -> CodexThreadSettingsOverrides {
         let state = self.state.lock().await;
         state
             .session_configuration
-            .restorable_thread_settings(self.services.turn_environments.selections())
+            .restorable_thread_settings(state.session_configuration.environments.clone())
     }
 
     pub(crate) async fn set_app_server_client_info(
@@ -3543,9 +3544,18 @@ impl Session {
     }
 
     pub(crate) fn response_item_from_user_input(&self, input: Vec<UserInput>) -> ResponseItem {
+        self.response_item_from_user_input_with_image_positions(input, &mut HashMap::new())
+    }
+
+    fn response_item_from_user_input_with_image_positions(
+        &self,
+        input: Vec<UserInput>,
+        user_image_content_indices: &mut HashMap<usize, usize>,
+    ) -> ResponseItem {
         let mut item = ResponseItem::from(ResponseInputItem::from_user_input(
             input,
             LocalImagePreparation::Defer,
+            user_image_content_indices,
         ));
         if let ResponseItem::Message {
             content,
@@ -3733,6 +3743,7 @@ impl Session {
         .await
     }
 
+    /// Captures and retains a step with the required MCP startup dependencies.
     pub(crate) async fn capture_step_context_with_required_mcp_servers(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
@@ -3851,12 +3862,13 @@ impl Session {
         }
         let (mcp, prepared_recommendations) = async {
             tokio::join!(
-                self.mcp_runtime_for_step(
+                // MCP refresh can be large; keep it off the sampling request's stack.
+                Box::pin(self.mcp_runtime_for_step(
                     turn_context.as_ref(),
                     &selected_capability_roots,
                     required_servers,
                     required_plugins,
-                ),
+                )),
                 turn::prepare_tool_recommendations(self.as_ref(), turn_context.as_ref()),
             )
         }
@@ -4838,20 +4850,37 @@ impl Session {
         // Persist the user message to history, but emit the turn item from `UserInput` so
         // UI-only `text_elements` are preserved. `ResponseItem::Message` does not carry
         // those spans, and `record_response_item_and_emit_turn_item` would drop them.
-        let response_item = self.response_item_from_user_input(input.to_vec());
-        self.record_annotated_conversation_items(
+        let mut user_image_content_indices = HashMap::new();
+        let response_item = self.response_item_from_user_input_with_image_positions(
+            input.to_vec(),
+            &mut user_image_content_indices,
+        );
+        let (prepared_items, image_preparations) = self
+            .prepare_annotated_conversation_items_for_history(
+                turn_context,
+                model_info,
+                vec![ResponseItemEnvelope {
+                    item: response_item,
+                    metadata: acceptance_order.map(|order| CodexHarnessMetadata {
+                        user_input_order: Some(order),
+                        ..Default::default()
+                    }),
+                }],
+            )
+            .await;
+        let mut user_message_item = UserMessageItem::new(input);
+        apply_prepared_image_file_ids(
+            &mut user_message_item,
+            &prepared_items,
+            &user_image_content_indices,
+        );
+        self.record_prepared_conversation_items(
             turn_context,
             model_info,
-            vec![ResponseItemEnvelope {
-                item: response_item,
-                metadata: acceptance_order.map(|order| CodexHarnessMetadata {
-                    user_input_order: Some(order),
-                    ..Default::default()
-                }),
-            }],
+            prepared_items,
+            image_preparations,
         )
         .await;
-        let mut user_message_item = UserMessageItem::new(input);
         user_message_item.client_id = client_id;
         let turn_item = TurnItem::UserMessage(user_message_item);
         self.emit_turn_item_started(turn_context, &turn_item).await;
@@ -4935,6 +4964,37 @@ impl Session {
 
     fn show_raw_agent_reasoning(&self) -> bool {
         self.services.show_raw_agent_reasoning
+    }
+}
+
+fn apply_prepared_image_file_ids(
+    user_message_item: &mut UserMessageItem,
+    prepared_items: &[ResponseItemEnvelope],
+    user_image_content_indices: &HashMap<usize, usize>,
+) {
+    // Preparation replaces image slots in place; resize notices are separate messages.
+    // Read the references from the original message while retaining UI-only input spans.
+    if let Some(ResponseItemEnvelope {
+        item: ResponseItem::Message { content, .. },
+        ..
+    }) = prepared_items.first()
+    {
+        for (&input_index, &content_index) in user_image_content_indices {
+            if let Some(ContentItem::InputImage {
+                image: ImageReference::File { file_id },
+                ..
+            }) = content.get(content_index)
+                && let UserInput::Image { detail, .. } | UserInput::LocalImage { detail, .. } =
+                    &user_message_item.content[input_index]
+            {
+                user_message_item.content[input_index] = UserInput::Image {
+                    image: ImageReference::File {
+                        file_id: file_id.clone(),
+                    },
+                    detail: *detail,
+                };
+            }
+        }
     }
 }
 

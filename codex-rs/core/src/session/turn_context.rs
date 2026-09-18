@@ -9,12 +9,14 @@ use crate::exec_policy::AllowPrefixRules;
 use crate::shell_snapshot::ShellSnapshot;
 use crate::shell_snapshot::ShellSnapshotFile;
 use crate::shell_snapshot::ShellSnapshotSandbox;
+use crate::tools::sandboxing::configured_windows_sandbox_selection;
 use crate::tools::sandboxing::executor_windows_sandbox_selection;
 use arc_swap::ArcSwap;
 use codex_core_plugins::PluginCommandAttribution;
 use codex_core_plugins::ResolvedPluginMetricsOperation;
 use codex_core_plugins::TrustedPluginRoots;
 use codex_exec_server::ExecutorFileSystem;
+use codex_extension_api::SelectedPluginSnapshot;
 use codex_file_system::FileSystemSandboxContext;
 use codex_model_provider::SharedModelProvider;
 use codex_protocol::SessionId;
@@ -36,6 +38,7 @@ use codex_sandboxing::policy_transforms::effective_permission_profile;
 use codex_skills_extension::HostSkillsSnapshot;
 use codex_skills_extension::SkillLoadOutcome;
 use codex_utils_path_uri::PathUri;
+use codex_utils_plugins::PluginIdentity;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::future::Shared;
@@ -228,12 +231,32 @@ impl TurnEnvironment {
             user_home_dir: self.user_home_dir.clone(),
             temporary_directories: self.temporary_directories.clone(),
             windows_sandbox_selection: executor_windows_sandbox_selection(
+                config.windows_sandbox_type,
                 config.windows_sandbox_level,
                 self.cwd(),
             ),
             windows_sandbox_private_desktop: config.windows_sandbox_private_desktop,
             windows_sandbox_proxy_settings_mode: None,
             use_legacy_landlock: config.use_legacy_landlock,
+        }
+    }
+
+    pub(crate) fn windows_sandbox_selection_for_turn_metadata(
+        &self,
+    ) -> codex_file_system::WindowsSandboxSelection {
+        let config = self.config();
+        if self.environment.is_remote() {
+            executor_windows_sandbox_selection(
+                config.windows_sandbox_type,
+                config.windows_sandbox_level,
+                self.cwd(),
+            )
+        } else {
+            configured_windows_sandbox_selection(
+                config.windows_sandbox_type,
+                config.windows_sandbox_level,
+                self.cwd(),
+            )
         }
     }
 
@@ -297,6 +320,7 @@ pub struct TurnContext {
     pub(crate) initial_settings: Arc<ResolvedStepSettings>,
     /// Thread-owned plugin selection captured when this turn was admitted.
     pub(crate) disabled_plugin_ids: Vec<String>,
+    pub(super) active_host_plugin_identities: Option<Vec<PluginIdentity>>,
     /// Snapshot for the next step; request consumers use their captured StepContext.
     pub(super) current_settings: ArcSwap<ResolvedStepSettings>,
     /// Turn-wide telemetry; model-attributed step work should use `StepContext::session_telemetry`.
@@ -387,6 +411,46 @@ impl TurnContext {
     /// Step-scoped consumers should use their captured `StepContext::settings`.
     pub(crate) fn collaboration_mode(&self) -> CollaborationMode {
         self.initial_settings.effective_collaboration_mode()
+    }
+
+    /// Combines setup-time host identities with current ready selected packages.
+    /// Keeps the complete observation or marks it unknown; never truncates membership.
+    pub(super) fn active_plugin_ids_for_telemetry(&self) -> Option<Vec<String>> {
+        const MAX_TELEMETRY_PLUGIN_IDS: usize = 512;
+        const MAX_TELEMETRY_PLUGIN_ID_BYTES: usize = 128;
+
+        let mut identities = self.active_host_plugin_identities.clone()?;
+        // Selected roots provide a package key, not a remote identity for that object.
+        if let Some(selected) = self.extension_data.get::<SelectedPluginSnapshot>() {
+            identities.extend(selected.plugins.iter().map(|plugin| PluginIdentity {
+                plugin_id: plugin.plugin_id.clone(),
+                remote_plugin_id: None,
+            }));
+        }
+        let mut ids = Vec::with_capacity(identities.len());
+        for identity in identities {
+            let id = match identity.remote_plugin_id {
+                Some(remote_id) => {
+                    if !codex_core_plugins::remote::is_valid_remote_plugin_id(&remote_id) {
+                        return None;
+                    }
+                    remote_id
+                }
+                None => {
+                    if codex_plugin::PluginId::parse(&identity.plugin_id).is_err() {
+                        return None;
+                    }
+                    identity.plugin_id
+                }
+            };
+            if id.len() > MAX_TELEMETRY_PLUGIN_ID_BYTES {
+                return None;
+            }
+            ids.push(id);
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        (ids.len() <= MAX_TELEMETRY_PLUGIN_IDS).then_some(ids)
     }
 
     pub(crate) fn plugin_attribution_for_command(
@@ -597,6 +661,7 @@ impl TurnContext {
             auth_manager: self.auth_manager.clone(),
             initial_settings: Arc::clone(&step_settings),
             disabled_plugin_ids: self.disabled_plugin_ids.clone(),
+            active_host_plugin_identities: self.active_host_plugin_identities.clone(),
             current_settings: ArcSwap::from(step_settings),
             session_telemetry,
             provider: self.provider.clone(),
@@ -748,6 +813,7 @@ impl Session {
         &self,
         session_configuration: &SessionConfiguration,
         cwd: AbsolutePathBuf,
+        workspace_roots: Vec<AbsolutePathBuf>,
     ) -> Config {
         // todo(aibrahim): store this state somewhere else so we don't need to mut config
         let config = session_configuration.original_config_do_not_use.clone();
@@ -755,7 +821,6 @@ impl Session {
         per_turn_config.cwd = cwd;
         per_turn_config.permissions.approval_policy =
             session_configuration.step_settings.approval_policy.clone();
-        let workspace_roots = self.services.turn_environments.primary_workspace_roots();
         per_turn_config.workspace_roots = workspace_roots.clone();
         per_turn_config
             .permissions
@@ -797,8 +862,15 @@ impl Session {
         &self,
         session_configuration: &SessionConfiguration,
     ) -> Config {
-        let mut config =
-            self.build_per_turn_config(session_configuration, session_configuration.cwd().clone());
+        let workspace_roots =
+            crate::environment_selection::ThreadEnvironments::primary_workspace_roots_for(
+                &session_configuration.environments,
+            );
+        let mut config = self.build_per_turn_config(
+            session_configuration,
+            session_configuration.cwd().clone(),
+            workspace_roots,
+        );
         config.model = Some(
             session_configuration
                 .step_settings
@@ -863,6 +935,16 @@ impl Session {
             per_turn_config.permissions.approval_policy.value(),
             per_turn_config.approvals_reviewer,
         );
+        let windows_sandbox_selection = environments
+            .primary()
+            .map(TurnEnvironment::windows_sandbox_selection_for_turn_metadata)
+            .unwrap_or_else(|| {
+                configured_windows_sandbox_selection(
+                    session_configuration.windows_sandbox_type,
+                    session_configuration.windows_sandbox_level,
+                    &PathUri::from_abs_path(&cwd),
+                )
+            });
         let per_turn_config = Arc::new(per_turn_config);
         let turn_metadata_state = Arc::new(TurnMetadataState::new(
             session_id.to_string(),
@@ -874,7 +956,7 @@ impl Session {
             sub_id.clone(),
             cwd.clone(),
             &permission_profile,
-            session_configuration.windows_sandbox_level,
+            windows_sandbox_selection,
             network.is_some(),
             auto_review_enabled,
             model_info,
@@ -895,6 +977,7 @@ impl Session {
             auth_manager,
             initial_settings: Arc::clone(&step_settings),
             disabled_plugin_ids: session_configuration.disabled_plugin_ids.clone(),
+            active_host_plugin_identities: None,
             current_settings: ArcSwap::from(step_settings),
             session_telemetry: session_telemetry_for_context,
             provider,
@@ -977,22 +1060,25 @@ impl Session {
         if let Some(service_tier) = service_tier_for_turn {
             Arc::make_mut(&mut configuration.step_settings).service_tier = Some(service_tier);
         }
+        let turn_environments = self.activate_turn_environments(&configuration).await;
         let turn_context = self
-            .new_turn_from_configuration(sub_id, configuration, options)
+            .new_turn_from_configuration(sub_id, configuration, turn_environments, options)
             .await;
         Ok(Some((turn_context, commit.snapshot)))
     }
 
-    /// Constructs a turn from the exact committed settings without starting a task.
+    /// Builds a context from the caller's chosen settings and environments without starting work.
     async fn new_turn_from_configuration(
         &self,
         sub_id: String,
         session_configuration: SessionConfiguration,
+        turn_environments: TurnEnvironmentSnapshot,
         options: NewTurnContextOptions,
     ) -> Arc<TurnContext> {
         self.new_turn_context_from_configuration(
             sub_id,
             session_configuration,
+            turn_environments,
             options,
             TurnMultiAgentRuntime::ResolveAndStore,
             self.git_enrichment_policy,
@@ -1005,9 +1091,11 @@ impl Session {
         sub_id: String,
         session_configuration: SessionConfiguration,
     ) -> Arc<TurnContext> {
+        let turn_environments = self.services.turn_environments.snapshot().await;
         self.new_turn_context_from_configuration(
             sub_id,
             session_configuration,
+            turn_environments,
             NewTurnContextOptions::default(),
             TurnMultiAgentRuntime::Preview,
             GitEnrichmentPolicy::Skip,
@@ -1020,11 +1108,11 @@ impl Session {
         &self,
         sub_id: String,
         session_configuration: SessionConfiguration,
+        turn_environments: TurnEnvironmentSnapshot,
         options: NewTurnContextOptions,
         multi_agent_runtime: TurnMultiAgentRuntime,
         git_enrichment_policy: GitEnrichmentPolicy,
     ) -> Arc<TurnContext> {
-        let turn_environments = self.services.turn_environments.snapshot().await;
         let primary_turn_environment = turn_environments.primary();
         // TODO(anp): Migrate per-turn config and legacy TurnContext cwd consumers to PathUri so
         // a foreign primary environment does not fall back to the session's host cwd.
@@ -1032,7 +1120,11 @@ impl Session {
             .as_ref()
             .and_then(|turn_environment| turn_environment.cwd().to_abs_path().ok())
             .unwrap_or_else(|| session_configuration.cwd().clone());
-        let per_turn_config = self.build_per_turn_config(&session_configuration, cwd.clone());
+        let per_turn_config = self.build_per_turn_config(
+            &session_configuration,
+            cwd.clone(),
+            turn_environments.primary_workspace_roots(),
+        );
         let network_permission_profile = primary_turn_environment
             .map(TurnEnvironment::permission_profile)
             .cloned()
@@ -1127,6 +1219,17 @@ impl Session {
         );
         turn_context.code_mode_available = self.services.code_mode_service.is_available();
         turn_context.extension_data.insert(trusted_plugin_roots);
+        turn_context.active_host_plugin_identities = Some(
+            plugin_outcome
+                .plugins()
+                .iter()
+                .filter(|plugin| plugin.is_active())
+                .map(|plugin| PluginIdentity {
+                    plugin_id: plugin.config_name.clone(),
+                    remote_plugin_id: plugin.remote_plugin_id.clone(),
+                })
+                .collect(),
+        );
         turn_context.realtime_active = self.conversation.running_state().await.is_some();
 
         turn_context.final_output_json_schema = options.final_output_json_schema;
@@ -1184,21 +1287,30 @@ impl Session {
         }
     }
 
+    /// Builds a context without starting work or changing the current environments.
     pub(crate) async fn new_default_turn(&self) -> Arc<TurnContext> {
-        self.new_turn_with_default_settings(
+        let session_configuration = self.default_turn_configuration().await;
+        let turn_environments = self.services.turn_environments.snapshot().await;
+        self.new_turn_from_configuration(
             self.next_internal_sub_id(),
+            session_configuration,
+            turn_environments,
             NewTurnContextOptions::default(),
         )
         .await
     }
 
+    /// Prepares new work on the saved environments; context-only callers keep the current ones.
     pub(crate) async fn new_turn_with_default_settings(
         &self,
         sub_id: String,
         options: NewTurnContextOptions,
     ) -> Arc<TurnContext> {
         let session_configuration = self.default_turn_configuration().await;
-        self.new_turn_from_configuration(sub_id, session_configuration, options)
+        let turn_environments = self
+            .activate_turn_environments(&session_configuration)
+            .await;
+        self.new_turn_from_configuration(sub_id, session_configuration, turn_environments, options)
             .await
     }
 
@@ -1216,3 +1328,7 @@ impl Session {
         state.session_configuration.clone()
     }
 }
+
+#[cfg(test)]
+#[path = "active_plugin_inventory_tests.rs"]
+mod tests;

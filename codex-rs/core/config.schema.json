@@ -530,6 +530,10 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "experimental_show_cell_overhead": {
+          "description": "Show handler duration, code-mode host duration, and harness overhead in each code-mode cell response. Experimental: this option and the response format may change or be removed.",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -6098,7 +6102,8 @@
     "WindowsSandboxModeToml": {
       "enum": [
         "elevated",
-        "unelevated"
+        "unelevated",
+        "mxc"
       ],
       "type": "string"
     },
@@ -6109,7 +6114,7 @@
           "$ref": "#/definitions/WindowsSandboxModeToml"
         },
         "sandbox_private_desktop": {
-          "description": "Defaults to `true`. Set to `false` to launch the final sandboxed child process on `Winsta0\\\\Default` instead of a private desktop.",
+          "description": "Defaults to `true` for legacy sandboxes and `false` for MXC. Set to `false` to launch the final sandboxed child process on `Winsta0\\\\Default`.",
           "type": "boolean"
         }
       },

@@ -21,6 +21,7 @@ use codex_network_proxy::managed_proxy_ports;
 use codex_network_proxy::normalize_host;
 use codex_network_proxy::validate_policy_against_constraints;
 use codex_protocol::models::PermissionProfile;
+use codex_utils_path_uri::Platform;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -196,7 +197,7 @@ impl NetworkProxySpec {
         enable_network_approval_flow: bool,
         audit_metadata: NetworkProxyAuditMetadata,
     ) -> std::io::Result<StartedNetworkProxy> {
-        let state = self.build_state_with_audit_metadata(audit_metadata)?;
+        let state = self.build_state_with_audit_metadata(audit_metadata, Platform::native())?;
         let mut builder = NetworkProxy::builder()
             .state(Arc::new(state))
             .managed_proxy_routing(managed_proxy_routing);
@@ -337,7 +338,8 @@ impl NetworkProxySpec {
         &self,
         started_proxy: &StartedNetworkProxy,
     ) -> std::io::Result<()> {
-        let state = self.build_config_state_for_spec()?;
+        let state = self
+            .build_config_state_for_spec(Platform::from_platform_os(Some(std::env::consts::OS)))?;
         started_proxy
             .proxy()
             .replace_config_state(state)
@@ -350,8 +352,9 @@ impl NetworkProxySpec {
     pub(crate) fn build_state_with_audit_metadata(
         &self,
         audit_metadata: NetworkProxyAuditMetadata,
+        executor_os: Platform,
     ) -> std::io::Result<NetworkProxyState> {
-        let state = self.build_config_state_for_spec()?;
+        let state = self.build_config_state_for_spec(executor_os)?;
         let reloader = Arc::new(StaticNetworkProxyReloader::new(state.clone()));
         Ok(NetworkProxyState::with_reloader_and_audit_metadata(
             state,
@@ -360,10 +363,13 @@ impl NetworkProxySpec {
         ))
     }
 
-    pub(super) fn build_config_state_for_spec(&self) -> std::io::Result<ConfigState> {
-        build_config_state(self.config.clone(), self.constraints.clone()).map_err(|err| {
-            std::io::Error::other(format!("failed to build network proxy state: {err}"))
-        })
+    pub(super) fn build_config_state_for_spec(
+        &self,
+        executor_os: Platform,
+    ) -> std::io::Result<ConfigState> {
+        build_config_state(self.config.clone(), self.constraints.clone(), executor_os).map_err(
+            |err| std::io::Error::other(format!("failed to build network proxy state: {err}")),
+        )
     }
 
     fn apply_requirements(

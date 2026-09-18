@@ -583,8 +583,8 @@ pub struct ToolMessages {
 /// Model-owned messages for a built-in tool.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
 pub struct ToolMessage {
-    /// Missing or null uses the built-in description; an empty string leaves the description
-    /// empty without disabling the tool.
+    /// Missing or null uses the built-in description; an empty string suppresses its static
+    /// text without disabling the tool. Tool-owned runtime guidance is retained.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
@@ -596,6 +596,16 @@ pub struct MultiAgentToolMessages {
     /// suppresses it. Generated model information and local usage hints are retained.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spawn_agent: Option<ToolMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_message: Option<ToolMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub followup_task: Option<ToolMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_agent: Option<ToolMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrupt_agent: Option<ToolMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_agents: Option<ToolMessage>,
 }
 
 /// Model-owned defaults for the context-window token-budget feature.
@@ -867,9 +877,12 @@ impl ModelPreset {
 
 impl ModelInfo {
     pub fn supports_service_tier(&self, service_tier: &str) -> bool {
-        self.service_tiers
-            .iter()
-            .any(|tier| tier.id == service_tier)
+        // Flex is an API request option, even when the Codex catalog does not advertise it.
+        service_tier == ServiceTier::Flex.request_value()
+            || self
+                .service_tiers
+                .iter()
+                .any(|tier| tier.id == service_tier)
     }
 
     pub fn service_tier_for_request(&self, service_tier: Option<String>) -> Option<String> {
@@ -1384,6 +1397,7 @@ mod tests {
                     spawn_agent: Some(ToolMessage {
                         description: Some("Catalog spawn description".to_string()),
                     }),
+                    ..Default::default()
                 }),
             }),
             instructions_template: None,
@@ -1836,6 +1850,19 @@ mod tests {
         assert_eq!(
             model.service_tier_for_request(Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())),
             None
+        );
+    }
+
+    #[test]
+    fn service_tier_for_request_preserves_flex_without_catalog_support() {
+        let model = ModelInfo {
+            service_tiers: Vec::new(),
+            ..test_model(/*spec*/ None)
+        };
+
+        assert_eq!(
+            model.service_tier_for_request(Some(ServiceTier::Flex.request_value().to_string())),
+            Some(ServiceTier::Flex.request_value().to_string())
         );
     }
 
