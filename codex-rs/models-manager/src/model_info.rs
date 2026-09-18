@@ -169,19 +169,22 @@ fn localdex_dsv41_flash_model_info() -> ModelInfo {
         slug: LOCALDEX_DSV41_FLASH.to_string(),
         display_name: "DeepSeek V4.1 Flash".to_string(),
         description: Some("Local DeepSeek V4.1 Flash coding model.".to_string()),
-        default_reasoning_level: Some(ReasoningEffort::Medium),
+        // DSV4.1 accepts `low`, `high`, `max`, or a numeric budget. Its
+        // OpenAI-compatible endpoint explicitly rejects Codex's generic
+        // `medium` default, so use a valid default even outside Omnigent.
+        default_reasoning_level: Some(ReasoningEffort::High),
         supported_reasoning_levels: vec![
             ReasoningEffortPreset {
                 effort: ReasoningEffort::Low,
                 description: "Fast responses with lighter reasoning".to_string(),
             },
             ReasoningEffortPreset {
-                effort: ReasoningEffort::Medium,
-                description: "Balances speed and reasoning depth".to_string(),
-            },
-            ReasoningEffortPreset {
                 effort: ReasoningEffort::High,
                 description: "Greater reasoning depth for complex work".to_string(),
+            },
+            ReasoningEffortPreset {
+                effort: ReasoningEffort::Max,
+                description: "Maximum reasoning depth for difficult work".to_string(),
             },
         ],
         shell_type: ConfigShellToolType::UnifiedExec,

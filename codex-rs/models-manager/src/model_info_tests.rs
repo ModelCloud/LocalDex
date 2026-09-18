@@ -249,6 +249,19 @@ fn localdex_dsv41_flash_uses_native_metadata() {
     assert_eq!(model.context_window, Some(524_288));
     assert_eq!(model.max_context_window, Some(524_288));
     assert_eq!(model.auto_compact_token_limit, Some(471_859));
+    assert_eq!(model.default_reasoning_level, Some(ReasoningEffort::High));
+    assert_eq!(
+        model
+            .supported_reasoning_levels
+            .iter()
+            .map(|preset| preset.effort.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            ReasoningEffort::Low,
+            ReasoningEffort::High,
+            ReasoningEffort::Max,
+        ]
+    );
     assert!(!model.supports_reasoning_summary_parameter);
     assert_eq!(model.default_reasoning_summary, ReasoningSummary::None);
     assert_eq!(model.tool_mode, Some(ToolMode::Direct));
