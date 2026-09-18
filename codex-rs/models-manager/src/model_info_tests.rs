@@ -255,6 +255,7 @@ fn localdex_dsv41_flash_uses_native_metadata() {
         Some(ApplyPatchToolType::Freeform)
     );
     assert_eq!(model.input_modalities, vec![InputModality::Text]);
+    assert!(model.include_skills_usage_instructions);
     assert!(!model.supports_search_tool);
     assert!(!model.used_fallback_model_metadata);
 }

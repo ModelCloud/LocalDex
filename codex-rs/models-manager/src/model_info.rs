@@ -195,7 +195,10 @@ fn localdex_dsv41_flash_model_info() -> ModelInfo {
         availability_nux: None,
         upgrade: None,
         model_messages: Some(local_model_messages()),
-        include_skills_usage_instructions: false,
+        // LocalDex uses the same skill catalog and bridge as Codex. Include
+        // the usage protocol so a local model knows to inspect a selected
+        // SKILL.md before it acts on that skill.
+        include_skills_usage_instructions: true,
         include_plugin_usage_instructions: false,
         include_apps_usage_instructions: false,
         supports_reasoning_summary_parameter: true,
