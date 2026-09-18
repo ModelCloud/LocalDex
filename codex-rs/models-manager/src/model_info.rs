@@ -1,9 +1,14 @@
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
+use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::openai_models::ConfigShellToolType;
+use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::openai_models::ModelVisibility;
+use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::openai_models::ReasoningEffortPreset;
+use codex_protocol::openai_models::ToolMode;
 use codex_protocol::openai_models::TruncationMode;
 use codex_protocol::openai_models::TruncationPolicyConfig;
 use codex_protocol::openai_models::WebSearchToolType;
@@ -15,6 +20,7 @@ use tracing::warn;
 
 pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 const PERSONALITY_SECTION_HEADER: &str = "# Personality";
+const LOCALDEX_DSV41_FLASH: &str = "QB/DSV4.1-Flash";
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
     if let Some(context_window) = config.model_context_window {
@@ -97,6 +103,9 @@ fn is_h1_heading(line: &str) -> bool {
 
 /// Build a minimal fallback model descriptor for missing/unknown slugs.
 pub fn model_info_from_slug(slug: &str) -> ModelInfo {
+    if slug == LOCALDEX_DSV41_FLASH {
+        return localdex_dsv41_flash_model_info();
+    }
     warn!("Unknown model {slug} is used. This will use fallback model metadata.");
     ModelInfo {
         slug: slug.to_string(),
@@ -143,6 +152,77 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
         auto_review_model_override: None,
         model_specialty: None,
         tool_mode: None,
+        multi_agent_version: None,
+        multi_agent_reasoning_effort: None,
+    }
+}
+
+/// Metadata for the LocalDex provider's bundled DeepSeek endpoint.
+///
+/// This is intentionally part of LocalDex rather than a `model_catalog_json`
+/// overlay: Codex treats that setting as a replacement for its full catalog,
+/// which conflicts with the upstream ChatGPT model catalog and configured
+/// provider routing. The inference server advertises matching capabilities
+/// through its OpenAI-compatible model-discovery endpoint.
+fn localdex_dsv41_flash_model_info() -> ModelInfo {
+    ModelInfo {
+        slug: LOCALDEX_DSV41_FLASH.to_string(),
+        display_name: "DeepSeek V4.1 Flash".to_string(),
+        description: Some("Local DeepSeek V4.1 Flash coding model.".to_string()),
+        default_reasoning_level: Some(ReasoningEffort::Medium),
+        supported_reasoning_levels: vec![
+            ReasoningEffortPreset {
+                effort: ReasoningEffort::Low,
+                description: "Fast responses with lighter reasoning".to_string(),
+            },
+            ReasoningEffortPreset {
+                effort: ReasoningEffort::Medium,
+                description: "Balances speed and reasoning depth".to_string(),
+            },
+            ReasoningEffortPreset {
+                effort: ReasoningEffort::High,
+                description: "Greater reasoning depth for complex work".to_string(),
+            },
+        ],
+        shell_type: ConfigShellToolType::UnifiedExec,
+        visibility: ModelVisibility::None,
+        supported_in_api: true,
+        priority: 99,
+        additional_speed_tiers: Vec::new(),
+        service_tiers: Vec::new(),
+        default_service_tier: None,
+        available_access_programs: None,
+        availability_nux: None,
+        upgrade: None,
+        model_messages: Some(local_model_messages()),
+        include_skills_usage_instructions: false,
+        include_plugin_usage_instructions: false,
+        include_apps_usage_instructions: false,
+        supports_reasoning_summary_parameter: true,
+        default_reasoning_summary: ReasoningSummary::Auto,
+        support_verbosity: false,
+        default_verbosity: None,
+        apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
+        web_search_tool_type: WebSearchToolType::Text,
+        truncation_policy: TruncationPolicyConfig::tokens(/*limit*/ 10_000),
+        supports_image_detail_original: false,
+        context_window: Some(524_288),
+        max_context_window: Some(524_288),
+        auto_compact_token_limit: Some(471_859),
+        comp_hash: None,
+        effective_context_window_percent: 95,
+        experimental_supported_tools: Vec::new(),
+        input_modalities: vec![InputModality::Text],
+        used_fallback_model_metadata: false,
+        supports_search_tool: false,
+        supports_experimental_context: false,
+        use_responses_lite: false,
+        guardian: None,
+        node_repl_auto_review_required: false,
+        node_repl_disabled: false,
+        auto_review_model_override: None,
+        model_specialty: None,
+        tool_mode: Some(ToolMode::Direct),
         multi_agent_version: None,
         multi_agent_reasoning_effort: None,
     }
