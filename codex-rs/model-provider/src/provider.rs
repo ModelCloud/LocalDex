@@ -389,9 +389,19 @@ impl ModelProvider for ConfiguredModelProvider {
             RemoteCompactionSupport::Unsupported
         };
 
+        // A configured external provider is only guaranteed to implement the
+        // portable Responses function-tool surface.  In particular, OpenAI's
+        // `namespace` tools are not part of the OpenAI-compatible contract and
+        // must not be sent to a local endpoint unless that provider has an
+        // explicit capability implementation.
+        let supports_openai_only_tools = self.info.requires_openai_auth;
+
         ProviderCapabilities {
+            namespace_tools: supports_openai_only_tools,
+            image_generation: supports_openai_only_tools,
+            web_search: supports_openai_only_tools,
+            external_web_access: supports_openai_only_tools,
             remote_compaction,
-            ..ProviderCapabilities::default()
         }
     }
 
@@ -422,10 +432,14 @@ impl ModelProvider for ConfiguredModelProvider {
     fn auth(&self) -> ModelProviderFuture<'_, Option<CodexAuth>> {
         Box::pin(async move {
             if !self.info.requires_openai_auth && self.info.auth.is_none() {
-                return self
-                    .auth_manager
-                    .as_ref()
-                    .and_then(|auth_manager| auth_manager.auth_cached());
+                // A custom OpenAI-compatible provider must never inherit the
+                // user's ChatGPT session. Its configured environment/command
+                // credential is resolved by the request path instead.
+                return self.info.is_openai().then(|| {
+                    self.auth_manager
+                        .as_ref()
+                        .and_then(|auth_manager| auth_manager.auth_cached())
+                }).flatten();
             }
             match self.auth_manager.as_ref() {
                 Some(auth_manager) => auth_manager.auth().await,
@@ -728,6 +742,25 @@ mod tests {
             let provider = create_model_provider(provider_info, /*auth_manager*/ None);
             assert_eq!(provider.capabilities().remote_compaction, expected);
         }
+    }
+
+    #[test]
+    fn custom_openai_compatible_provider_omits_openai_only_tools() {
+        let provider = create_model_provider(
+            provider_for("https://example.test/v1".to_string()),
+            /*auth_manager*/ None,
+        );
+
+        assert_eq!(
+            provider.capabilities(),
+            ProviderCapabilities {
+                namespace_tools: false,
+                image_generation: false,
+                web_search: false,
+                external_web_access: false,
+                remote_compaction: RemoteCompactionSupport::Unsupported,
+            }
+        );
     }
 
     #[test]
