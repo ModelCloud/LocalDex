@@ -249,6 +249,8 @@ fn localdex_dsv41_flash_uses_native_metadata() {
     assert_eq!(model.context_window, Some(524_288));
     assert_eq!(model.max_context_window, Some(524_288));
     assert_eq!(model.auto_compact_token_limit, Some(471_859));
+    assert!(!model.supports_reasoning_summary_parameter);
+    assert_eq!(model.default_reasoning_summary, ReasoningSummary::None);
     assert_eq!(model.tool_mode, Some(ToolMode::Direct));
     assert_eq!(
         model.apply_patch_tool_type,

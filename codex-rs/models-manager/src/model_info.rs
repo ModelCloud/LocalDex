@@ -201,8 +201,12 @@ fn localdex_dsv41_flash_model_info() -> ModelInfo {
         include_skills_usage_instructions: true,
         include_plugin_usage_instructions: false,
         include_apps_usage_instructions: false,
-        supports_reasoning_summary_parameter: true,
-        default_reasoning_summary: ReasoningSummary::Auto,
+        // The local endpoint streams raw reasoning text. It does not expose a
+        // distinct reasoning-summary stream, so never ask it for one: some
+        // OpenAI-compatible servers mirror a requested summary alongside the
+        // raw stream, which duplicates/interleaves visible thinking.
+        supports_reasoning_summary_parameter: false,
+        default_reasoning_summary: ReasoningSummary::None,
         support_verbosity: false,
         default_verbosity: None,
         apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
