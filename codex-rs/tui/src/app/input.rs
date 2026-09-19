@@ -419,7 +419,7 @@ impl App {
                         ..Default::default()
                     })
                     .collect(),
-                    ..Default::default()
+                    ..SelectionViewParams::picker()
                 });
                 return;
             }

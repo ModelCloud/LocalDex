@@ -302,7 +302,7 @@ impl ChatWidget {
                 is_disabled: true,
                 ..Default::default()
             }],
-            ..Default::default()
+            ..SelectionViewParams::picker()
         });
         self.pet_selection_load_request_id
     }
