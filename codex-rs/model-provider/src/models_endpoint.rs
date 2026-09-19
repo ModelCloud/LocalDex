@@ -74,11 +74,18 @@ impl OpenAiModelsEndpoint {
     }
 
     async fn auth(&self) -> Option<CodexAuth> {
+        // A custom OpenAI-compatible provider must not inherit a cached
+        // ChatGPT credential. Doing so routes its model discovery through
+        // Codex backend semantics instead of its own bearer-token config.
+        // Only the built-in OpenAI provider supports that fallback.
         if !self.provider_info.requires_openai_auth && self.provider_info.auth.is_none() {
-            return self
-                .auth_manager
-                .as_ref()
-                .and_then(|auth_manager| auth_manager.auth_cached());
+            return if self.provider_info.is_openai() {
+                self.auth_manager
+                    .as_ref()
+                    .and_then(|auth_manager| auth_manager.auth_cached())
+            } else {
+                None
+            };
         }
         match self.auth_manager.as_ref() {
             Some(auth_manager) => auth_manager.auth().await,
