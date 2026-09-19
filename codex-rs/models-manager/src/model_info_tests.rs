@@ -263,6 +263,7 @@ fn localdex_dsv41_flash_uses_native_metadata() {
             .map(|preset| preset.effort.clone())
             .collect::<Vec<_>>(),
         vec![
+            ReasoningEffort::Custom("off".to_string()),
             ReasoningEffort::Low,
             ReasoningEffort::High,
             ReasoningEffort::Max,
