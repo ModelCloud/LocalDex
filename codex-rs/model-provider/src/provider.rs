@@ -469,11 +469,15 @@ impl ModelProvider for ConfiguredModelProvider {
                 // A custom OpenAI-compatible provider must never inherit the
                 // user's ChatGPT session. Its configured environment/command
                 // credential is resolved by the request path instead.
-                return self.info.is_openai().then(|| {
-                    self.auth_manager
-                        .as_ref()
-                        .and_then(|auth_manager| auth_manager.auth_cached())
-                }).flatten();
+                return self
+                    .info
+                    .is_openai()
+                    .then(|| {
+                        self.auth_manager
+                            .as_ref()
+                            .and_then(|auth_manager| auth_manager.auth_cached())
+                    })
+                    .flatten();
             }
             match self.auth_manager.as_ref() {
                 Some(auth_manager) => auth_manager.auth().await,

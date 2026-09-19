@@ -737,7 +737,7 @@ impl Session {
         mut session_configuration: SessionConfiguration,
         environment_selections: &[TurnEnvironmentSelection],
         config: Arc<Config>,
-        instructions: SessionInstructions,
+        mut instructions: SessionInstructions,
         installation_id: String,
         auth_manager: Arc<AuthManager>,
         models_manager: SharedModelsManager,
@@ -869,6 +869,16 @@ impl Session {
                 ));
             }
         };
+        let isolation = thread_extension_init
+            .get::<codex_extension_api::SessionIsolation>()
+            .map(|policy| *policy)
+            .unwrap_or_default();
+        if !session_configuration.session_source.is_non_root_agent()
+            && isolation != codex_extension_api::SessionIsolation::Isolated
+        {
+            instructions.thread_provider = agent_control
+                .root_thread_instructions_provider(thread_id, instructions.thread_provider);
+        }
         // Ephemeral forks reuse cache routing, without sharing storage or lifecycle identity.
         let fork_cache_key = match &initial_history {
             InitialHistory::Forked(items)
@@ -949,10 +959,6 @@ impl Session {
         // Publish the already resolved model before extensions make startup decisions.
         // Turn construction refreshes this attachment when the selected model changes.
         thread_extension_init.insert(model_info);
-        let isolation = thread_extension_init
-            .get::<codex_extension_api::SessionIsolation>()
-            .map(|policy| *policy)
-            .unwrap_or_default();
         let allowed_tools = thread_extension_init
             .get::<codex_extension_api::AllowedTools>()
             .or_else(|| {
@@ -1125,6 +1131,7 @@ impl Session {
                     mcp_thread_init_for_startup,
                     thread_extension_data_for_mcp,
                     McpThreadIdentity {
+                        auth_changed: false,
                         session_source: &mcp_session_source,
                         originator: &mcp_originator,
                         disabled_plugin_ids: &mcp_disabled_plugin_ids,
@@ -1818,6 +1825,10 @@ impl Session {
                         &sess.services.mcp_thread_init,
                         &sess.services.thread_extension_data,
                         McpThreadIdentity {
+                            auth_changed: !sess
+                                .services
+                                .mcp_runtime
+                                .current_auth_matches(latest_auth.as_ref()),
                             session_source: &session_configuration.session_source,
                             originator: &session_configuration.originator,
                             disabled_plugin_ids: &session_configuration.disabled_plugin_ids,

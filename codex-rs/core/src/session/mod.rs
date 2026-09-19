@@ -591,6 +591,16 @@ impl Session {
             .get::<codex_extension_api::SessionIsolation>()
             .map(|policy| *policy)
             .unwrap_or_default();
+        // Enforce snapshot-only instructions for both managed and inline isolated sessions.
+        let instructions = if isolation == codex_extension_api::SessionIsolation::Isolated {
+            SessionInstructions {
+                user: instructions.user,
+                thread: instructions.thread,
+                ..Default::default()
+            }
+        } else {
+            instructions
+        };
         let exec_policy = if isolation == codex_extension_api::SessionIsolation::Isolated {
             let managed_policy = config
                 .config_layer_stack
@@ -3753,8 +3763,8 @@ impl Session {
             if !discovery.sandbox_contexts().is_empty() {
                 extension_data.insert(discovery.sandbox_contexts().clone());
             }
-        } else if !environments
-            .permission_profile_or_else(|| turn_context.permission_profile())
+        } else if !turn_context
+            .permission_profile_for_environments(&environments)
             .file_system_sandbox_policy()
             .has_full_disk_read_access()
         {
