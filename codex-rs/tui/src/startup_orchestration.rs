@@ -18,6 +18,11 @@ pub(super) async fn run_main_inner(
             "--no-daemon cannot be used with --remote.",
         ));
     }
+    if explicit_remote_endpoint.is_some() && !cli.add_dir.is_empty() {
+        return Err(std::io::Error::other(
+            "--add-dir is not supported with --remote. Configure additional workspace roots on the server.",
+        ));
+    }
     let strict_config = cli.strict_config;
     if cli.shared.worktree {
         if explicit_remote_endpoint.is_some() {
@@ -67,6 +72,16 @@ pub(super) async fn run_main_inner(
             std::process::exit(1);
         }
     };
+    if explicit_remote_endpoint.is_some()
+        && cli_kv_overrides.iter().any(|(key, value)| {
+            key == "sandbox_workspace_write.writable_roots"
+                || (key == "sandbox_workspace_write" && value.get("writable_roots").is_some())
+        })
+    {
+        return Err(std::io::Error::other(
+            "sandbox_workspace_write.writable_roots overrides are not supported with --remote. Configure additional workspace roots on the server.",
+        ));
+    }
 
     // we load config.toml here to determine project state.
     #[allow(clippy::print_stderr)]
@@ -384,56 +399,6 @@ pub(super) async fn run_main_inner(
             strict_config,
         ))
         .await?;
-    let auto_start_daemon = config.features.enabled(Feature::DaemonAutoStart)
-        && !cli.agents_overview
-        && !cli.no_daemon
-        && !app_server_target.uses_remote_workspace();
-    if auto_start_daemon
-        && daemon_exclusion.is_none()
-        && should_show_bedrock_setup_wizard(
-            LoginStatus::NotAuthenticated,
-            config.model_provider.requires_openai_auth,
-            &config,
-            &AppServerTarget::Embedded,
-        )
-        && startup_draft
-            .run_until(
-                config
-                    .auth_config()
-                    .load_auth(/*enable_codex_api_key_env*/ false),
-            )
-            .await?
-            .ok()
-            .flatten()
-            .is_none()
-    {
-        // The Bedrock wizard configures its provider through the embedded server.
-        daemon_exclusion = Some("Bedrock sign-in");
-        app_server_target = AppServerTarget::Embedded;
-    }
-    if auto_start_daemon && daemon_exclusion.is_none() {
-        startup_draft.flush_pending_events().await?;
-        let output = startup_draft
-            .tui_mut()
-            .with_restored(|| async {
-                // Package installation may print progress; keep ordinary Ctrl+C handling.
-                crossterm::terminal::disable_raw_mode()?;
-                let result =
-                    codex_app_server_daemon::run(codex_app_server_daemon::LifecycleCommand::Start)
-                        .await;
-                daemon_telemetry::record_start(&config, &result).await;
-                result.map_err(|err| {
-                    std::io::Error::other(format!("{err:#}\n{}", daemon_startup::FAILURE_HINT))
-                })
-            })
-            .await?;
-        app_server_target = AppServerTarget::LocalDaemon {
-            endpoint: RemoteAppServerEndpoint::UnixSocket {
-                socket_path: AbsolutePathBuf::from_absolute_path_checked(output.socket_path)?,
-            },
-            allow_embedded_fallback: false,
-        };
-    }
     startup_draft.apply_config(&config);
 
     let mut cloud_config_bundle = if workload_identity_selected {
@@ -468,13 +433,79 @@ pub(super) async fn run_main_inner(
     } else {
         None
     };
-    let daemon_startup_warning = daemon_exclusion
-        .filter(|_| auto_start_daemon)
-        .map(|reason| {
-            format!(
-                "Running without the shared background server: {reason} requires embedded mode."
+    let auto_start_daemon = config.features.enabled(Feature::DaemonAutoStart)
+        && !cli.agents_overview
+        && !cli.no_daemon
+        && !app_server_target.uses_remote_workspace();
+    if auto_start_daemon
+        && daemon_exclusion.is_none()
+        && should_show_bedrock_setup_wizard(
+            LoginStatus::NotAuthenticated,
+            config.model_provider.requires_openai_auth,
+            &config,
+            &AppServerTarget::Embedded,
+        )
+        && startup_draft
+            .run_until(
+                config
+                    .auth_config()
+                    .load_auth(/*enable_codex_api_key_env*/ false),
             )
-        });
+            .await?
+            .ok()
+            .flatten()
+            .is_none()
+    {
+        // The Bedrock wizard configures its provider through the embedded server.
+        daemon_exclusion = Some("Bedrock sign-in");
+        app_server_target = AppServerTarget::Embedded;
+    }
+    let daemon_features = daemon_startup::server_features(&cli_kv_overrides);
+    if auto_start_daemon && daemon_exclusion.is_none() {
+        startup_draft.flush_pending_events().await?;
+        let output = startup_draft
+            .tui_mut()
+            .with_restored(|| async {
+                // Package installation may print progress; keep ordinary Ctrl+C handling.
+                crossterm::terminal::disable_raw_mode()?;
+                let result = codex_app_server_daemon::start_with_features(&daemon_features).await;
+                daemon_telemetry::record_start(&config, &result).await;
+                result.map_err(|err| {
+                    std::io::Error::other(format!("{err:#}\n{}", daemon_startup::FAILURE_HINT))
+                })
+            })
+            .await?;
+        app_server_target = AppServerTarget::LocalDaemon {
+            endpoint: RemoteAppServerEndpoint::UnixSocket {
+                socket_path: AbsolutePathBuf::from_absolute_path_checked(output.socket_path)?,
+            },
+            allow_embedded_fallback: false,
+        };
+    }
+    // The overview must inspect the shared server's agents regardless of local settings.
+    let compatibility_warning = if cli.agents_overview {
+        None
+    } else {
+        startup_draft
+            .run_until(daemon_startup::compatibility_warning(
+                &app_server_target,
+                &config,
+            ))
+            .await?
+    };
+    if compatibility_warning.is_some() {
+        app_server_target = AppServerTarget::Embedded;
+        daemon_exclusion = Some("daemon feature settings");
+    }
+    let daemon_startup_warning = compatibility_warning.or_else(|| {
+        daemon_exclusion
+            .filter(|_| auto_start_daemon)
+            .map(|reason| {
+                format!(
+                    "Running without the shared background server: {reason} requires embedded mode."
+                )
+            })
+    });
     #[cfg(target_os = "macos")]
     let local_runtime_paths = local_runtime_paths.with_allowed_symlinked_codex_home(
         codex_config::allowed_symlinked_codex_home(&config.config_layer_stack, &config.codex_home),

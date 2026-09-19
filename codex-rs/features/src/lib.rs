@@ -199,6 +199,8 @@ pub enum Feature {
     Worktrees,
     /// Respect host system proxy settings for Codex-owned network clients.
     RespectSystemProxy,
+    /// Retry eligible bootstrap requests through the system proxy after normal routing fails.
+    SystemProxyFallback,
     /// Enable collab tools.
     Collab,
     /// Enable task-path-based multi-agent routing.
@@ -1292,6 +1294,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
+        id: Feature::SystemProxyFallback,
+        key: "system_proxy_fallback",
+        stage: Stage::Stable,
+        default_enabled: true,
+    },
+    FeatureSpec {
         id: Feature::Collab,
         key: "multi_agent",
         stage: Stage::Stable,
@@ -1612,8 +1620,8 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::GuardianReuseParentCompaction,
         key: "guardian_reuse_parent_compaction",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
+        stage: Stage::Stable,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::GuardianEnhancedNodeReplTranscripts,

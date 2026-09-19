@@ -4,6 +4,10 @@ use crate::StateDbHandle;
 use crate::ThreadManager;
 use crate::agent::agent_status_from_event;
 use crate::agent::next_thread_spawn_depth;
+use crate::agent::types::LiveAgent;
+use crate::agent::types::ResolvedMultiAgentV2UsageHints;
+use crate::agent::types::SpawnAgentForkMode;
+use crate::agent::types::SpawnAgentOptions;
 use crate::agent_communication::AgentCommunicationContext;
 use crate::agent_communication::AgentCommunicationKind;
 use crate::config::AgentRoleConfig;
@@ -14,6 +18,7 @@ use crate::context::ManagedDeveloperInstructions;
 use crate::context::MultiAgentRoleInstructions;
 use crate::context::SubagentNotification;
 use crate::init_state_db;
+use crate::session::SessionSettingsUpdate;
 use crate::thread_manager::StartThreadOptions;
 use crate::tools::handlers::multi_agents_common::thread_spawn_source;
 use assert_matches::assert_matches;
@@ -66,6 +71,7 @@ use codex_protocol::protocol::TokenUsageRecord;
 use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::TurnCompleteEvent;
+use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_protocol::protocol::TurnStartedEvent;
 use codex_thread_store::ArchiveThreadParams;
 use codex_thread_store::InMemoryThreadStore;
@@ -159,7 +165,7 @@ fn assistant_message(text: &str, phase: Option<MessagePhase>) -> ResponseItem {
 
 #[test]
 fn register_session_root_skips_threads_with_explicit_parent() {
-    let control = AgentControl::default();
+    let control = LocalAgentControl::default();
 
     control.register_session_root(ThreadId::new(), Some(ThreadId::new()));
 
@@ -183,7 +189,7 @@ struct AgentControlHarness {
     config: Config,
     state_db: Option<StateDbHandle>,
     manager: ThreadManager,
-    control: AgentControl,
+    control: LocalAgentControl,
 }
 
 impl AgentControlHarness {
@@ -414,7 +420,7 @@ async fn persist_thread_for_tree_resume(thread: &Arc<CodexThread>, message: &str
 }
 
 async fn wait_for_live_thread_spawn_children(
-    control: &AgentControl,
+    control: &LocalAgentControl,
     parent_thread_id: ThreadId,
     expected_children: &[ThreadId],
 ) {
@@ -453,7 +459,7 @@ async fn assert_thread_not_loaded(manager: &ThreadManager, thread_id: ThreadId) 
 
 #[tokio::test]
 async fn send_input_errors_when_manager_dropped() {
-    let control = AgentControl::default();
+    let control = LocalAgentControl::default();
     let err = control
         .send_input(
             ThreadId::new(),
@@ -473,7 +479,7 @@ async fn send_input_errors_when_manager_dropped() {
 
 #[tokio::test]
 async fn get_status_returns_not_found_without_manager() {
-    let control = AgentControl::default();
+    let control = LocalAgentControl::default();
     let got = control.get_status(ThreadId::new()).await;
     assert_eq!(got, AgentStatus::NotFound);
 }
@@ -551,7 +557,7 @@ async fn on_event_updates_status_from_shutdown_complete() {
 
 #[tokio::test]
 async fn spawn_agent_errors_when_manager_dropped() {
-    let control = AgentControl::default();
+    let control = LocalAgentControl::default();
     let (_home, config) = test_config().await;
     let err = control
         .spawn_agent(config, text_input("hello"), /*session_source*/ None)
@@ -565,7 +571,7 @@ async fn spawn_agent_errors_when_manager_dropped() {
 
 #[tokio::test]
 async fn resume_agent_errors_when_manager_dropped() {
-    let control = AgentControl::default();
+    let control = LocalAgentControl::default();
     let (_home, config) = test_config().await;
     let err = control
         .resume_agent_from_rollout(config, ThreadId::new(), SessionSource::Exec)
@@ -748,7 +754,7 @@ enum V2ReloadRoute {
 }
 
 async fn spawn_v2_reload_test_child(
-    control: &AgentControl,
+    control: &LocalAgentControl,
     config: Config,
     parent: &CodexThread,
     task_name: &str,
@@ -894,20 +900,24 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
             .expect("known v2 agent should reload"),
         V2ReloadRoute::NestedParent => {
             let environment = parent_turn
-                .environments
+                .initial_environments
                 .primary()
                 .expect("parent environment");
-            let thread_config = environment.config().clone();
-            let mut owner_config = thread_config.clone();
+            let mut owner_config = environment.config().clone();
             owner_config.allow_login_shell = false;
             let mut selection = environment.selection();
             selection.config = EnvironmentConfigState::Ready(owner_config);
             parent_thread
                 .session
-                .services
-                .turn_environments
-                .update_selections(std::slice::from_ref(&selection), &thread_config);
-            parent_turn = parent_thread.session.new_default_turn().await;
+                .update_settings(SessionSettingsUpdate {
+                    environments: Some(TurnEnvironmentSelections::new(
+                        parent_turn.config.cwd.clone(),
+                        vec![selection],
+                    )),
+                    ..Default::default()
+                })
+                .await
+                .expect("save parent environments");
             parent_thread.session.mark_interrupted();
             // The fixture has no task runner to finish the turn or consume child results.
             *parent_thread.session.active_turn.lock().await = None;
@@ -921,6 +931,7 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
                 .ensure_multi_agent_v2_child_loaded(spawned_agent.thread_id)
                 .await
                 .expect("known child should reload through its parent");
+            parent_turn = parent_thread.session.new_default_turn().await;
             assert!(harness.manager.get_thread(parent_thread_id).await.is_err());
         }
     }
@@ -939,12 +950,12 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
         let reloaded_turn = reloaded_child.session.new_default_turn().await;
         assert_eq!(
             (
-                reloaded_turn.environments.to_selections(),
+                reloaded_turn.initial_environments.to_selections(),
                 reloaded_turn.permission_profile(),
                 reloaded_child.client_mcp_extensions(),
             ),
             (
-                parent_turn.environments.to_selections(),
+                parent_turn.initial_environments.to_selections(),
                 parent_turn.permission_profile(),
                 client_mcp_extensions,
             ),

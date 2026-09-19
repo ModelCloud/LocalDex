@@ -74,14 +74,20 @@ mod external_auth;
 mod fork_thread;
 mod git_enrichment;
 mod guardian_authorization;
+#[path = "guardian_cached_score_tests.rs"]
+mod guardian_cached_score;
 #[path = "guardian_checkpoint_migration_tests.rs"]
 mod guardian_checkpoint_migration;
 // Uses the same command-approval harness as guardian_review below.
 mod canonical_plugin_connectors;
+mod gateway_auth;
 #[cfg(not(target_os = "windows"))]
 mod guardian_context_budget;
 mod guardian_history;
 mod guardian_mcp_elicitation;
+#[cfg(not(target_os = "windows"))]
+#[path = "guardian_persistence_tests.rs"]
+mod guardian_persistence;
 mod guardian_retained_context;
 mod guardian_retry;
 #[cfg(not(target_os = "windows"))]
@@ -129,6 +135,7 @@ mod models_cache_ttl;
 mod models_etag_responses;
 mod multi_agent_mode;
 mod multi_agent_resume;
+mod multi_agent_tool_descriptions;
 #[cfg(unix)]
 mod multi_exec_server_sandbox;
 mod network_approval;
@@ -182,7 +189,6 @@ mod skill_approval;
 mod skills;
 mod skills_extension;
 mod spawn_agent_description;
-mod spawn_agent_tool_descriptions;
 mod sqlite_state;
 mod startup_cancellation;
 mod step_settings;

@@ -78,6 +78,9 @@ const MAX_CAPABILITY_SUMMARY_DESCRIPTION_LEN: usize = 1024;
 #[path = "marketplace_policy/curated_loading_tests.rs"]
 mod curated_marketplace_policy;
 
+#[path = "remote_metadata_cache_tests.rs"]
+mod remote_metadata_cache;
+
 fn unrestricted_config_layer_stack() -> ConfigLayerStack {
     ConfigLayerStack::default()
 }
@@ -2375,6 +2378,7 @@ async fn load_plugin_skills_dedupes_overlapping_manifest_roots() {
         description: None,
         keywords: Vec::new(),
         paths: crate::manifest::PluginManifestPaths {
+            onboarding_skill: None,
             skills: vec![
                 plugin_root.join("skills"),
                 plugin_root.join("skills/abc"),
@@ -7270,7 +7274,10 @@ remote_plugin = true
         /*on_effective_plugins_changed*/ None,
     );
 
-    tokio::time::sleep(Duration::from_millis(400)).await;
+    let _guard = first_manager
+        .acquire_remote_installed_plugin_sync_guard()
+        .await
+        .expect("background bundle sync should finish");
     server.verify().await;
 }
 

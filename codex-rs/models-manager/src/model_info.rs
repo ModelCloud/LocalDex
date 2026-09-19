@@ -146,6 +146,7 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
         supports_search_tool: false,
         supports_experimental_context: false,
         use_responses_lite: false,
+        supports_reasoning_effort_updates: false,
         guardian: None,
         node_repl_auto_review_required: false,
         node_repl_disabled: false,
@@ -224,6 +225,9 @@ fn localdex_dsv41_flash_model_info() -> ModelInfo {
         supports_search_tool: false,
         supports_experimental_context: false,
         use_responses_lite: false,
+        // The configured OpenAI-compatible endpoint does not support changing
+        // reasoning effort after a turn has started.
+        supports_reasoning_effort_updates: false,
         guardian: None,
         node_repl_auto_review_required: false,
         node_repl_disabled: false,
