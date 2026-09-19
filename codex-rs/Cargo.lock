@@ -4855,6 +4855,7 @@ dependencies = [
  "ratatui-macros",
  "regex-lite",
  "rmcp",
+ "semver",
  "serde",
  "serde_json",
  "serial_test",
@@ -5115,6 +5116,7 @@ dependencies = [
  "portable-pty",
  "pretty_assertions",
  "shared_library",
+ "tempfile",
  "tokio",
  "winapi",
 ]
