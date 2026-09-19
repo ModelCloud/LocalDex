@@ -88,6 +88,20 @@ class SourceBinariesForTargetTest(unittest.TestCase):
             ["codex-code-mode-host"],
         )
 
+    def test_localdex_builds_the_upstream_codex_binary_before_staging(self) -> None:
+        self.assertEqual(
+            source_binaries_for_target(
+                TARGET_SPECS["x86_64-unknown-linux-gnu"],
+                PACKAGE_VARIANTS["localdex"],
+                build_entrypoint=True,
+                build_code_mode_host=True,
+                build_bwrap=True,
+                build_codex_command_runner=False,
+                build_codex_windows_sandbox_setup=False,
+            ),
+            ["codex", "codex-code-mode-host", "bwrap"],
+        )
+
     def test_build_uses_prebuilt_windows_helpers_without_running_cargo(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

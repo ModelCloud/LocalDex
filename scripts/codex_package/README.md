@@ -64,6 +64,12 @@ explicit target. Release jobs that already built and signed/notarized the
 entrypoint should pass `--entrypoint-bin` so the package contains that exact
 binary instead of rebuilding it.
 
+For a distributable Linux x86_64 LocalDex package, run
+`scripts/build_localdex_linux_amd64.sh`. It uses the `localdex-release` profile
+and, when installed, `sccache` plus the `mold` linker. This trades Thin LTO and
+debug line tables for much faster repeatable builds while retaining normal
+optimized native binaries and the Code Mode host.
+
 Release jobs should likewise pass `--code-mode-host-bin` so the package contains
 the signed host executable beside the signed entrypoint.
 

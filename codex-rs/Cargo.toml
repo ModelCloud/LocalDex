@@ -609,6 +609,19 @@ strip = false
 # Favor build throughput on high-core agent hosts over marginal binary-size savings.
 codegen-units = 64
 
+# LocalDex packages run inference remotely, so link-time optimization and full
+# release debug information do not materially improve their steady-state work.
+# This profile is intentionally optimized for a repeatable, fast AMD64 package
+# build: it keeps normal optimizations while allowing sccache to make rebuilds
+# cheap.
+[profile.localdex-release]
+inherits = "release"
+opt-level = 2
+lto = false
+debug = "none"
+strip = "symbols"
+codegen-units = 256
+
 [profile.profiling]
 inherits = "release"
 debug = "full"

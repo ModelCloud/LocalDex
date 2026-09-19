@@ -81,7 +81,10 @@ def build_source_binaries(
     outputs = SourceBuildOutputs(
         entrypoint_bin=resolve_output_path(
             entrypoint_bin,
-            output_dir / variant.entrypoint_name(spec),
+            # Cargo emits the Rust binary name. The package layout performs
+            # any variant-specific rename (LocalDex is built as `codex` and
+            # staged as `localdex`).
+            output_dir / f"{variant.cargo_bin}{spec.exe_suffix}",
         ),
         code_mode_host_bin=(
             code_mode_host_bin.resolve()
