@@ -537,10 +537,21 @@ pub(crate) async fn run_turn(
         match sampling_request_result {
             Ok((sampling_request_output, sampling_request_input)) => {
                 guardian_budget_compacted = false;
-                let SamplingRequestResult {
-                    needs_follow_up: model_needs_follow_up,
-                    last_agent_message: sampling_request_last_agent_message,
-                } = sampling_request_output;
+                let (model_needs_follow_up, sampling_request_last_agent_message) =
+                    match sampling_request_output {
+                        // A LocalDex steer interrupted only the live provider
+                        // stream. Keep the turn alive and consume the input that
+                        // steer already appended before issuing the replacement
+                        // request.
+                        SamplingRequestResult::Preempted => {
+                            can_drain_pending_input = true;
+                            continue;
+                        }
+                        SamplingRequestResult::Completed {
+                            needs_follow_up,
+                            last_agent_message,
+                        } => (needs_follow_up, last_agent_message),
+                    };
                 if model_needs_follow_up {
                     sess.input_queue
                         .accept_mailbox_delivery_for_current_turn(
@@ -1650,6 +1661,7 @@ async fn run_sampling_request(
             Arc::clone(&turn_diff_tracker),
             &prompt,
             cancellation_token.child_token(),
+            arm_localdex_sampling_preemption(sess.as_ref(), turn_context.as_ref()).await,
         )
         .await
         {
@@ -1825,9 +1837,30 @@ pub(crate) async fn built_tools(
 }
 
 #[derive(Debug)]
-struct SamplingRequestResult {
-    needs_follow_up: bool,
-    last_agent_message: Option<String>,
+enum SamplingRequestResult {
+    Completed {
+        needs_follow_up: bool,
+        last_agent_message: Option<String>,
+    },
+    /// The local provider stream was intentionally replaced by a same-turn
+    /// steer. This is not a failed request and must not emit TurnAborted.
+    Preempted,
+}
+
+async fn arm_localdex_sampling_preemption(
+    sess: &Session,
+    turn_context: &TurnContext,
+) -> Option<CancellationToken> {
+    if turn_context.config.model_provider_id != "localdex" {
+        return None;
+    }
+    let turn_state = sess
+        .input_queue
+        .turn_state_for_sub_id(&sess.active_turn, &turn_context.sub_id)
+        .await?;
+    let token = CancellationToken::new();
+    turn_state.lock().await.sampling_preemption = Some(token.clone());
+    Some(token)
 }
 
 /// Ephemeral per-response state for streaming a single proposed plan.
@@ -2456,6 +2489,7 @@ async fn try_run_sampling_request(
     turn_diff_tracker: SharedTurnDiffTracker,
     prompt: &Prompt,
     cancellation_token: CancellationToken,
+    sampling_preemption: Option<CancellationToken>,
 ) -> CodexResult<SamplingRequestResult> {
     let turn_context = Arc::clone(&step_context.turn);
     feedback_tags!(
@@ -2482,7 +2516,7 @@ async fn try_run_sampling_request(
         .features
         .enabled(Feature::ConcurrentReasoningSummaries)
         && turn_context.provider.info().is_openai();
-    let mut stream = client_session
+    let stream_request = client_session
         .stream(
             prompt,
             &step_context.settings.model_info,
@@ -2497,9 +2531,17 @@ async fn try_run_sampling_request(
             responses_metadata,
             &inference_trace,
         )
-        .instrument(trace_span!("stream_request"))
-        .or_cancel(&cancellation_token)
-        .await??;
+        .instrument(trace_span!("stream_request"));
+    let mut stream = if let Some(sampling_preemption) = sampling_preemption.as_ref() {
+        tokio::select! {
+            biased;
+            _ = cancellation_token.cancelled() => return Err(CodexErr::TurnAborted),
+            _ = sampling_preemption.cancelled() => return Ok(SamplingRequestResult::Preempted),
+            result = stream_request => result?,
+        }
+    } else {
+        stream_request.or_cancel(&cancellation_token).await??
+    };
     let mut in_flight: FuturesOrdered<InFlightFuture<'static>> = FuturesOrdered::new();
     let mut needs_follow_up = false;
     let mut last_agent_message: Option<String> = None;
@@ -2545,15 +2587,24 @@ async fn try_run_sampling_request(
             codex.usage.total_tokens = field::Empty,
         );
 
-        let event = match stream
-            .next()
-            .instrument(trace_span!(parent: &handle_responses, "receiving"))
-            .or_cancel(&cancellation_token)
-            .await
-        {
-            Ok(event) => event,
-            Err(codex_async_utils::CancelErr::Cancelled) => {
-                break Err(CodexErr::TurnAborted);
+        let event = if let Some(sampling_preemption) = sampling_preemption.as_ref() {
+            tokio::select! {
+                biased;
+                _ = cancellation_token.cancelled() => break Err(CodexErr::TurnAborted),
+                _ = sampling_preemption.cancelled() => break Ok(SamplingRequestResult::Preempted),
+                event = stream.next().instrument(trace_span!(parent: &handle_responses, "receiving")) => event,
+            }
+        } else {
+            match stream
+                .next()
+                .instrument(trace_span!(parent: &handle_responses, "receiving"))
+                .or_cancel(&cancellation_token)
+                .await
+            {
+                Ok(event) => event,
+                Err(codex_async_utils::CancelErr::Cancelled) => {
+                    break Err(CodexErr::TurnAborted);
+                }
             }
         };
 
@@ -2686,7 +2737,7 @@ async fn try_run_sampling_request(
                 needs_follow_up |= output_result.needs_follow_up;
                 // todo: remove before stabilizing multi-agent v2
                 if preempt_for_mailbox_mail && sess.input_queue.has_pending_mailbox_items().await {
-                    break Ok(SamplingRequestResult {
+                    break Ok(SamplingRequestResult::Completed {
                         needs_follow_up: true,
                         last_agent_message,
                     });
@@ -2870,7 +2921,7 @@ async fn try_run_sampling_request(
                 if let Some(false) = end_turn {
                     needs_follow_up = true;
                 }
-                break Ok(SamplingRequestResult {
+                break Ok(SamplingRequestResult::Completed {
                     needs_follow_up,
                     last_agent_message,
                 });

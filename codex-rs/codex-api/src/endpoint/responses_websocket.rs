@@ -330,7 +330,10 @@ impl ResponsesWebsocketConnection {
         );
 
         Ok(ResponseStream {
-            rx_event,
+            rx_event: crate::common::ResponseStreamReceiver::new(
+                rx_event,
+                tokio_util::sync::CancellationToken::new(),
+            ),
             upstream_request_id: None,
         })
     }

@@ -2263,14 +2263,11 @@ fn map_response_stream(
     inference_trace_attempt: InferenceTraceAttempt,
     provider: SharedModelProvider,
 ) -> (ResponseStream, oneshot::Receiver<LastResponse>) {
-    let codex_api::ResponseStream {
-        rx_event,
-        upstream_request_id,
-    } = api_stream;
-    let api_stream = codex_api::ResponseStream {
-        rx_event,
-        upstream_request_id: None,
-    };
+    // `codex_api::ResponseStream` owns cancellation of the upstream request on
+    // drop, so retain the stream itself rather than destructuring its fields.
+    // Moving fields out of a Drop type would lose that cancellation path.
+    let mut api_stream = api_stream;
+    let upstream_request_id = api_stream.upstream_request_id.take();
     map_response_events(
         upstream_request_id,
         api_stream,
