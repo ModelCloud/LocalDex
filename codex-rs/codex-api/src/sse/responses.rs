@@ -1,5 +1,6 @@
 use crate::common::ResponseEvent;
 use crate::common::ResponseStream;
+use crate::common::ResponseStreamReceiver;
 use crate::common::SafetyBuffering;
 use crate::common::SafetyBufferingTreatment;
 use crate::error::ApiError;
@@ -24,6 +25,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
 use tracing::debug;
 use tracing::trace;
 
@@ -70,6 +72,8 @@ pub fn spawn_response_stream(
         let _ = turn_state.set(header_value.to_string());
     }
     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent, ApiError>>(1600);
+    let cancellation_token = CancellationToken::new();
+    let stream_cancellation_token = cancellation_token.clone();
     tokio::spawn(async move {
         if let Some(model) = server_model {
             let _ = tx_event.send(Ok(ResponseEvent::ServerModel(model))).await;
@@ -85,18 +89,20 @@ pub fn spawn_response_stream(
                 .send(Ok(ResponseEvent::ServerReasoningIncluded(true)))
                 .await;
         }
-        process_sse_with_treatment(
-            stream_response.bytes,
-            tx_event,
-            idle_timeout,
-            telemetry,
-            safety_buffering_treatment,
-        )
-        .await;
+        tokio::select! {
+            _ = stream_cancellation_token.cancelled() => {}
+            _ = process_sse_with_treatment(
+                stream_response.bytes,
+                tx_event,
+                idle_timeout,
+                telemetry,
+                safety_buffering_treatment,
+            ) => {}
+        }
     });
 
     ResponseStream {
-        rx_event,
+        rx_event: ResponseStreamReceiver::new(rx_event, cancellation_token),
         upstream_request_id,
     }
 }

@@ -2,6 +2,7 @@ use super::*;
 use crate::config::Constrained;
 use crate::session::step_settings::StepSettingsUpdate;
 use crate::session::tests::make_session_and_context;
+use crate::session::tests::make_session_and_context_with_auth_and_config_and_rx;
 use crate::session::tests::make_session_and_context_with_rx;
 use crate::session::turn_context::TurnContext;
 use crate::state::TaskKind;
@@ -945,6 +946,56 @@ async fn steer_only_enforces_expected_turn_id() {
             .1,
         Some(crate::session::input_queue::InputQueueActivity::Steer)
     );
+}
+
+#[tokio::test]
+async fn steer_preempts_only_an_armed_localdex_sampling_request() {
+    let (session, turn_context, _rx) = make_session_and_context_with_auth_and_config_and_rx(
+        codex_login::CodexAuth::from_api_key("Test API Key"),
+        Vec::new(),
+        |config| config.model_provider_id = "localdex".to_string(),
+    )
+    .await;
+    session
+        .spawn_task(
+            Arc::clone(&turn_context),
+            Vec::new(),
+            NeverEndingTask {
+                kind: TaskKind::Regular,
+                listen_to_cancellation_token: true,
+            },
+        )
+        .await;
+
+    let sampling_preemption = CancellationToken::new();
+    let turn_state = session
+        .input_queue
+        .turn_state_for_sub_id(&session.active_turn, &turn_context.sub_id)
+        .await
+        .expect("active turn state");
+    turn_state.lock().await.sampling_preemption = Some(sampling_preemption.clone());
+
+    let submission = submit_steer_only(
+        &session,
+        vec![UserInput::Text {
+            text: "steer immediately".to_string(),
+            text_elements: Vec::new(),
+        }],
+        &turn_context.sub_id,
+    )
+    .await;
+
+    assert_eq!(
+        submission,
+        TurnInputSubmission::Steered {
+            turn_id: turn_context.sub_id.clone()
+        }
+    );
+    assert!(
+        sampling_preemption.is_cancelled(),
+        "a localdex steer must cancel the live sampling request"
+    );
+    session.abort_all_tasks(TurnAbortReason::Interrupted).await;
 }
 
 #[tokio::test]

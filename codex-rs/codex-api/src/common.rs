@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 pub const WS_REQUEST_HEADER_TRACEPARENT_CLIENT_METADATA_KEY: &str = "ws_request_header_traceparent";
 pub const WS_REQUEST_HEADER_TRACESTATE_CLIENT_METADATA_KEY: &str = "ws_request_header_tracestate";
@@ -392,7 +393,7 @@ pub fn create_text_param_for_request(
 }
 
 pub struct ResponseStream {
-    pub rx_event: mpsc::Receiver<Result<ResponseEvent, ApiError>>,
+    pub rx_event: ResponseStreamReceiver,
     /// Server-assigned `x-request-id` response header, when present.
     pub upstream_request_id: Option<String>,
 }
@@ -401,6 +402,47 @@ impl Stream for ResponseStream {
     type Item = Result<ResponseEvent, ApiError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.rx_event.poll_recv(cx)
+        Pin::new(&mut self.rx_event).poll_next(cx)
+    }
+}
+
+/// The receive side of a response stream.
+///
+/// The cancellation token intentionally belongs to the receiver rather than
+/// [`ResponseStream`]: a few consumers take ownership of `rx_event` to drain
+/// it directly. Whichever form owns the receiver must close the upstream
+/// HTTP/SSE task when it is dropped.
+pub struct ResponseStreamReceiver {
+    receiver: mpsc::Receiver<Result<ResponseEvent, ApiError>>,
+    cancellation_token: CancellationToken,
+}
+
+impl ResponseStreamReceiver {
+    pub fn new(
+        receiver: mpsc::Receiver<Result<ResponseEvent, ApiError>>,
+        cancellation_token: CancellationToken,
+    ) -> Self {
+        Self {
+            receiver,
+            cancellation_token,
+        }
+    }
+
+    pub async fn recv(&mut self) -> Option<Result<ResponseEvent, ApiError>> {
+        self.receiver.recv().await
+    }
+}
+
+impl Stream for ResponseStreamReceiver {
+    type Item = Result<ResponseEvent, ApiError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.receiver.poll_recv(cx)
+    }
+}
+
+impl Drop for ResponseStreamReceiver {
+    fn drop(&mut self) {
+        self.cancellation_token.cancel();
     }
 }
