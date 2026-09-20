@@ -419,7 +419,10 @@ pub(crate) async fn run_turn(
     // 2. After auto-compact, when model/tool continuation needs to resume before any steer.
 
     let mut next_step_context = Some(first_step_context);
-    let mut guardian_budget_compacted = false;
+    // Prevent an unbounded retry loop after any provider reports a context
+    // overflow. This is not Guardian-specific: a custom endpoint can lower
+    // its limit after the capability refresh that admitted this turn.
+    let mut context_overflow_compacted = false;
     loop {
         // Note that pending_input would be something like a message the user
         // submitted through the UI while the model was running. Though the UI
@@ -533,10 +536,10 @@ pub(crate) async fn run_turn(
             )
             .await
         }
-        .await;
+            .await;
         match sampling_request_result {
             Ok((sampling_request_output, sampling_request_input)) => {
-                guardian_budget_compacted = false;
+                context_overflow_compacted = false;
                 let (model_needs_follow_up, sampling_request_last_agent_message) =
                     match sampling_request_output {
                         // A LocalDex steer interrupted only the live provider
@@ -750,22 +753,25 @@ pub(crate) async fn run_turn(
             }
             Err(err)
                 if matches!(err.details(), CodexErrorDetails::ContextWindowExceeded)
-                    && !guardian_budget_compacted
-                    && !turn_context.config.features.enabled(Feature::TokenBudget)
-                    && sess
-                        .services
-                        .thread_extension_data
-                        .get::<crate::guardian::ExhaustedReviewBudget>()
-                        .is_some() =>
+                    && turn_context.model_info().slug == "QB/DSV4.1-Flash"
+                    && !context_overflow_compacted
+                    && !turn_context.config.features.enabled(Feature::TokenBudget) =>
             {
-                // Tool continuations can also cross the complete-request limit.
-                // Only summarizing compaction preserves the action and evidence;
-                // token-budget resets must fail closed and retire the reviewer.
-                // Retry once per model step, so ineffective compaction cannot loop.
-                guardian_budget_compacted = true;
-                sess.services
+                // A provider can lower its request limit between capability
+                // refresh and sampling. Retry one summarizing compaction per
+                // model step so a standardized context-overflow response does
+                // not strand the thread or loop forever.
+                context_overflow_compacted = true;
+                if sess
+                    .services
                     .thread_extension_data
-                    .insert(crate::guardian::ExhaustedReviewBudget::Compacting);
+                    .get::<crate::guardian::ExhaustedReviewBudget>()
+                    .is_some()
+                {
+                    sess.services
+                        .thread_extension_data
+                        .insert(crate::guardian::ExhaustedReviewBudget::Compacting);
+                }
                 run_auto_compact(
                     &sess,
                     Arc::clone(&step_context),
@@ -1364,6 +1370,34 @@ async fn maybe_run_previous_model_inline_compact(
         turn_context.model_info().comp_hash.as_deref(),
     );
     let previous_model = previous_turn_settings.model;
+    // A LocalDex deployment can lower its context capacity while this thread
+    // remains alive. Its capability snapshot is refreshed before every host
+    // turn, so compact before sampling when the same local model's current
+    // budget no longer accommodates the retained history. Upstream providers
+    // retain their existing model-switch-only behavior.
+    if previous_model == turn_context.model_info().slug
+        && turn_context.model_info().slug == "QB/DSV4.1-Flash"
+        && sess.get_total_token_usage().await
+            > turn_context
+                .model_info()
+                .auto_compact_token_limit()
+                .unwrap_or(i64::MAX)
+    {
+        let step_context = sess
+            .capture_step_context(Arc::clone(turn_context), cancellation_token)
+            .await?;
+        run_auto_compact(
+            sess,
+            step_context,
+            /*fallback_step_context*/ None,
+            client_session,
+            InitialContextInjection::DoNotInject,
+            CompactionReason::ContextLimit,
+            CompactionPhase::PreTurn,
+        )
+        .await?;
+        return Ok(());
+    }
     if crate::guardian::is_basic_session_source(&turn_context.session_source)
         && !should_compact_for_comp_hash_change
         && previous_model == turn_context.model_info().slug

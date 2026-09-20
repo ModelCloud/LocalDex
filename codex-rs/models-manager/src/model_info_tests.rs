@@ -252,9 +252,9 @@ fn localdex_dsv41_flash_uses_native_metadata() {
     let model = model_info_from_slug("QB/DSV4.1-Flash");
 
     assert_eq!(model.display_name, "DeepSeek V4.1 Flash");
-    assert_eq!(model.context_window, Some(524_288));
-    assert_eq!(model.max_context_window, Some(524_288));
-    assert_eq!(model.auto_compact_token_limit, Some(471_859));
+    assert_eq!(model.context_window, Some(262_144));
+    assert_eq!(model.max_context_window, None);
+    assert_eq!(model.auto_compact_token_limit, Some(235_929));
     assert_eq!(model.default_reasoning_level, Some(ReasoningEffort::High));
     assert_eq!(
         model
@@ -280,6 +280,31 @@ fn localdex_dsv41_flash_uses_native_metadata() {
     assert!(model.include_skills_usage_instructions);
     assert!(!model.supports_search_tool);
     assert!(!model.used_fallback_model_metadata);
+}
+
+#[test]
+fn localdex_runtime_capability_uses_only_matching_positive_context_window() {
+    assert_eq!(
+        super::localdex_runtime_context_window(
+            r#"{"model":"QB/DSV4.1-Flash","context_window":262144}"#,
+            "QB/DSV4.1-Flash",
+        ),
+        Some(262_144)
+    );
+    assert_eq!(
+        super::localdex_runtime_context_window(
+            r#"{"model":"other","context_window":262144}"#,
+            "QB/DSV4.1-Flash",
+        ),
+        None
+    );
+    assert_eq!(
+        super::localdex_runtime_context_window(
+            r#"{"model":"QB/DSV4.1-Flash","context_window":0}"#,
+            "QB/DSV4.1-Flash",
+        ),
+        None
+    );
 }
 
 #[test]

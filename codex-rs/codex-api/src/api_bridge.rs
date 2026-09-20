@@ -115,6 +115,14 @@ pub fn map_api_error(err: ApiError) -> CodexErr {
                     });
                 }
 
+                if status == http::StatusCode::BAD_REQUEST
+                    && let Ok(parsed) = serde_json::from_str::<Value>(&body_text)
+                    && let Some(error) = parsed.get("error")
+                    && error.get("code").and_then(Value::as_str) == Some("context_length_exceeded")
+                {
+                    return CodexErr::ContextWindowExceeded;
+                }
+
                 if status == http::StatusCode::BAD_REQUEST {
                     if let Ok(parsed) = serde_json::from_str::<Value>(&body_text)
                         && let Some(error) = parsed.get("error")
