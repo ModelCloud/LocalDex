@@ -119,7 +119,6 @@ async fn run_startup_hooks_review_app(
                     key_event,
                     &keymap.chords,
                     crate::keymap::KeymapContextSet::new(crate::keymap::KeymapContext::List),
-                    tokio::time::Instant::now(),
                 ) {
                     crate::keymap::KeyChordMatch::PassThrough => key_event,
                     crate::keymap::KeyChordMatch::Completed(dispatch_event) => dispatch_event,
@@ -184,7 +183,7 @@ async fn run_startup_hooks_review_app(
                     }
                 }
             }
-            TuiEvent::Paste(_) | TuiEvent::FocusLost => {}
+            TuiEvent::Paste(_) | TuiEvent::FocusLost | TuiEvent::Mouse(_) => {}
             TuiEvent::Draw | TuiEvent::Resume | TuiEvent::Resize(_) | TuiEvent::FocusGained => {
                 draw_view(tui, &view)?;
             }

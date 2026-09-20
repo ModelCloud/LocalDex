@@ -275,8 +275,12 @@ pub(crate) enum AppEvent {
     ReviewMisalignment(Arc<crate::chatwidget::MisalignmentReview>),
     ContinueMisalignment(Arc<crate::chatwidget::MisalignmentReview>),
     CloseMisalignmentReview,
-    /// Open the daemon-wide overview of recent and locally retained root sessions.
+    /// Open the live command center for recent and locally retained root sessions.
     OpenAgentsOverview,
+    /// Create an empty thread from the command center.
+    NewAgentsOverviewSession {
+        cwd: Option<AbsolutePathBuf>,
+    },
     /// Update the daemon-wide overview after a background thread listing finishes.
     AgentsOverviewThreadsLoaded {
         request_id: Uuid,
@@ -285,10 +289,6 @@ pub(crate) enum AppEvent {
     /// Switch to a root session selected from the shared dashboard.
     SelectAgentsOverviewThread {
         thread_id: ThreadId,
-    },
-    /// Open an empty session in the selected checkout.
-    NewAgentsOverviewSession {
-        cwd: Option<AbsolutePathBuf>,
     },
     /// Create an empty session in a worktree from the selected project's default branch.
     NewAgentsOverviewWorktree {
@@ -424,6 +424,10 @@ pub(crate) enum AppEvent {
 
     /// Open the filename prompt for an on-demand Markdown transcript export.
     OpenTranscriptExportFilePrompt,
+    /// Open retained warnings without changing the draft or transcript position.
+    OpenWarnings,
+    /// Copy a diagnostic and acknowledge in the footer, without appending history.
+    CopyWarning(String),
 
     /// Export all current-thread history to the selected destination.
     ExportTranscript {
@@ -574,10 +578,10 @@ pub(crate) enum AppEvent {
         name: Option<String>,
     },
 
-    /// Branch before a selected prompt and reopen it in the new thread's composer.
+    /// Revert before a selected prompt, retaining its identity across queued history pages.
     RevertSessionForPromptEdit {
         thread_id: ThreadId,
-        nth_user_message: usize,
+        selected_cell: Arc<dyn HistoryCell>,
         prompt: UserMessage,
     },
     FinishPromptRevert {
@@ -1068,6 +1072,10 @@ pub(crate) enum AppEvent {
     /// Begin buffering thread-switch replay cells so the final scrollback write can reuse the
     /// resize-reflow tail renderer.
     BeginThreadSwitchHistoryReplayBuffer,
+
+    /// Resume following the transcript after an explicit local command submission.
+    /// Background output and later refreshes must preserve the user's reading position.
+    FollowTranscript,
 
     InsertHistoryCell(Box<dyn HistoryCell>),
 

@@ -421,10 +421,7 @@ impl App {
             );
             let preserve_explicit_permissions = unloaded || started.is_some();
             let (mut resume_config, mut local_settings) = if let Some((config, _)) = &started {
-                (
-                    config.clone(),
-                    crate::local_settings::LocalSettings::from(config),
-                )
+                (config.clone(), self.local_settings.reloaded(config))
             } else if unloaded {
                 let target_session = SessionTarget {
                     path: target_thread.path.clone(),
@@ -473,7 +470,7 @@ impl App {
                 {
                     return Ok(control);
                 }
-                local_settings = crate::local_settings::LocalSettings::from(&resume_config);
+                local_settings = self.local_settings.reloaded(&resume_config);
             }
             // Folder selection and trust prompts can replace or clear the loading frame.
             loading::draw(tui)?;
@@ -952,7 +949,11 @@ impl App {
                 let turns = match thread.history_mode {
                     ThreadHistoryMode::Paginated if app_server.supports_paginated_history() => {
                         app_server
-                            .thread_turns_page(thread_id, /*cursor*/ None)
+                            .thread_turns_page(
+                                thread_id,
+                                /*cursor*/ None,
+                                crate::app_server_session::INITIAL_HISTORY_TURN_LIMIT,
+                            )
                             .await?
                             .data
                     }
