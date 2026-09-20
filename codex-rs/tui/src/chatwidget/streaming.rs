@@ -366,7 +366,7 @@ impl ChatWidget {
             .or(self.reasoning_header.take());
         if !self.reasoning_summary_parts.is_empty() {
             let reasoning_parts = std::mem::take(&mut self.reasoning_summary_parts);
-            let mut cell: Box<dyn history_cell::HistoryCell> = if self.config.show_raw_agent_reasoning {
+            let mut cell = if self.config.show_raw_agent_reasoning {
                 Box::new(history_cell::ReasoningSummaryCell::new(
                     "Raw reasoning".to_string(),
                     reasoning_parts.join("\n\n"),
@@ -379,6 +379,7 @@ impl ChatWidget {
             if let Some(id) = &self.status_state.reasoning_item_id {
                 cell.set_source_item_id(id.clone());
             }
+            let cell: Box<dyn history_cell::HistoryCell> = cell;
             let result = match self.transcript.active_cell.as_mut() {
                 Some(active) => active.append_reasoning(cell),
                 None => Err(cell),
