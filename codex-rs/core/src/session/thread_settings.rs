@@ -69,6 +69,7 @@ pub(super) fn prepare_update(overrides: ThreadSettingsOverrides) -> SessionSetti
         active_permission_profile,
         windows_sandbox_level,
         model,
+        model_provider,
         effort,
         summary,
         service_tier,
@@ -94,6 +95,7 @@ pub(super) fn prepare_update(overrides: ThreadSettingsOverrides) -> SessionSetti
         permission_profile,
         active_permission_profile,
         windows_sandbox_level,
+        model_provider,
         disabled_plugin_ids,
         ..Default::default()
     }

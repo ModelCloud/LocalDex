@@ -150,6 +150,7 @@ pub struct CodexThreadSettingsOverrides {
     pub active_permission_profile: Option<ActivePermissionProfile>,
     pub windows_sandbox_level: Option<WindowsSandboxLevel>,
     pub model: Option<String>,
+    pub model_provider: Option<String>,
     pub effort: Option<Option<ReasoningEffort>>,
     pub summary: Option<ReasoningSummary>,
     pub service_tier: Option<Option<String>>,
@@ -612,6 +613,7 @@ impl CodexThread {
             active_permission_profile,
             windows_sandbox_level,
             model,
+            model_provider,
             effort,
             summary,
             service_tier,
@@ -637,6 +639,7 @@ impl CodexThread {
             permission_profile,
             active_permission_profile,
             windows_sandbox_level,
+            model_provider,
             disabled_plugin_ids,
             ..Default::default()
         }
