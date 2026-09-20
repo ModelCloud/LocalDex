@@ -13,14 +13,25 @@ use codex_protocol::openai_models::TruncationMode;
 use codex_protocol::openai_models::TruncationPolicyConfig;
 use codex_protocol::openai_models::WebSearchToolType;
 use codex_protocol::openai_models::default_input_modalities;
+use serde::Deserialize;
 
 use crate::config::ModelsManagerConfig;
 use codex_utils_output_truncation::approx_bytes_for_tokens;
+use std::path::PathBuf;
 use tracing::warn;
 
 pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 const PERSONALITY_SECTION_HEADER: &str = "# Personality";
 const LOCALDEX_DSV41_FLASH: &str = "QB/DSV4.1-Flash";
+const LOCALDEX_DSV41_FLASH_CONTEXT_WINDOW: i64 = 262_144;
+const LOCALDEX_DSV41_FLASH_AUTO_COMPACT_TOKEN_LIMIT: i64 = 235_929;
+const LOCALDEX_RUNTIME_CAPABILITIES_FILE: &str = "localdex-runtime-capabilities.json";
+
+#[derive(Deserialize)]
+struct LocalDexRuntimeCapabilities {
+    model: String,
+    context_window: i64,
+}
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
     if let Some(context_window) = config.model_context_window {
@@ -62,7 +73,37 @@ pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig)
         *instructions_template = strip_personality_section(std::mem::take(instructions_template));
     }
 
+    apply_localdex_runtime_capabilities(model)
+}
+
+/// Apply the session-private endpoint capability snapshot when it is newer
+/// than bundled metadata. Omnigent writes this file immediately before every
+/// LocalDex turn after authenticating to `/v1/models/{id}`. Treat malformed or
+/// missing data as unavailable and retain the conservative bundled fallback.
+fn apply_localdex_runtime_capabilities(mut model: ModelInfo) -> ModelInfo {
+    if model.slug != LOCALDEX_DSV41_FLASH {
+        return model;
+    }
+    let Some(codex_home) = std::env::var_os("CODEX_HOME") else {
+        return model;
+    };
+    let path = PathBuf::from(codex_home).join(LOCALDEX_RUNTIME_CAPABILITIES_FILE);
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return model;
+    };
+    let Some(context_window) = localdex_runtime_context_window(&contents, &model.slug) else {
+        return model;
+    };
+    model.context_window = Some(context_window);
+    model.max_context_window = None;
+    model.auto_compact_token_limit = Some(context_window.saturating_mul(9) / 10);
     model
+}
+
+fn localdex_runtime_context_window(contents: &str, model: &str) -> Option<i64> {
+    let capabilities = serde_json::from_str::<LocalDexRuntimeCapabilities>(contents).ok()?;
+    (capabilities.model == model && capabilities.context_window > 0)
+        .then_some(capabilities.context_window)
 }
 
 fn strip_personality_section(mut instructions: String) -> String {
@@ -104,7 +145,7 @@ fn is_h1_heading(line: &str) -> bool {
 /// Build a minimal fallback model descriptor for missing/unknown slugs.
 pub fn model_info_from_slug(slug: &str) -> ModelInfo {
     if slug == LOCALDEX_DSV41_FLASH {
-        return localdex_dsv41_flash_model_info();
+        return apply_localdex_runtime_capabilities(localdex_dsv41_flash_model_info());
     }
     warn!("Unknown model {slug} is used. This will use fallback model metadata.");
     ModelInfo {
@@ -221,9 +262,15 @@ fn localdex_dsv41_flash_model_info() -> ModelInfo {
         web_search_tool_type: WebSearchToolType::Text,
         truncation_policy: TruncationPolicyConfig::tokens(/*limit*/ 10_000),
         supports_image_detail_original: false,
-        context_window: Some(524_288),
-        max_context_window: Some(524_288),
-        auto_compact_token_limit: Some(471_859),
+        // The endpoint reserves two tokens for its prompt template, exposing
+        // a 262,142-token request budget from a 262,144-token context window.
+        // Compact well before that hard request limit so a model switch can
+        // recover an existing larger-context thread before its next request.
+        context_window: Some(LOCALDEX_DSV41_FLASH_CONTEXT_WINDOW),
+        // A live endpoint capability snapshot may raise or lower this value;
+        // do not cap that authoritative result to the bundled fallback.
+        max_context_window: None,
+        auto_compact_token_limit: Some(LOCALDEX_DSV41_FLASH_AUTO_COMPACT_TOKEN_LIMIT),
         comp_hash: None,
         effective_context_window_percent: 95,
         experimental_supported_tools: Vec::new(),
