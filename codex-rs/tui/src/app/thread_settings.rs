@@ -76,9 +76,26 @@ impl App {
             })
         });
 
+        // LocalDex launches with its private OpenAI-compatible provider. A
+        // model-picker change to an official model must change the provider
+        // too; otherwise the app-server retains `localdex` and sends an
+        // official model id to the private endpoint. Keep the configured
+        // local model on LocalDex, and route every other picker model through
+        // the built-in OpenAI provider.
+        let model_provider = (self.config.model_provider_id == "localdex"
+            && self.config.model.as_deref().is_some())
+        .then(|| {
+            if self.config.model.as_deref() == Some(model.as_str()) {
+                "localdex".to_string()
+            } else {
+                "openai".to_string()
+            }
+        });
+
         let mut params = ThreadSettingsUpdateParams {
             thread_id: thread_id.to_string(),
             model: Some(model),
+            model_provider,
             collaboration_mode: Some(self.chat_widget.effective_collaboration_mode()),
             ..ThreadSettingsUpdateParams::default()
         };
