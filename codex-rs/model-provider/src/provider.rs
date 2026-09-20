@@ -19,6 +19,7 @@ use codex_models_manager::cache::ModelsCache;
 use codex_models_manager::manager::OpenAiModelsManager;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::manager::StaticModelsManager;
+use codex_protocol::account::PlanType;
 use codex_protocol::account::ProviderAccount;
 use codex_protocol::error::CodexErr;
 use codex_protocol::openai_models::ModelsResponse;
@@ -549,11 +550,13 @@ impl ModelProvider for ConfiguredModelProvider {
                     | CodexAuth::AgentIdentity(_)
                     | CodexAuth::PersonalAccessToken(_) => {
                         let email = auth.get_account_email();
-                        let plan_type = auth.account_plan_type();
+                        // Account/plan metadata is informational. A stale or partially
+                        // refreshed ChatGPT token may not carry a plan claim, but that
+                        // must not prevent the TUI from starting and letting the user
+                        // select a different provider.
+                        let plan_type = auth.account_plan_type().unwrap_or(PlanType::Unknown);
 
-                        plan_type
-                            .map(|plan_type| ProviderAccount::Chatgpt { email, plan_type })
-                            .ok_or(ProviderAccountError::MissingChatgptAccountDetails)
+                        Ok(ProviderAccount::Chatgpt { email, plan_type })
                     }
                 })
                 .transpose()?
