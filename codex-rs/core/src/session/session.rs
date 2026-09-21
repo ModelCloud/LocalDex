@@ -394,6 +394,22 @@ impl SessionConfiguration {
         current_environments: &[TurnEnvironmentSelection],
     ) -> ConstraintResult<Self> {
         let mut next_configuration = self.clone();
+        if let Some(model_provider_id) = &updates.model_provider {
+            let mut config = (*next_configuration.original_config_do_not_use).clone();
+            let model_provider = config
+                .model_providers
+                .get(model_provider_id)
+                .cloned()
+                .ok_or_else(|| ConstraintError::InvalidValue {
+                    field_name: "model_provider",
+                    candidate: model_provider_id.clone(),
+                    allowed: "a configured model provider".to_string(),
+                    requirement_source: codex_config::RequirementSource::Unknown,
+                })?;
+            config.model_provider_id = model_provider_id.clone();
+            config.model_provider = model_provider;
+            next_configuration.original_config_do_not_use = Arc::new(config);
+        }
         if let Some(disabled_plugin_ids) = &updates.disabled_plugin_ids {
             next_configuration.disabled_plugin_ids = disabled_plugin_ids.clone();
         }
@@ -591,6 +607,7 @@ pub(crate) struct SessionSettingsCommit {
 #[derive(Default, Clone)]
 pub(crate) struct SessionSettingsUpdate {
     pub(crate) step_settings: StepSettingsUpdate,
+    pub(crate) model_provider: Option<String>,
     pub(crate) environments: Option<TurnEnvironmentSelections>,
     pub(crate) runtime_workspace_roots: Option<Vec<AbsolutePathBuf>>,
     pub(crate) profile_workspace_roots: Option<Vec<ProfileWorkspaceRoot>>,
