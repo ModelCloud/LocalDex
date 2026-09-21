@@ -485,6 +485,30 @@ fn test_merge_configured_model_providers_adds_custom_provider() {
 }
 
 #[test]
+fn test_merge_configured_localdex_provider_enables_responses_continuation() {
+    let localdex_provider = ModelProviderInfo {
+        name: "LocalDex".to_string(),
+        base_url: Some("http://127.0.0.1:2120/v1".to_string()),
+        ..ModelProviderInfo::default()
+    };
+    let configured_model_providers = std::collections::HashMap::from([(
+        LOCALDEX_PROVIDER_ID.to_string(),
+        localdex_provider,
+    )]);
+
+    let providers = merge_configured_model_providers(
+        built_in_model_providers(/*openai_base_url*/ None),
+        configured_model_providers,
+    )
+    .expect("LocalDex provider should merge");
+
+    assert!(
+        providers[LOCALDEX_PROVIDER_ID].supports_responses_continuation,
+        "LocalDex should enable its supported continuation protocol by default"
+    );
+}
+
+#[test]
 fn test_merge_configured_model_providers_applies_amazon_bedrock_aws_override() {
     let credential_export = AwsCredentialExportConfig {
         command: "aws-vault".to_string(),
