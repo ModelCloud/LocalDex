@@ -74,6 +74,13 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 const OPENAI_ACTOR_AUTHORIZATION_HEADER: &str = "x-openai-actor-authorization";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
+/// The additive local provider bundled by the LocalDex distribution.
+///
+/// A configured provider with this ID targets ModelCloud's Responses endpoint,
+/// which supports stored-response continuation. Keep this provider-specific so
+/// arbitrary OpenAI-compatible endpoints retain the conservative stateless
+/// default.
+pub const LOCALDEX_PROVIDER_ID: &str = "localdex";
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
 pub const AMAZON_BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
@@ -692,6 +699,14 @@ pub fn merge_configured_model_providers(
     configured_model_providers: HashMap<String, ModelProviderInfo>,
 ) -> Result<HashMap<String, ModelProviderInfo>, String> {
     for (key, mut provider) in configured_model_providers {
+        // LocalDex owns this provider ID and its endpoint implements stored
+        // Responses continuation. Existing LocalDex configurations predate the
+        // capability flag, so make the supported behavior available without a
+        // per-host configuration migration. All other configured providers
+        // remain opt-in because `store=true` changes retention semantics.
+        if key == LOCALDEX_PROVIDER_ID {
+            provider.supports_responses_continuation = true;
+        }
         if matches!(
             key.as_str(),
             AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID
