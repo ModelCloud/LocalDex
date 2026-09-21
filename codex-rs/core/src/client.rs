@@ -317,6 +317,8 @@ struct WebsocketContinuation {
 struct HttpSession {
     last_request: Option<ResponsesApiRequest>,
     last_response_rx: Option<oneshot::Receiver<LastResponse>>,
+    last_response: Option<LastResponse>,
+    continuation_disabled: bool,
 }
 
 struct HttpContinuation {
@@ -1003,9 +1005,9 @@ impl ModelClient {
             tool_choice: "auto".to_string(),
             parallel_tool_calls: prompt.parallel_tool_calls && !model_info.use_responses_lite,
             reasoning: Some(reasoning),
-            // A completed response is the exact continuation baseline for a later tool round.
-            // Keep it server-side so we need only send newly appended output items next time.
-            store: true,
+            // This opt-in changes retention semantics. Only providers that explicitly declare
+            // stored-response continuation receive `store=true`.
+            store: self.state.provider.info().supports_responses_continuation,
             stream: true,
             stream_options,
             include,
@@ -1479,13 +1481,29 @@ impl ModelClientSession {
     }
 
     fn get_last_http_response(&mut self) -> Option<LastResponse> {
-        self.http_session
+        if let Some(last_response) = &self.http_session.last_response {
+            return Some(last_response.clone());
+        }
+
+        let result = self
+            .http_session
             .last_response_rx
-            .take()
-            .and_then(|mut receiver| match receiver.try_recv() {
-                Ok(last_response) => Some(last_response),
-                Err(TryRecvError::Closed) | Err(TryRecvError::Empty) => None,
-            })
+            .as_mut()
+            .map(|receiver| receiver.try_recv())?;
+        match result {
+            Ok(last_response) => {
+                self.http_session.last_response_rx = None;
+                self.http_session.last_response = Some(last_response.clone());
+                Some(last_response)
+            }
+            // The next request cannot safely elide history until the completed response is
+            // available, but a merely pending receiver must remain available for a later round.
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Closed) => {
+                self.http_session.last_response_rx = None;
+                None
+            }
+        }
     }
 
     /// Returns only the appended protocol items for an HTTP Responses continuation.
@@ -1493,6 +1511,16 @@ impl ModelClientSession {
     /// The model's reasoning and function calls stay in their original `ResponseItem` form. If
     /// the request is no longer a strict append, callers intentionally fall back to full history.
     fn prepare_http_request(&mut self, request: &ResponsesApiRequest) -> Option<HttpContinuation> {
+        if self.http_session.continuation_disabled
+            || !self
+                .client
+                .state
+                .provider
+                .info()
+                .supports_responses_continuation
+        {
+            return None;
+        }
         let last_response = self.get_last_http_response()?;
         let previous_request = self.http_session.last_request.as_ref()?;
         let items = self.get_incremental_items(request, previous_request, &last_response)?;
@@ -1732,6 +1760,11 @@ impl ModelClientSession {
                 service_tier.clone(),
                 responses_metadata,
             )?;
+            if self.http_session.continuation_disabled {
+                // The provider rejected stored-response continuation. Do not keep asking it to
+                // retain future requests after switching this session back to stateless mode.
+                request.store = false;
+            }
             ModelClient::filter_tool_result_metadata(
                 &mut request.input,
                 &client_setup.api_provider,
@@ -1787,6 +1820,7 @@ impl ModelClientSession {
                 client_setup.api_auth,
             )
             .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+            let is_continuation_request = request.previous_response_id.is_some();
             let stream_result = client.stream_request(request, options).await;
 
             match stream_result {
@@ -1799,7 +1833,25 @@ impl ModelClientSession {
                     );
                     self.http_session.last_request = Some(full_request);
                     self.http_session.last_response_rx = Some(last_response_rx);
+                    self.http_session.last_response = None;
                     return Ok(stream);
+                }
+                Err(ApiError::Transport(TransportError::Http { status, .. }))
+                    if is_continuation_request
+                        && matches!(
+                            status,
+                            StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND | StatusCode::GONE
+                        ) =>
+                {
+                    // A configured endpoint can advertise continuation incorrectly or lose its
+                    // response store. Retry this request once with the exact full history, then
+                    // stay stateless for the remainder of the session.
+                    warn!(
+                        status = %status,
+                        "Responses continuation rejected; retrying with full history and disabling it for this session"
+                    );
+                    self.http_session.continuation_disabled = true;
+                    continue;
                 }
                 Err(ApiError::Transport(unauthorized_transport))
                     if self

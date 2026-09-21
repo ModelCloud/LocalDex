@@ -79,6 +79,7 @@ base_url = "http://localhost:11434/v1"
         websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
+        supports_responses_continuation: false,
         supports_standalone_web_search: false,
     };
 
@@ -116,6 +117,7 @@ query_params = { api-version = "2025-04-01-preview" }
         websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
+        supports_responses_continuation: false,
         supports_standalone_web_search: false,
     };
 
@@ -157,6 +159,7 @@ supports_standalone_web_search = true
         websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
+        supports_responses_continuation: false,
         supports_standalone_web_search: true,
     };
 
@@ -345,6 +348,7 @@ fn test_create_amazon_bedrock_provider() {
             websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             supports_websockets: false,
+            supports_responses_continuation: false,
             supports_standalone_web_search: false,
         }
     );
@@ -668,6 +672,7 @@ fn test_validate_provider_aws_rejects_conflicting_auth() {
         }),
         env_key: Some("AWS_BEARER_TOKEN_BEDROCK".to_string()),
         supports_websockets: false,
+        supports_responses_continuation: false,
         ..ModelProviderInfo::create_openai_provider(/*base_url*/ None)
     };
 
@@ -688,6 +693,7 @@ fn test_validate_provider_aws_rejects_websockets() {
         }),
         requires_openai_auth: false,
         supports_websockets: true,
+        supports_responses_continuation: false,
         ..ModelProviderInfo::create_openai_provider(/*base_url*/ None)
     };
 

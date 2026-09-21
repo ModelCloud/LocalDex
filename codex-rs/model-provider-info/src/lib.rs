@@ -188,6 +188,12 @@ pub struct ModelProviderInfo {
     /// Whether this provider supports the Responses API WebSocket transport.
     #[serde(default)]
     pub supports_websockets: bool,
+    /// Whether the provider stores Responses and supports `previous_response_id` continuation.
+    ///
+    /// This is opt-in because enabling it changes data-retention semantics: every request in a
+    /// potentially continued turn is sent with `store=true`.
+    #[serde(default)]
+    pub supports_responses_continuation: bool,
     /// Whether this provider supports the standalone web-search endpoint.
     #[serde(default)]
     pub supports_standalone_web_search: bool,
@@ -545,6 +551,7 @@ other non-default provider fields are not supported"
             websocket_connect_timeout_ms: None,
             requires_openai_auth: true,
             supports_websockets: true,
+            supports_responses_continuation: false,
             supports_standalone_web_search: true,
         }
     }
@@ -583,6 +590,7 @@ other non-default provider fields are not supported"
             websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             supports_websockets: false,
+            supports_responses_continuation: false,
             supports_standalone_web_search: false,
         }
     }
@@ -756,6 +764,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
+        supports_responses_continuation: false,
         supports_standalone_web_search: false,
     }
 }
