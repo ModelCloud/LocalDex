@@ -297,6 +297,8 @@ mod startup_submission_tests;
 mod status_and_layout;
 mod status_command_tests;
 mod status_surface_previews;
+#[path = "tests/subagent_activity_tests.rs"]
+mod subagent_activity;
 mod terminal_title;
 #[path = "tests/tool_activity_tests.rs"]
 mod tool_activity_tests;
@@ -311,6 +313,9 @@ pub(super) use helpers::*;
 
 #[path = "tests/questions_tests.rs"]
 mod questions_tests;
+
+#[path = "tests/list_spacing_tests.rs"]
+mod list_spacing_tests;
 
 #[path = "tests/question_notifications_tests.rs"]
 mod question_notifications_tests;

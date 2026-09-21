@@ -518,9 +518,9 @@ pub(crate) enum AppEvent {
         result: color_eyre::Result<AppServerStartedThread>,
     },
 
-    /// Register a dynamically created background thread before its first turn starts.
+    /// Register a tool-created or resumed background thread and its overview metadata.
     DynamicToolThreadStarted {
-        thread_id: ThreadId,
+        thread: Thread,
         task_tools_available: bool,
         registered: tokio::sync::oneshot::Sender<()>,
     },
@@ -1492,6 +1492,11 @@ pub(crate) enum AppEvent {
     },
     /// Dismiss the terminal-title setup UI without changing config.
     TerminalTitleSetupCancelled,
+
+    /// Save the transcript renderer preference for the next launch only.
+    FullscreenTranscriptSelected {
+        enabled: bool,
+    },
 
     /// Apply a user-confirmed syntax theme selection.
     SyntaxThemeSelected {

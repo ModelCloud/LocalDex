@@ -3,6 +3,8 @@ use crate::CodexThread;
 use crate::StateDbHandle;
 use crate::ThreadManager;
 use crate::agent::agent_status_from_event;
+use crate::agent::api::AgentInfo;
+use crate::agent::api::AgentTarget;
 use crate::agent::next_thread_spawn_depth;
 use crate::agent::types::AgentMessage;
 use crate::agent::types::LiveAgent;
@@ -881,6 +883,14 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
             .await
             .is_some()
     );
+    assert_matches!(
+        control
+            .inspect(parent_thread_id, AgentTarget::Id(spawned_agent.thread_id))
+            .await
+            .expect("inspect registered unloaded agent"),
+        AgentInfo::Unloaded(_)
+    );
+    // Inspection must not restore the evicted runtime.
     match harness.manager.get_thread(spawned_agent.thread_id).await {
         Err(err) => match err.details() {
             CodexErrorDetails::ThreadNotFound(id) => assert_eq!(*id, spawned_agent.thread_id),
@@ -1290,13 +1300,22 @@ async fn cold_resume_with_thread_instructions_preserves_lazy_v2_child_inheritanc
             .session
             .services
             .agent_control
-            .deliver_message(
-                parent_thread_id,
-                &turn,
-                target_thread_id,
-                AgentMessage::Plaintext("hello after resume".to_string()),
-                MessageDeliveryMode::QueueOnly,
-            )
+            .send(crate::SendRequest {
+                caller: parent_thread_id,
+                target: crate::AgentTarget::Id(target_thread_id),
+                resume_config: crate::agent::child_config::build_agent_resume_config(&turn)
+                    .expect("capture resume config"),
+                input: crate::AgentInput::Message {
+                    message: AgentMessage::Plaintext("hello after resume".to_string()),
+                    mode: MessageDeliveryMode::QueueOnly,
+                },
+                start_options: TurnStartOptions {
+                    root_turn_id: turn.turn_metadata_state.root_turn_id(),
+                    turn_trigger: turn.turn_metadata_state.current_turn_trigger(),
+                    cyber_access_program: turn.cyber_access_program,
+                    ..Default::default()
+                },
+            })
             .await
             .expect("message should reload the grandchild");
         assert_thread_not_loaded(&resumed_manager, worker_thread_id).await;
@@ -1406,13 +1425,22 @@ async fn v2_sibling_reload_preserves_shared_instructions_after_root_unloads(shar
         .session
         .services
         .agent_control
-        .deliver_message(
-            sender_id,
-            &sender_turn,
-            target_id,
-            AgentMessage::Plaintext("wake the sibling".to_string()),
-            MessageDeliveryMode::QueueOnly,
-        )
+        .send(crate::SendRequest {
+            caller: sender_id,
+            target: crate::AgentTarget::Id(target_id),
+            resume_config: crate::agent::child_config::build_agent_resume_config(&sender_turn)
+                .expect("capture resume config"),
+            input: crate::AgentInput::Message {
+                message: AgentMessage::Plaintext("wake the sibling".to_string()),
+                mode: MessageDeliveryMode::QueueOnly,
+            },
+            start_options: TurnStartOptions {
+                root_turn_id: sender_turn.turn_metadata_state.root_turn_id(),
+                turn_trigger: sender_turn.turn_metadata_state.current_turn_trigger(),
+                cyber_access_program: sender_turn.cyber_access_program,
+                ..Default::default()
+            },
+        })
         .await
         .expect("reload target from its sibling");
     let resumed = harness
@@ -2005,6 +2033,9 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
     let harness = AgentControlHarness::new().await;
     let mut parent_config = harness.config.clone();
     let _ = parent_config.features.enable(Feature::MultiAgentV2);
+    let _ = parent_config
+        .features
+        .enable(Feature::GuardianThreadContext);
     parent_config.developer_instructions = Some("Parent developer instructions.".to_string());
     parent_config.multi_agent_v2.root_agent_usage_hint_text =
         Some("Parent root guidance.".to_string());
@@ -2012,6 +2043,7 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
         Some("Parent subagent guidance.".to_string());
     let mut child_config = harness.config.clone();
     let _ = child_config.features.enable(Feature::MultiAgentV2);
+    let _ = child_config.features.enable(Feature::GuardianThreadContext);
     child_config.developer_instructions = Some("Child developer instructions.".to_string());
     child_config.multi_agent_v2.subagent_developer_instructions =
         Some("Child developer instructions.".to_string());
@@ -2191,6 +2223,13 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
     );
     let history = child_thread.session.clone_history().await;
     let history_items = history.raw_items().cloned().collect::<Vec<_>>();
+    let assistant_position = |history: &crate::context_manager::ContextManager| {
+        history.annotated_items().iter().find(|item| {
+            matches!(&item.item, ResponseItem::Message { role, phase: Some(MessagePhase::FinalAnswer), .. } if role == "assistant")
+        }).expect("recorded final answer").metadata.as_ref().and_then(|metadata| metadata.user_input_order)
+    };
+    assert!(assistant_position(&parent_thread.session.clone_history().await).is_some());
+    assert_eq!(assistant_position(&history), None);
     let expected_final_answer = parent_thread
         .session
         .clone_history()

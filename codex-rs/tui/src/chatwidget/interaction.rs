@@ -5,6 +5,26 @@ use crate::bottom_pane::BottomPaneView;
 use crate::clipboard_copy::CopyFormat;
 
 impl ChatWidget {
+    pub(crate) fn end_composer_drag(&mut self) {
+        self.bottom_pane.end_composer_drag();
+    }
+
+    pub(crate) fn copy_composer_selection(
+        &mut self,
+        event: &crate::tui::TuiEvent,
+        copy: impl FnOnce(&str) -> Result<crate::clipboard_copy::CopyStatus, String>,
+    ) -> Option<(usize, Result<crate::clipboard_copy::CopyStatus, String>)> {
+        self.bottom_pane.copy_composer_selection(event, copy)
+    }
+
+    pub(crate) fn handle_composer_mouse(&mut self, event: crossterm::event::MouseEvent) -> bool {
+        self.bottom_pane.handle_composer_mouse(event)
+    }
+
+    pub(crate) fn prepare_composer_mouse(&mut self, event: crossterm::event::MouseEvent) -> bool {
+        self.bottom_pane.prepare_composer_mouse(event)
+    }
+
     pub(crate) fn set_agents_navigation_enabled(&mut self, enabled: bool) {
         self.bottom_pane.set_agents_navigation_enabled(enabled);
     }

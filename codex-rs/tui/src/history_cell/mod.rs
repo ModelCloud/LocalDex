@@ -23,7 +23,6 @@ use crate::exec_command::relativize_to_home;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::legacy_core::config::Config;
 use crate::live_wrap::take_prefix_by_width;
-use crate::markdown::append_markdown;
 use crate::motion::MotionMode;
 use crate::motion::ReducedMotionIndicator;
 use crate::motion::activity_indicator;
@@ -233,6 +232,15 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     #[allow(dead_code, reason = "Used by later layers of the TUI refresh stack.")]
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.display_hyperlink_lines(width)
+    }
+
+    /// Rich presentation in a viewport that can redraw previously visible rows.
+    fn retained_hyperlink_lines(&self, width: u16, detailed: bool) -> Vec<HyperlinkLine> {
+        if detailed {
+            self.transcript_hyperlink_lines(width)
+        } else {
+            self.compact_hyperlink_lines(width)
+        }
     }
 
     /// Stable, namespaced member identities used to retain disclosure across grouping and replay.

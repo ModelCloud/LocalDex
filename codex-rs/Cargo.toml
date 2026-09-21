@@ -58,6 +58,7 @@ members = [
     "exec-server/tests/support",
     "execpolicy",
     "ext/agent",
+    "ext/agent-message-board",
     "ext/connectors",
     "ext/extension-api",
     "ext/goal",
@@ -202,6 +203,7 @@ codex-websocket-client = { path = "websocket-client" }
 codex-config = { path = "config" }
 codex-connectors = { path = "connectors" }
 codex-agent-extension = { path = "ext/agent" }
+codex-agent-message-board-extension = { path = "ext/agent-message-board" }
 codex-connectors-extension = { path = "ext/connectors" }
 codex-context-fragments = { path = "context-fragments" }
 codex-core = { path = "core" }
@@ -334,6 +336,7 @@ bitflags = "2.13.1"
 blake3 = "1.8.2"
 bm25 = "2.3.2"
 bytes = "1.10.1"
+caseless = "0.2.2"
 chardetng = "0.1.17"
 chrono = "0.4.43"
 clap = "4"

@@ -121,6 +121,7 @@ mod cli;
 mod clipboard_copy;
 mod clipboard_html;
 mod clipboard_paste;
+mod clock_format;
 mod collaboration_modes;
 mod color;
 mod config_update;
@@ -193,6 +194,7 @@ mod session_queue_commands;
 mod session_resume;
 mod session_start;
 mod session_state;
+mod shortcut_help;
 mod skills_helpers;
 mod slash_command;
 mod startup_draft;
@@ -215,6 +217,7 @@ mod terminal_probe;
 mod terminal_title;
 mod terminal_visualization_instructions;
 mod text_formatting;
+mod text_selection;
 mod theme_picker;
 mod thread_color;
 mod thread_transcript;
@@ -1369,6 +1372,7 @@ async fn run_ratatui_app(
             })
         };
 
+    crate::markdown_render::preferences::init(config.tui_rendering);
     // Startup pickers need the current theme before selection can reload config.
     // Leave the one-time override initialization below to use the final config.
     if (cli.resume_picker || cli.fork_picker)
@@ -1839,10 +1843,22 @@ async fn run_ratatui_app(
     }
     startup_draft.apply_config(&config);
 
+    // Count launches that reach final config resolution, regardless of screen policy.
+    if config.analytics_enabled != Some(false)
+        && config.otel.metrics_exporter != codex_config::types::OtelExporterKind::None
+        && let Some(metrics) = codex_otel::global()
+    {
+        let _ = metrics.counter(
+            "codex.tui.fullscreen_transcript",
+            /*inc*/ 1,
+            &[("enabled", &config.tui_fullscreen_transcript.to_string())],
+        );
+    }
+
     // Cloud configuration and session selection can change screen policy after first paint.
     let use_alt_screen = determine_alt_screen_mode(cli.no_alt_screen, config.tui_alternate_screen);
     let mode = crate::transcript_mode::TranscriptMode::resolve(
-        config.features.enabled(Feature::TranscriptV2),
+        config.tui_fullscreen_transcript,
         use_alt_screen,
     );
     if use_alt_screen != tui.is_alt_screen_enabled() || mode.is_owned() != tui.is_owned_screen() {
@@ -1854,6 +1870,7 @@ async fn run_ratatui_app(
     }
 
     let local_settings = crate::local_settings::LocalSettings::for_tui(&config, &tui);
+    crate::markdown_render::preferences::init(local_settings.tui.rendering);
     // Configure syntax highlighting theme from the final config — onboarding
     // and resume/fork can both reload config with a different tui_theme, so
     // this must happen after the last possible reload.

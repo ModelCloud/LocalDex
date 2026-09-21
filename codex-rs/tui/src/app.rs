@@ -265,6 +265,7 @@ mod thread_session_state;
 mod thread_settings;
 mod thread_title;
 mod transcript_export;
+mod tui_mode_picker;
 mod user_verification;
 mod user_verification_errors;
 mod user_verification_requests;
@@ -577,6 +578,7 @@ pub(crate) struct App {
     pub(crate) file_search: FileSearchManager,
 
     pub(crate) transcript_cells: Vec<Arc<dyn HistoryCell>>,
+    composer_tips: composer_hints::ComposerTips,
     native_history: native_history::NativeHistory,
     pub(crate) transcript_view: crate::transcript_view::TranscriptView,
     last_rendered_history_tail: Option<history_ui::RenderedHistoryTail>,
@@ -857,6 +859,11 @@ impl App {
         app_server: &mut AppServerSession,
         event: TuiEvent,
     ) -> Result<AppRunControl> {
+        if matches!(&event, TuiEvent::Key(_))
+            && self.handle_composer_copy_event(tui, &event, tui::Tui::copy_transcript_selection)
+        {
+            return Ok(AppRunControl::Continue);
+        }
         // Resume arrives after suspension; retain the last painted phase across hidden owners.
         if matches!(&event, TuiEvent::Resume) || !tui.is_owned_screen() || self.overlay.is_some() {
             self.chat_widget
@@ -965,6 +972,13 @@ impl App {
         {
             if self.reconnect.presentation == reconnect::ReconnectPresentation::Overview {
                 self.chat_widget.handle_disconnected_view_key(*key);
+                if self
+                    .chat_widget
+                    .selected_index_for_present_view(agents_overview::AGENTS_OVERVIEW_VIEW_ID)
+                    .is_none()
+                {
+                    self.reconnect.presentation = reconnect::ReconnectPresentation::Conversation;
+                }
             } else {
                 self.chat_widget
                     .handle_restricted_key(*key, RestrictedInputMode::Disconnected);

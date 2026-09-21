@@ -95,7 +95,7 @@ pub enum Feature {
     AnalyticsPlanHistory,
     /// Discover model catalogs for OpenAI API-key authentication.
     ApiKeyModelDiscovery,
-    /// Enable the interactive transcript composer and turn-selection UI.
+    /// Deprecated no-op; use `tui.fullscreen_transcript` instead.
     TranscriptV2,
     // Stable.
     /// Enable the default shell tool.
@@ -205,6 +205,8 @@ pub enum Feature {
     Collab,
     /// Enable task-path-based multi-agent routing.
     MultiAgentV2,
+    /// Enable shared discussion tools for an agent tree.
+    AgentMessageBoard,
     /// Removed compatibility flag retained as a no-op.
     MultiAgentMode,
     /// Removed compatibility flag for the deleted agent-job tools.
@@ -592,6 +594,10 @@ impl Features {
                         Feature::WebSearchCached,
                     );
                 }
+                "transcript_v2" => {
+                    self.record_legacy_usage_force("features.transcript_v2", Feature::TranscriptV2);
+                    continue;
+                }
                 "tui_app_server" => {
                     continue;
                 }
@@ -696,6 +702,10 @@ impl Features {
 fn legacy_usage_notice(alias: &str, feature: Feature) -> (String, Option<String>) {
     let canonical = feature.key();
     match feature {
+        Feature::TranscriptV2 => (
+            "`[features].transcript_v2` is deprecated and ignored.".to_string(),
+            Some("Use `[tui].fullscreen_transcript` in config.toml instead.".to_string()),
+        ),
         Feature::WebSearchRequest | Feature::WebSearchCached => {
             let label = match alias {
                 "web_search" => "[features].web_search",
@@ -937,7 +947,7 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::TranscriptV2,
         key: "transcript_v2",
-        stage: Stage::UnderDevelopment,
+        stage: Stage::Deprecated,
         default_enabled: false,
     },
     // Stable features.
@@ -1309,6 +1319,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::MultiAgentV2,
         key: "multi_agent_v2",
         stage: Stage::Stable,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::AgentMessageBoard,
+        key: "agent_message_board",
+        stage: Stage::UnderDevelopment,
         default_enabled: false,
     },
     FeatureSpec {

@@ -1,7 +1,6 @@
-//! Compose the owned transcript above the existing composer and route transcript-only gestures.
+//! Compose the owned transcript above the composer and route their selection gestures.
 //! Reserve a cleared row between transcript content and the composer. Slash suggestions overlay
 //! already-painted rows so opening or closing them leaves transcript geometry unchanged.
-//! Fresh-thread decoration is painted separately in unused cells and never enters history.
 //! Plain Enter returns an empty composer to latest after transcript interactions and prompt editing.
 
 use super::*;
@@ -15,6 +14,28 @@ use crate::transcript_view::ViewAction;
 use ratatui::widgets::Widget;
 
 impl App {
+    /// Copy draft selections before key shortcuts, or after mouse layout has been refreshed.
+    pub(super) fn handle_composer_copy_event(
+        &mut self,
+        tui: &mut tui::Tui,
+        event: &TuiEvent,
+        copy: impl FnOnce(&mut tui::Tui, &str) -> Result<crate::clipboard_copy::CopyStatus, String>,
+    ) -> bool {
+        if tui.is_owned_screen()
+            && self.overlay.is_none()
+            && !self.transcript_view.has_active_interaction()
+            && let Some((char_count, result)) = self
+                .chat_widget
+                .copy_composer_selection(event, |text| copy(tui, text))
+        {
+            self.cancel_pending_key_chord();
+            self.transcript_view.show_copy_feedback(&result, char_count);
+            tui.frame_requester().schedule_frame();
+            return true;
+        }
+        false
+    }
+
     fn sync_owned_transcript(&mut self, width: u16) -> bool {
         let chat_widget = &self.chat_widget;
         let transcript_width = chat_widget.history_wrap_width(width);
@@ -43,20 +64,27 @@ impl App {
         screen_size: Size,
     ) -> Result<Rect> {
         self.chat_widget.sync_warnings(&self.transcript_cells);
-        let motion = MotionMode::from_animations_enabled(self.local_settings.tui.animations);
+        let motion = MotionMode::from_animations_enabled(
+            self.local_settings.tui.animations && self.local_settings.tui.effects.shimmer,
+        );
         let focused = tui.is_terminal_focused();
-        let logo = self.empty_state_presentation(motion, focused);
+        self.empty_state_presentation(
+            MotionMode::from_animations_enabled(
+                self.local_settings.tui.animations && self.local_settings.tui.effects.welcome,
+            ),
+            focused,
+        );
         let latest_navigation = if self.enter_returns_to_latest() {
             "enter/esc latest"
         } else {
             "esc latest"
         };
         self.sync_owned_transcript(screen_size.width);
-        let composer_tip = self.composer_tip();
+        let transcript_width = self.chat_widget.history_wrap_width(screen_size.width);
+        let composer_hint = self.composer_hint(transcript_width);
         let mut prompt_footer =
             self.prompt_navigation_footer(screen_size.width.saturating_sub(/*rhs*/ 2));
         let chat_widget = &self.chat_widget;
-        let transcript_width = chat_widget.history_wrap_width(screen_size.width);
         let view = &mut self.transcript_view;
         let active_key = chat_widget.active_cell_transcript_key();
         view.sync_history_tail(&self.transcript_cells);
@@ -99,7 +127,6 @@ impl App {
         );
         let mut rendered_cursor = None;
         let mut footer_height_changed = false;
-        let mut decoration_tick = None;
         let mut feedback_tick = None;
         tui.draw(screen_size.height, |frame| {
             ratatui::widgets::Clear.render(
@@ -116,12 +143,6 @@ impl App {
                 frame.buffer,
                 &self.transcript_cells,
             );
-            decoration_tick = chat_widget.empty_state_animation.borrow_mut().render(
-                screen_size,
-                bottom_area,
-                frame.buffer,
-                logo,
-            );
             let follow_area =
                 (available > 0 && chat_widget.no_modal_or_popup_active()).then(|| {
                     Rect::new(
@@ -132,7 +153,7 @@ impl App {
                     )
                 });
             feedback_tick =
-                view.render_composer_gap(follow_area, composer_tip.as_ref(), frame.buffer);
+                view.render_composer_gap(follow_area, composer_hint.as_ref(), frame.buffer);
             // Rendering resolves whether new activity is still hidden. Paint that result in
             // this frame so a revision change cannot flash a stale activity hint.
             let mut footer =
@@ -175,9 +196,6 @@ impl App {
         if let Some(delay) = feedback_tick {
             tui.frame_requester().schedule_frame_in(delay);
         }
-        if let Some(delay) = decoration_tick {
-            tui.frame_requester().schedule_frame_in(delay);
-        }
         let animating =
             view.is_following() && active_key.is_some_and(|key| key.animation_tick.is_some());
         let loading = view.is_loading_history() && motion == MotionMode::Animated;
@@ -202,6 +220,12 @@ impl App {
         {
             self.transcript_view.end_drag();
         }
+        if !tui.is_owned_screen()
+            || matches!(event, TuiEvent::FocusLost | TuiEvent::Resume)
+            || self.overlay.is_some()
+        {
+            self.chat_widget.end_composer_drag();
+        }
         if !tui.is_owned_screen() || self.overlay.is_some() {
             return Ok(false);
         }
@@ -223,14 +247,37 @@ impl App {
             }
             return Ok(false);
         }
+        if let TuiEvent::Mouse(mouse) = event {
+            let composer_ready = self.chat_widget.prepare_composer_mouse(*mouse);
+            if mouse.kind != crossterm::event::MouseEventKind::Moved {
+                let size = tui.prepare_draw_size()?;
+                self.render_owned_transcript(tui, size)?;
+            }
+            if composer_ready
+                && self.handle_composer_copy_event(tui, event, tui::Tui::copy_transcript_selection)
+            {
+                return Ok(true);
+            }
+            if composer_ready && self.chat_widget.handle_composer_mouse(*mouse) {
+                self.transcript_view.end_selection(&self.transcript_cells);
+                self.transcript_view.cancel_search();
+                self.transcript_view.clear_activity_focus();
+                tui.frame_requester().schedule_frame();
+                return Ok(true);
+            }
+        }
         if !self.chat_widget.no_modal_or_popup_active() {
+            self.chat_widget.end_composer_drag();
             return Ok(false);
         }
-        let input = matches!(event, TuiEvent::Key(key) if key.kind != KeyEventKind::Release)
-            || matches!(event, TuiEvent::Mouse(mouse) if mouse.kind != crossterm::event::MouseEventKind::Moved);
-        if input {
+        if matches!(event, TuiEvent::Key(key) if key.kind != KeyEventKind::Release) {
             let size = tui.prepare_draw_size()?;
             self.render_owned_transcript(tui, size)?;
+        }
+        if matches!(event, TuiEvent::Key(_))
+            || matches!(event, TuiEvent::Mouse(mouse) if matches!(mouse.kind, crossterm::event::MouseEventKind::Down(_)))
+        {
+            self.chat_widget.end_composer_drag();
         }
         // Visible shortcut help owns Escape before returning a paused viewport to latest.
         // A transcript search or selection still owns Escape while it replaces the help footer.

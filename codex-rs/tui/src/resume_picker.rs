@@ -3346,11 +3346,17 @@ fn render_transcript_content_lines(
             conversation_user_style(),
         )],
         TranscriptPreviewSpeaker::Assistant => {
-            let mut lines = render_assistant(&line.text, /*width*/ None, cwd, &|_| false)
-                .lines
-                .into_iter()
-                .map(|line| line.line)
-                .collect::<Vec<_>>();
+            let mut lines = render_assistant(
+                &line.text,
+                /*width*/ None,
+                cwd,
+                &|_| false,
+                crate::markdown_render::ListSpacing::AfterMultiline,
+            )
+            .lines
+            .into_iter()
+            .map(|line| line.line)
+            .collect::<Vec<_>>();
             for line in &mut lines {
                 *line = conversation_content_line(line.clone(), conversation_assistant_style());
             }
@@ -3436,7 +3442,7 @@ fn expanded_time_detail_line(
     expanded_detail_line(label, &value, width)
 }
 
-fn format_relative_time(reference: DateTime<Utc>, ts: Option<DateTime<Utc>>) -> String {
+pub(crate) fn format_relative_time(reference: DateTime<Utc>, ts: Option<DateTime<Utc>>) -> String {
     let Some(ts) = ts else {
         return "-".to_string();
     };
