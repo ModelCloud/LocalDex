@@ -1506,10 +1506,12 @@ pub async fn mount_response_sequence(
 /// - A `function_call_output` with missing/empty `call_id` must have a nonempty `name`.
 /// - No `custom_tool_call_output` with missing/empty `call_id`.
 /// - `tool_search_output` must have a `call_id` unless it is a server-executed legacy item.
-/// - Every `function_call_output` with a `call_id` must match a prior `function_call`
-///   or `local_shell_call` with the same `call_id` in the same `input`.
-/// - Every `custom_tool_call_output` must match a prior `custom_tool_call`.
-/// - Every `tool_search_output` must match a prior `tool_search_call`.
+/// - For a stateless request, every `function_call_output` with a `call_id` must match a prior
+///   `function_call` or `local_shell_call` with the same `call_id` in the same `input`.
+/// - For a stateless request, every `custom_tool_call_output` must match a prior
+///   `custom_tool_call`, and every `tool_search_output` a prior `tool_search_call`.
+/// - A request with `previous_response_id` may legitimately carry only a tool output: the
+///   matching call is part of the referenced stored response rather than this input payload.
 /// - Additionally, enforce symmetry: every `function_call`/`custom_tool_call`/
 ///   `tool_search_call` in the `input` must have a matching output entry.
 fn validate_request_body_invariants(request: &wiremock::Request) {
@@ -1527,6 +1529,10 @@ fn validate_request_body_invariants(request: &wiremock::Request) {
     let Ok(body): Result<Value, _> = serde_json::from_slice(&body_bytes) else {
         return;
     };
+    let is_stored_continuation = body
+        .get("previous_response_id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| !id.is_empty());
     let items = body
         .get("input")
         .and_then(Value::as_array)
@@ -1602,41 +1608,43 @@ fn validate_request_body_invariants(request: &wiremock::Request) {
         "orphan custom_tool_call_output with empty call_id should be dropped",
     );
 
-    for cid in &function_call_outputs {
-        assert!(
-            function_calls.contains(cid) || local_shell_calls.contains(cid),
-            "function_call_output without matching call in input: {cid}",
-        );
-    }
-    for cid in &custom_tool_call_outputs {
-        assert!(
-            custom_tool_calls.contains(cid),
-            "custom_tool_call_output without matching call in input: {cid}",
-        );
-    }
-    for cid in &tool_search_outputs {
-        assert!(
-            tool_search_calls.contains(cid),
-            "tool_search_output without matching call in input: {cid}",
-        );
-    }
+    if !is_stored_continuation {
+        for cid in &function_call_outputs {
+            assert!(
+                function_calls.contains(cid) || local_shell_calls.contains(cid),
+                "function_call_output without matching call in input: {cid}",
+            );
+        }
+        for cid in &custom_tool_call_outputs {
+            assert!(
+                custom_tool_calls.contains(cid),
+                "custom_tool_call_output without matching call in input: {cid}",
+            );
+        }
+        for cid in &tool_search_outputs {
+            assert!(
+                tool_search_calls.contains(cid),
+                "tool_search_output without matching call in input: {cid}",
+            );
+        }
 
-    for cid in &function_calls {
-        assert!(
-            function_call_outputs.contains(cid),
-            "Function call output is missing for call id: {cid}",
-        );
-    }
-    for cid in &custom_tool_calls {
-        assert!(
-            custom_tool_call_outputs.contains(cid),
-            "Custom tool call output is missing for call id: {cid}",
-        );
-    }
-    for cid in &tool_search_calls {
-        assert!(
-            tool_search_outputs.contains(cid),
-            "Tool search output is missing for call id: {cid}",
-        );
+        for cid in &function_calls {
+            assert!(
+                function_call_outputs.contains(cid),
+                "Function call output is missing for call id: {cid}",
+            );
+        }
+        for cid in &custom_tool_calls {
+            assert!(
+                custom_tool_call_outputs.contains(cid),
+                "Custom tool call output is missing for call id: {cid}",
+            );
+        }
+        for cid in &tool_search_calls {
+            assert!(
+                tool_search_outputs.contains(cid),
+                "Tool search output is missing for call id: {cid}",
+            );
+        }
     }
 }

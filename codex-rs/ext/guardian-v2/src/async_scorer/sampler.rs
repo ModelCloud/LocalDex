@@ -217,6 +217,7 @@ impl LunaSampler {
             model: MODEL.to_owned(),
             instructions: String::new(),
             input,
+            previous_response_id: None,
             tools: None,
             tool_choice: "none".to_owned(),
             parallel_tool_calls: false,

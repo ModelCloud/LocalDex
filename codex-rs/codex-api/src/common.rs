@@ -263,6 +263,9 @@ pub struct ResponsesApiRequest {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub instructions: String,
     pub input: Vec<ResponseItem>,
+    /// Continue a stored response without replaying already accepted items.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_response_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<ResponsesApiTools>,
     pub tool_choice: String,
@@ -290,7 +293,7 @@ impl<'a> From<&'a ResponsesApiRequest> for ResponseCreateWsRequest<'a> {
         Self {
             model: &request.model,
             instructions: &request.instructions,
-            previous_response_id: None,
+            previous_response_id: request.previous_response_id.clone(),
             input: &request.input,
             tools: request.tools.as_ref().map(ResponsesApiTools::as_raw_value),
             tool_choice: &request.tool_choice,

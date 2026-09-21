@@ -284,6 +284,7 @@ pub struct ModelClient {
 pub struct ModelClientSession {
     client: ModelClient,
     websocket_session: WebsocketSession,
+    http_session: HttpSession,
     /// Turn state for sticky routing.
     ///
     /// This is an `OnceLock` that stores the turn state value received from the server
@@ -308,6 +309,21 @@ struct WebsocketContinuation {
     response_id: String,
     items: Vec<ResponseItem>,
     from_untraced_warmup: bool,
+}
+
+/// Per-turn state for HTTP Responses continuation. Unlike WebSocket continuation this is kept
+/// only in the client, but it still uses the exact protocol items received from the server.
+#[derive(Debug, Default)]
+struct HttpSession {
+    last_request: Option<ResponsesApiRequest>,
+    last_response_rx: Option<oneshot::Receiver<LastResponse>>,
+    last_response: Option<LastResponse>,
+    continuation_disabled: bool,
+}
+
+struct HttpContinuation {
+    response_id: String,
+    items: Vec<ResponseItem>,
 }
 
 #[derive(Debug, Default)]
@@ -336,6 +352,7 @@ fn responses_request_properties_match(
         model: previous_model,
         instructions: previous_instructions,
         input: _,
+        previous_response_id: _,
         tools: previous_tools,
         tool_choice: previous_tool_choice,
         parallel_tool_calls: previous_parallel_tool_calls,
@@ -354,6 +371,7 @@ fn responses_request_properties_match(
         model: current_model,
         instructions: current_instructions,
         input: _,
+        previous_response_id: _,
         tools: current_tools,
         tool_choice: current_tool_choice,
         parallel_tool_calls: current_parallel_tool_calls,
@@ -400,8 +418,22 @@ fn response_items_equal_ignoring_internal_metadata(
 
     let mut previous = previous.clone();
     previous.clear_internal_chat_message_metadata_passthrough();
+    previous.set_id(None);
     let mut current = current.clone();
     current.clear_internal_chat_message_metadata_passthrough();
+    current.set_id(None);
+    // Custom providers never receive encrypted function arguments. They can still be present in
+    // the server's stored response, so ignore that private transport-only field when proving that
+    // the persisted history is the same exact response prefix.
+    for item in [&mut previous, &mut current] {
+        if let ResponseItem::FunctionCall {
+            encrypted_function_args,
+            ..
+        } = item
+        {
+            *encrypted_function_args = None;
+        }
+    }
     previous == current
 }
 
@@ -597,6 +629,7 @@ impl ModelClient {
         ModelClientSession {
             client: self.clone(),
             websocket_session,
+            http_session: HttpSession::default(),
             turn_state: Arc::new(OnceLock::new()),
         }
     }
@@ -967,11 +1000,14 @@ impl ModelClient {
             model: model_info.slug.clone(),
             instructions,
             input,
+            previous_response_id: None,
             tools,
             tool_choice: "auto".to_string(),
             parallel_tool_calls: prompt.parallel_tool_calls && !model_info.use_responses_lite,
             reasoning: Some(reasoning),
-            store: false,
+            // This opt-in changes retention semantics. Only providers that explicitly declare
+            // stored-response continuation receive `store=true`.
+            store: self.state.provider.info().supports_responses_continuation,
             stream: true,
             stream_options,
             include,
@@ -1382,9 +1418,9 @@ impl ModelClientSession {
     fn get_incremental_items(
         &self,
         request: &ResponsesApiRequest,
+        previous_request: &ResponsesApiRequest,
         last_response: &LastResponse,
     ) -> Option<Vec<ResponseItem>> {
-        let previous_request = self.websocket_session.last_request.as_ref()?;
         if !responses_request_properties_match(previous_request, request) {
             trace!("incremental request failed, websocket reuse properties didn't match");
             return None;
@@ -1429,7 +1465,8 @@ impl ModelClientSession {
         request: &ResponsesApiRequest,
     ) -> Option<WebsocketContinuation> {
         let last_response = self.get_last_response()?;
-        let items = self.get_incremental_items(request, &last_response)?;
+        let previous_request = self.websocket_session.last_request.as_ref()?;
+        let items = self.get_incremental_items(request, previous_request, &last_response)?;
 
         if last_response.response_id.is_empty() {
             trace!("incremental request failed, no previous response id");
@@ -1440,6 +1477,62 @@ impl ModelClientSession {
             response_id: last_response.response_id,
             items,
             from_untraced_warmup: self.websocket_session.last_response_from_untraced_warmup,
+        })
+    }
+
+    fn get_last_http_response(&mut self) -> Option<LastResponse> {
+        if let Some(last_response) = &self.http_session.last_response {
+            return Some(last_response.clone());
+        }
+
+        let result = self
+            .http_session
+            .last_response_rx
+            .as_mut()
+            .map(|receiver| receiver.try_recv())?;
+        match result {
+            Ok(last_response) => {
+                self.http_session.last_response_rx = None;
+                self.http_session.last_response = Some(last_response.clone());
+                Some(last_response)
+            }
+            // The next request cannot safely elide history until the completed response is
+            // available, but a merely pending receiver must remain available for a later round.
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Closed) => {
+                self.http_session.last_response_rx = None;
+                None
+            }
+        }
+    }
+
+    /// Returns only the appended protocol items for an HTTP Responses continuation.
+    ///
+    /// The model's reasoning and function calls stay in their original `ResponseItem` form. If
+    /// the request is no longer a strict append, callers intentionally fall back to full history.
+    fn prepare_http_request(&mut self, request: &ResponsesApiRequest) -> Option<HttpContinuation> {
+        if self.http_session.continuation_disabled
+            || !self
+                .client
+                .state
+                .provider
+                .info()
+                .supports_responses_continuation
+        {
+            return None;
+        }
+        let last_response = self.get_last_http_response()?;
+        let previous_request = self.http_session.last_request.as_ref()?;
+        let items = self.get_incremental_items(request, previous_request, &last_response)?;
+
+        if last_response.response_id.is_empty() {
+            trace!("HTTP continuation failed, no previous response id");
+            return None;
+        }
+
+        Some(HttpContinuation {
+            response_id: last_response.response_id,
+            items,
         })
     }
 
@@ -1608,7 +1701,7 @@ impl ModelClientSession {
         )
     )]
     async fn stream_responses_api(
-        &self,
+        &mut self,
         prompt: &Prompt,
         model_info: &ModelInfo,
         session_telemetry: &SessionTelemetry,
@@ -1667,6 +1760,11 @@ impl ModelClientSession {
                 service_tier.clone(),
                 responses_metadata,
             )?;
+            if self.http_session.continuation_disabled {
+                // The provider rejected stored-response continuation. Do not keep asking it to
+                // retain future requests after switching this session back to stateless mode.
+                request.store = false;
+            }
             ModelClient::filter_tool_result_metadata(
                 &mut request.input,
                 &client_setup.api_provider,
@@ -1698,6 +1796,13 @@ impl ModelClientSession {
                 client_setup.auth.as_ref(),
                 prompt.cyber_access_program,
             );
+            // Keep a full request as the client-side compatibility baseline. The wire request can
+            // then be reduced to just new items when the previous response is stored remotely.
+            let full_request = request.clone();
+            if let Some(continuation) = self.prepare_http_request(&request) {
+                request.previous_response_id = Some(continuation.response_id);
+                request.input = continuation.items;
+            }
             self.client
                 .prepare_response_items_for_request(&mut request.input);
             if crate::guardian::is_basic_session_source(&self.client.state.session_source) {
@@ -1715,17 +1820,38 @@ impl ModelClientSession {
                 client_setup.api_auth,
             )
             .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+            let is_continuation_request = request.previous_response_id.is_some();
             let stream_result = client.stream_request(request, options).await;
 
             match stream_result {
                 Ok(stream) => {
-                    let (stream, _) = map_response_stream(
+                    let (stream, last_response_rx) = map_response_stream(
                         stream,
                         request_session_telemetry,
                         inference_trace_attempt,
                         Arc::clone(&self.client.state.provider),
                     );
+                    self.http_session.last_request = Some(full_request);
+                    self.http_session.last_response_rx = Some(last_response_rx);
+                    self.http_session.last_response = None;
                     return Ok(stream);
+                }
+                Err(ApiError::Transport(TransportError::Http { status, .. }))
+                    if is_continuation_request
+                        && matches!(
+                            status,
+                            StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND | StatusCode::GONE
+                        ) =>
+                {
+                    // A configured endpoint can advertise continuation incorrectly or lose its
+                    // response store. Retry this request once with the exact full history, then
+                    // stay stateless for the remainder of the session.
+                    warn!(
+                        status = %status,
+                        "Responses continuation rejected; retrying with full history and disabling it for this session"
+                    );
+                    self.http_session.continuation_disabled = true;
+                    continue;
                 }
                 Err(ApiError::Transport(unauthorized_transport))
                     if self

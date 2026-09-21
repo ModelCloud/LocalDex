@@ -74,6 +74,7 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::mount_sse_sequence;
+use core_test_support::responses::mount_response_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::sse_failed;
 use core_test_support::responses::start_mock_server;
@@ -291,7 +292,7 @@ fn assert_codex_client_metadata(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn openai_stateless_responses_requests_preserve_item_turn_metadata_across_turns() {
+async fn responses_requests_preserve_item_turn_metadata_across_turns() {
     let server = MockServer::start().await;
     let assistant_create_time = 1_785_276_138.422709;
     let mut assistant_message = ev_assistant_message("msg-1", "first answer");
@@ -319,6 +320,12 @@ async fn openai_stateless_responses_requests_preserve_item_turn_metadata_across_
     assert_eq!(requests.len(), 2);
     let first = requests[0].body_json();
     let second = requests[1].body_json();
+    assert_eq!(first["store"], serde_json::Value::Bool(false));
+    assert_eq!(second["store"], serde_json::Value::Bool(false));
+    assert!(first.get("previous_response_id").is_none());
+    // A fresh turn is intentionally stateless even though its responses are retained. A response
+    // id is only valid for the strict append sequence within a single active turn.
+    assert!(second.get("previous_response_id").is_none());
     let first_turn_id = first["client_metadata"]["turn_id"]
         .as_str()
         .expect("first request should include turn id");
@@ -404,6 +411,7 @@ async fn non_openai_responses_requests_include_item_ids_without_passthrough_meta
     provider.name = "Test Responses".to_string();
     provider.base_url = Some(format!("{}/v1", server.uri()));
     provider.supports_websockets = false;
+    provider.supports_responses_continuation = true;
     let codex = test_codex()
         .with_config(move |config| {
             config.model_provider_id = provider.name.clone();
@@ -423,15 +431,29 @@ async fn non_openai_responses_requests_include_item_ids_without_passthrough_meta
         .unwrap();
     wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
-    let body = response_mock
-        .requests()
-        .pop()
-        .expect("follow-up request")
-        .body_json();
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 2);
+    let first = requests[0].body_json();
+    let body = requests[1].body_json();
+    assert_eq!(first["store"], serde_json::Value::Bool(true));
+    assert!(first.get("previous_response_id").is_none());
+    assert_eq!(body["store"], serde_json::Value::Bool(true));
+    assert_eq!(
+        body["previous_response_id"],
+        serde_json::Value::String("resp1".to_string())
+    );
     let input = body["input"]
         .as_array()
         .expect("request should include input items");
     assert!(!input.is_empty(), "request should include input items");
+    assert!(
+        input.len()
+            < first["input"]
+                .as_array()
+                .expect("first request input")
+                .len(),
+        "continuation should send only tool-round additions, not replay the initial prompt"
+    );
     for item in input {
         assert!(
             item.get("internal_chat_message_metadata_passthrough")
@@ -447,6 +469,91 @@ async fn non_openai_responses_requests_include_item_ids_without_passthrough_meta
             "input item should include a generated ID: {item}"
         );
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_continuation_rejection_retries_full_history_and_disables_storage() {
+    let server = MockServer::start().await;
+    let response_mock = mount_response_sequence(
+        &server,
+        vec![
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse(vec![
+                    ev_response_created("resp1"),
+                    ev_function_call("call-1", "unsupported_tool", "{}"),
+                    ev_completed("resp1"),
+                ])),
+            ResponseTemplate::new(400).set_body_json(json!({
+                "error": {
+                    "message": "previous_response_id is unsupported",
+                    "type": "invalid_request_error",
+                }
+            })),
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse(vec![
+                    ev_response_created("resp2"),
+                    ev_completed("resp2"),
+                ])),
+        ],
+    )
+    .await;
+    let mut provider =
+        built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
+    provider.name = "Continuation test provider".to_string();
+    provider.base_url = Some(format!("{}/v1", server.uri()));
+    provider.supports_websockets = false;
+    provider.supports_responses_continuation = true;
+    let codex = test_codex()
+        .with_config(move |config| {
+            config.model_provider_id = provider.name.clone();
+            config.model_provider = provider;
+        })
+        .build(&server)
+        .await
+        .unwrap()
+        .codex;
+
+    codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "hello".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await
+        .unwrap();
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 3);
+    let first = requests[0].body_json();
+    let rejected_continuation = requests[1].body_json();
+    let stateless_retry = requests[2].body_json();
+    assert_eq!(first["store"], serde_json::Value::Bool(true));
+    assert!(first.get("previous_response_id").is_none());
+    assert_eq!(
+        rejected_continuation["previous_response_id"],
+        serde_json::Value::String("resp1".to_string())
+    );
+    assert!(
+        rejected_continuation["input"]
+            .as_array()
+            .expect("continuation input")
+            .len()
+            < first["input"].as_array().expect("first input").len()
+    );
+    assert!(stateless_retry.get("previous_response_id").is_none());
+    assert_eq!(stateless_retry["store"], serde_json::Value::Bool(false));
+    assert!(
+        stateless_retry["input"]
+            .as_array()
+            .expect("retry input")
+            .len()
+            > rejected_continuation["input"]
+                .as_array()
+                .expect("continuation input")
+                .len()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1621,6 +1728,7 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
         websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
+        supports_responses_continuation: false,
         supports_standalone_web_search: false,
     };
 
@@ -1863,6 +1971,7 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
     let model_provider = ModelProviderInfo {
         base_url: Some(format!("{}/v1", server.uri())),
         supports_websockets: false,
+        supports_responses_continuation: false,
         ..built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone()
     };
 
@@ -3092,7 +3201,7 @@ async fn includes_managed_developer_instructions_once_per_request() -> anyhow::R
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids() {
+async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
@@ -3123,6 +3232,7 @@ async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids(
         websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
+        supports_responses_continuation: false,
         supports_standalone_web_search: false,
     };
 
@@ -3759,6 +3869,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
         websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
+        supports_responses_continuation: false,
         supports_standalone_web_search: false,
     };
 
@@ -3845,6 +3956,7 @@ async fn env_var_overrides_loaded_auth() {
         websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
+        supports_responses_continuation: false,
         supports_standalone_web_search: false,
     };
 
