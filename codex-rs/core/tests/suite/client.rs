@@ -291,7 +291,7 @@ fn assert_codex_client_metadata(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn openai_stateless_responses_requests_preserve_item_turn_metadata_across_turns() {
+async fn responses_requests_preserve_item_turn_metadata_across_turns() {
     let server = MockServer::start().await;
     let assistant_create_time = 1_785_276_138.422709;
     let mut assistant_message = ev_assistant_message("msg-1", "first answer");
@@ -319,6 +319,12 @@ async fn openai_stateless_responses_requests_preserve_item_turn_metadata_across_
     assert_eq!(requests.len(), 2);
     let first = requests[0].body_json();
     let second = requests[1].body_json();
+    assert_eq!(first["store"], serde_json::Value::Bool(true));
+    assert_eq!(second["store"], serde_json::Value::Bool(true));
+    assert!(first.get("previous_response_id").is_none());
+    // A fresh turn is intentionally stateless even though its responses are retained. A response
+    // id is only valid for the strict append sequence within a single active turn.
+    assert!(second.get("previous_response_id").is_none());
     let first_turn_id = first["client_metadata"]["turn_id"]
         .as_str()
         .expect("first request should include turn id");
@@ -423,15 +429,29 @@ async fn non_openai_responses_requests_include_item_ids_without_passthrough_meta
         .unwrap();
     wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
-    let body = response_mock
-        .requests()
-        .pop()
-        .expect("follow-up request")
-        .body_json();
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 2);
+    let first = requests[0].body_json();
+    let body = requests[1].body_json();
+    assert_eq!(first["store"], serde_json::Value::Bool(true));
+    assert!(first.get("previous_response_id").is_none());
+    assert_eq!(body["store"], serde_json::Value::Bool(true));
+    assert_eq!(
+        body["previous_response_id"],
+        serde_json::Value::String("resp1".to_string())
+    );
     let input = body["input"]
         .as_array()
         .expect("request should include input items");
     assert!(!input.is_empty(), "request should include input items");
+    assert!(
+        input.len()
+            < first["input"]
+                .as_array()
+                .expect("first request input")
+                .len(),
+        "continuation should send only tool-round additions, not replay the initial prompt"
+    );
     for item in input {
         assert!(
             item.get("internal_chat_message_metadata_passthrough")
@@ -1593,7 +1613,7 @@ async fn amazon_bedrock_proxy_uses_command_auth_and_custom_headers() {
         request.header("x-amzn-mantle-client-agent"),
         Some("codex".to_string())
     );
-    assert_eq!(request.body_json()["store"], false);
+    assert_eq!(request.body_json()["store"], true);
 }
 
 /// Issues one streamed Responses request through a provider configured with command-backed auth.
@@ -3092,7 +3112,7 @@ async fn includes_managed_developer_instructions_once_per_request() -> anyhow::R
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids() {
+async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
@@ -3293,7 +3313,7 @@ async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids(
     assert_eq!(request.path(), "/openai/responses");
     let body = request.body_json();
 
-    assert_eq!(body["store"], serde_json::Value::Bool(false));
+    assert_eq!(body["store"], serde_json::Value::Bool(true));
     assert_eq!(body["stream"], serde_json::Value::Bool(true));
     assert_eq!(body["input"].as_array().map(Vec::len), Some(10));
     assert_eq!(body["input"][0]["id"].as_str(), Some("rs_reasoning-id"));

@@ -937,6 +937,7 @@ mod tests {
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }],
+            previous_response_id: None,
             tools: Some(
                 Arc::<RawValue>::from(
                     to_raw_value(&vec![json!({
