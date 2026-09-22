@@ -1940,7 +1940,7 @@ dependencies = [
 
 [[package]]
 name = "codex-agent-message-board-extension"
-version = "0.0.0"
+version = "0.155.1"
 dependencies = [
  "base64 0.22.1",
  "caseless",
