@@ -9,6 +9,7 @@ use codex_utils_fuzzy_match::fuzzy_match;
 
 use crate::slash_command::SlashCommand;
 use crate::slash_command::built_in_slash_commands;
+use codex_protocol::openai_models::SPEED_TIER_FAST;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ServiceTierCommand {
@@ -137,7 +138,7 @@ pub(crate) fn find_slash_command(
     }
 
     let tiers_enabled = flags.service_tier_commands_enabled;
-    tiers_enabled
+    let command = tiers_enabled
         .then(|| {
             service_tier_commands
                 .iter()
@@ -145,7 +146,19 @@ pub(crate) fn find_slash_command(
                 .cloned()
                 .map(SlashCommandItem::ServiceTier)
         })
-        .flatten()
+        .flatten();
+    // Keep unsupported tiers out of the completion menu, but recognize a
+    // typed `/fast` so dispatch can explain that the selected provider does
+    // not implement it rather than presenting it as an unknown command.
+    command.or_else(|| {
+        name.eq_ignore_ascii_case(SPEED_TIER_FAST).then(|| {
+            SlashCommandItem::ServiceTier(ServiceTierCommand {
+                id: SPEED_TIER_FAST.to_string(),
+                name: SPEED_TIER_FAST.to_string(),
+                description: "Fast service tier".to_string(),
+            })
+        })
+    })
 }
 
 pub(crate) fn has_slash_command_prefix(
@@ -239,7 +252,33 @@ mod tests {
             description: "fastest inference".to_string(),
         }];
 
-        assert_eq!(find_slash_command("fast", flags, &commands), None);
+        assert_eq!(
+            find_slash_command("fast", flags, &commands),
+            Some(SlashCommandItem::ServiceTier(ServiceTierCommand {
+                id: SPEED_TIER_FAST.to_string(),
+                name: SPEED_TIER_FAST.to_string(),
+                description: "Fast service tier".to_string(),
+            }))
+        );
+    }
+
+    #[test]
+    fn typed_fast_resolves_for_a_capability_error_when_the_model_does_not_offer_it() {
+        let command = find_slash_command("fast", all_enabled_flags(), &[]);
+
+        assert_eq!(
+            command,
+            Some(SlashCommandItem::ServiceTier(ServiceTierCommand {
+                id: SPEED_TIER_FAST.to_string(),
+                name: SPEED_TIER_FAST.to_string(),
+                description: "Fast service tier".to_string(),
+            }))
+        );
+        assert!(
+            commands_for_input(all_enabled_flags(), &[])
+                .into_iter()
+                .all(|command| command.command() != SPEED_TIER_FAST)
+        );
     }
 
     #[test]

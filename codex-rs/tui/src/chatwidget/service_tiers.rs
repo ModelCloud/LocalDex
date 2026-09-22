@@ -124,7 +124,7 @@ impl ChatWidget {
             .send(AppEvent::PersistServiceTierSelection { service_tier });
     }
 
-    fn model_supports_service_tier(&self, model: &str, service_tier: &str) -> bool {
+    pub(super) fn model_supports_service_tier(&self, model: &str, service_tier: &str) -> bool {
         self.model_catalog
             .try_list_models()
             .ok()

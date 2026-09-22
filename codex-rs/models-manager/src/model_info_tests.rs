@@ -283,6 +283,25 @@ fn localdex_dsv41_flash_uses_native_metadata() {
 }
 
 #[test]
+fn localdex_catalog_makes_the_local_model_selectable_without_replacing_codex_models() {
+    let catalog = localdex_model_catalog();
+    let model = catalog
+        .models
+        .iter()
+        .find(|model| model.slug == LOCALDEX_DSV41_FLASH)
+        .expect("LocalDex model is included in the picker catalog");
+
+    assert_eq!(model.visibility, ModelVisibility::List);
+    assert!(model.service_tiers.is_empty());
+    assert!(
+        catalog
+            .models
+            .iter()
+            .any(|model| model.slug != LOCALDEX_DSV41_FLASH)
+    );
+}
+
+#[test]
 fn localdex_runtime_capability_uses_only_matching_positive_context_window() {
     assert_eq!(
         super::localdex_runtime_context_window(
