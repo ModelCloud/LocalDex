@@ -2128,6 +2128,11 @@ fn thread_resume_params_from_config(
     if model_settings == ResumeModelSettings::PreserveExistingThread {
         return ThreadResumeParams {
             thread_id: thread_id.to_string(),
+            // Rejoining a live app-server thread normally preserves its
+            // settings. An explicit `default` tier records that the user
+            // turned `/fast` off, however, and must not silently regress to
+            // the server's previous fast tier after a client restart.
+            service_tier: service_tier_override_from_config(&config),
             ..ThreadResumeParams::default()
         };
     }
@@ -3476,7 +3481,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn thread_resume_params_can_rejoin_without_overriding_existing_settings() {
+    async fn thread_resume_params_rejoin_preserves_an_explicit_normal_service_tier() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let mut config = build_config(&temp_dir).await;
+        config.service_tier = Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string());
+        let thread_id = ThreadId::new();
+
+        let params = thread_resume_params_from_config(
+            config,
+            thread_id,
+            ThreadParamsMode::Embedded,
+            /*remote_cwd_override*/ None,
+            ResumeModelSettings::PreserveExistingThread,
+        );
+
+        assert_eq!(params.thread_id, thread_id.to_string());
+        assert_eq!(
+            params.service_tier,
+            Some(Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn thread_resume_params_rejoin_leaves_service_tier_unset_when_not_selected() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let config = build_config(&temp_dir).await;
         let thread_id = ThreadId::new();
@@ -3489,13 +3516,7 @@ mod tests {
             ResumeModelSettings::PreserveExistingThread,
         );
 
-        assert_eq!(
-            params,
-            ThreadResumeParams {
-                thread_id: thread_id.to_string(),
-                ..ThreadResumeParams::default()
-            }
-        );
+        assert_eq!(params.service_tier, None);
     }
 
     #[tokio::test]

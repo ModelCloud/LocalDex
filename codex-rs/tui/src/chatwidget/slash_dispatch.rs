@@ -16,6 +16,7 @@ use crate::bottom_pane::slash_commands::SlashCommandItem;
 use crate::bottom_pane::slash_commands::find_slash_command;
 use crate::goal_display::GOAL_USAGE;
 use crate::goal_files::GoalDraft;
+use codex_protocol::openai_models::SPEED_TIER_FAST;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SlashCommandDispatchSource {
@@ -60,6 +61,24 @@ impl ChatWidget {
             self.add_error_message(format!(
                 "'/{}' is unavailable in side conversations. {SIDE_SLASH_COMMAND_UNAVAILABLE_HINT}",
                 command.name
+            ));
+            self.bottom_pane.drain_pending_submission_state();
+            self.bottom_pane.record_pending_slash_command_history();
+            return;
+        }
+        if !self.fast_mode_enabled() && command.id == SPEED_TIER_FAST {
+            self.add_error_message(
+                "'/fast' is unavailable because Fast Mode is disabled.".to_string(),
+            );
+            self.bottom_pane.drain_pending_submission_state();
+            self.bottom_pane.record_pending_slash_command_history();
+            return;
+        }
+        if !self.model_supports_service_tier(self.current_model(), &command.id) {
+            self.add_error_message(format!(
+                "'/{}' is unavailable for {}: this model provider does not support that service tier.",
+                command.name,
+                self.current_model()
             ));
             self.bottom_pane.drain_pending_submission_state();
             self.bottom_pane.record_pending_slash_command_history();

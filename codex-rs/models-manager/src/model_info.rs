@@ -6,6 +6,7 @@ use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::openai_models::ModelVisibility;
+use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
 use codex_protocol::openai_models::ToolMode;
@@ -199,6 +200,23 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
     }
 }
 
+/// Return the upstream catalog plus the bundled LocalDex model.
+///
+/// A LocalDex provider must expose both its configured local model and the
+/// ordinary Codex catalog from one `/model` picker. `model_catalog_json` is an
+/// authoritative replacement, so callers use this only when the user has not
+/// configured one explicitly.
+pub fn localdex_model_catalog() -> ModelsResponse {
+    let mut catalog = crate::bundled_models_response().unwrap_or_default();
+    catalog
+        .models
+        .retain(|model| model.slug != LOCALDEX_DSV41_FLASH);
+    catalog.models.push(apply_localdex_runtime_capabilities(
+        localdex_dsv41_flash_model_info(),
+    ));
+    catalog
+}
+
 /// Metadata for the LocalDex provider's bundled DeepSeek endpoint.
 ///
 /// This is intentionally part of LocalDex rather than a `model_catalog_json`
@@ -234,7 +252,10 @@ fn localdex_dsv41_flash_model_info() -> ModelInfo {
             },
         ],
         shell_type: ConfigShellToolType::UnifiedExec,
-        visibility: ModelVisibility::None,
+        // This is a configured local provider model, not a hidden fallback.
+        // Keep its low priority so it never becomes the global default, while
+        // making it selectable alongside official models in `/model`.
+        visibility: ModelVisibility::List,
         supported_in_api: true,
         priority: 99,
         additional_speed_tiers: Vec::new(),

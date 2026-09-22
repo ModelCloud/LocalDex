@@ -426,10 +426,14 @@ pub fn build_models_manager(
     auth_manager: Arc<AuthManager>,
 ) -> SharedModelsManager {
     let provider = create_model_provider(config.model_provider.clone(), Some(auth_manager));
-    let manager = provider.models_manager(
-        config.codex_home.to_path_buf(),
-        config.model_catalog.clone(),
-    );
+    // The LocalDex endpoint only describes the local model. Supply the merged
+    // catalog so one picker can also select the bundled upstream Codex models;
+    // an explicit user catalog remains authoritative.
+    let model_catalog = config.model_catalog.clone().or_else(|| {
+        (config.model_provider_id == "localdex")
+            .then(codex_models_manager::model_info::localdex_model_catalog)
+    });
+    let manager = provider.models_manager(config.codex_home.to_path_buf(), model_catalog);
     manager.set_api_key_model_discovery_enabled(
         config.features.enabled(Feature::ApiKeyModelDiscovery),
     );
