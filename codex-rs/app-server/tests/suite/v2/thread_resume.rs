@@ -206,6 +206,7 @@ async fn thread_resume_paginated_model_context_preserves_original_metadata() -> 
             window_id: None,
             compaction_response_id: None,
             latest_token_usage_record: None,
+            resume_metadata: None,
         }),
     )
     .await?;
@@ -4433,6 +4434,8 @@ async fn thread_resume_prefers_persisted_git_metadata_for_local_threads() -> Res
     let rollout_dir = rollout_path.parent().expect("rollout parent directory");
     std::fs::create_dir_all(rollout_dir)?;
     let session_meta = SessionMeta {
+        creator_user_id: None,
+        creator_account_id: None,
         session_id: conversation_id.into(),
         id: conversation_id,
         forked_from_id: None,

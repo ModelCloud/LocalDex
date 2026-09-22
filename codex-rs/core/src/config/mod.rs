@@ -688,6 +688,10 @@ pub struct Config {
     /// guardian developer prompt.
     pub guardian_policy_config: Option<String>,
 
+    /// Additional Guardian policy from requirements.toml or config.toml.
+    /// Rendered into `{{ extra_policy }}` alongside the resolved tenant policy.
+    pub guardian_extra_policy: Option<String>,
+
     /// Guardian prompt template override from config.toml.
     /// The resolved policy config replaces its `{{ tenant_policy_config }}`
     /// placeholder when a review session is built.
@@ -708,8 +712,8 @@ pub struct Config {
     /// Optional token budget override for the available-skills catalog.
     pub skill_max_context_tokens: Option<NonZeroUsize>,
 
-    /// Whether orchestrator-owned skills are exposed to the model.
-    pub orchestrator_skills_enabled: bool,
+    /// Whether cloud skills are discovered and exposed to the model.
+    pub cloud_skill_enabled: bool,
 
     /// Whether orchestrator-owned MCP tools are exposed to the model.
     pub orchestrator_mcp_enabled: bool,
@@ -1676,6 +1680,7 @@ impl Config {
             self.features.enabled(Feature::RemotePlugin),
             self.chatgpt_base_url.clone(),
             self.http_client_factory(),
+            self.apps_mcp_product_sku.clone(),
         )
     }
 
@@ -2672,9 +2677,7 @@ fn resolve_update_plan_enabled(config_toml: &ConfigToml) -> bool {
         .is_some_and(|config| config.enabled)
 }
 
-fn resolve_orchestrator_feature_enabled(
-    feature: Option<&codex_config::config_toml::OrchestratorFeatureToml>,
-) -> bool {
+fn resolve_feature_enabled(feature: Option<&codex_config::config_toml::FeatureToggleToml>) -> bool {
     feature.and_then(|feature| feature.enabled).unwrap_or(true)
 }
 
@@ -3208,10 +3211,14 @@ impl Config {
                 .as_ref(),
         )?;
         let orchestrator = cfg.orchestrator.as_ref();
-        let orchestrator_skills_enabled =
-            resolve_orchestrator_feature_enabled(orchestrator.and_then(|value| value.skills.as_ref()));
+        let cloud_skill_enabled = cfg
+            .cloud
+            .as_ref()
+            .and_then(|cloud| cloud.skills.as_ref())
+            .and_then(|skills| skills.enabled)
+            .unwrap_or(true);
         let orchestrator_mcp_enabled =
-            resolve_orchestrator_feature_enabled(orchestrator.and_then(|value| value.mcp.as_ref()));
+            resolve_feature_enabled(orchestrator.and_then(|value| value.mcp.as_ref()));
         let mut startup_warnings = config_layer_stack
             .startup_warnings()
             .unwrap_or_default()
@@ -3259,6 +3266,7 @@ impl Config {
             filesystem: filesystem_requirements,
             additional_developer_instructions: _,
             guardian_policy_config_source: _,
+            guardian_extra_policy_source: _,
         } = config_layer_stack.requirements().clone();
 
         // Destructure ConfigOverrides fully to ensure all overrides are applied.
@@ -3954,6 +3962,17 @@ impl Config {
                             auto_review.policy.as_deref(),
                         ))
                 });
+        let guardian_extra_policy = normalize_guardian_policy_config(
+            config_layer_stack
+                .requirements_toml()
+                .guardian_extra_policy
+                .as_deref(),
+        )
+        .or_else(|| {
+            cfg.auto_review.as_ref().and_then(|auto_review| {
+                normalize_guardian_policy_config(auto_review.extra_policy.as_deref())
+            })
+        });
         let guardian_policy_template = cfg
             .auto_review
             .as_ref()
@@ -4224,7 +4243,7 @@ impl Config {
             include_collaboration_mode_instructions,
             include_skill_instructions,
             skill_max_context_tokens,
-            orchestrator_skills_enabled,
+            cloud_skill_enabled,
             orchestrator_mcp_enabled,
             include_environment_context,
             // The config.toml omits "_mode" because it's a config file. However, "_mode"
@@ -4308,6 +4327,7 @@ impl Config {
                 .or(show_raw_agent_reasoning)
                 .unwrap_or(false),
             guardian_policy_config,
+            guardian_extra_policy,
             guardian_policy_template,
             model_reasoning_effort: cfg.model_reasoning_effort,
             plan_mode_reasoning_effort: cfg.plan_mode_reasoning_effort,
@@ -4416,7 +4436,7 @@ impl Config {
             tui_fullscreen_transcript: cfg
                 .tui
                 .as_ref()
-                .is_some_and(|tui| tui.fullscreen_transcript),
+                .is_none_or(|tui| tui.fullscreen_transcript),
             tui_alternate_screen: cfg
                 .tui
                 .as_ref()
