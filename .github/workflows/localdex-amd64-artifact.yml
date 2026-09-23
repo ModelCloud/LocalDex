@@ -2,6 +2,9 @@ name: LocalDex Linux installable artifacts
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - "localdex-artifacts-*"
 
 permissions:
   contents: read
