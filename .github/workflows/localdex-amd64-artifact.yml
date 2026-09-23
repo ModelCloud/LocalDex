@@ -10,9 +10,12 @@ on:
       - ".github/workflows/localdex-amd64-artifact.yml"
       - "scripts/build_localdex_linux_amd64.sh"
       - "scripts/build_localdex_linux_aarch64.sh"
+      - ".github/actions/setup-rusty-v8/action.yml"
       - "scripts/build_codex_package.py"
       - "scripts/codex_package/**"
       - "scripts/install/install-localdex.sh"
+      - "codex-rs/Cargo.lock"
+      - "third_party/v8/**"
 
 permissions:
   contents: read
@@ -37,6 +40,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+      - name: Configure V8 sandbox artifacts
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ matrix.target }}
       - name: Install native build tools
         run: |
           sudo apt-get update -y
