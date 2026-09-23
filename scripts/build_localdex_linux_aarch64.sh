@@ -7,6 +7,7 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 target="aarch64-unknown-linux-gnu"
 target_dir="${CARGO_TARGET_DIR:-${repo_root}/codex-rs/target-localdex-release-aarch64}"
 dist_dir="${LOCALDEX_DIST_DIR:-${repo_root}/dist/localdex-${target}}"
+cargo_bin="${LOCALDEX_CARGO:-cargo}"
 package_version="${LOCALDEX_PACKAGE_VERSION:-$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["workspace"]["package"]["version"])' "${repo_root}/codex-rs/Cargo.toml")}"
 
 export CARGO_TARGET_DIR="${target_dir}"
@@ -20,13 +21,16 @@ if command -v sccache >/dev/null 2>&1; then
     sccache --start-server >/dev/null 2>&1 || true
 fi
 
-if command -v clang >/dev/null 2>&1 && command -v mold >/dev/null 2>&1; then
+if [ "$(uname -m)" = "aarch64" ] \
+    && command -v clang >/dev/null 2>&1 \
+    && command -v mold >/dev/null 2>&1; then
     export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="clang"
     export RUSTFLAGS="${RUSTFLAGS:+${RUSTFLAGS} }-C link-arg=-fuse-ld=mold"
 fi
 
 mkdir -p "${dist_dir}"
 CODEX_REPO_ROOT="${repo_root}" python3 "${repo_root}/scripts/build_codex_package.py" \
+    --cargo "${cargo_bin}" \
     --target "${target}" \
     --variant localdex \
     --cargo-profile localdex-release \
