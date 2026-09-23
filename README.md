@@ -1,4 +1,4 @@
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
+<p align="center"><strong>LocalDex</strong> is a Codex-compatible coding agent that runs locally on your computer.
 <p align="center">
   <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
 </p>
@@ -11,43 +11,100 @@ If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="http
 
 ## Quickstart
 
-### Installing and running Codex CLI
+### Installing and running LocalDex
 
-Run the following on Mac or Linux to install Codex CLI:
-
-```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
-```
-
-Run the following on Windows to install Codex CLI:
+The supported release currently targets Linux x86_64. The installer downloads
+only the LocalDex release, installs the `codex` command and its Code Mode
+companion, and leaves the existing `CODEX_HOME` auth, configuration, and
+session files in place:
 
 ```shell
-powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
+curl -fsSL https://github.com/ModelCloud/LocalDex/releases/latest/download/install-localdex.sh | sh
 ```
 
-The standalone installers download from `https://releases.openai.com/codex` by default and fall back to GitHub Releases if a metadata or asset download is unavailable. To force GitHub Releases, set `CODEX_INSTALLER_USE_RELEASES_OPENAI_COM` to `false` (`0` and `no` are also accepted):
+To pin a release, pass `--release VERSION` to the downloaded installer. Each
+upgrade keeps prior versioned binaries under `CODEX_HOME/packages/standalone/`
+so rollback can switch the `current` symlink back to the previous release.
+Local model endpoints are not contacted during installation or upgrade.
+
+To roll back, inspect the retained release directories and repoint `current`:
 
 ```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALLER_USE_RELEASES_OPENAI_COM=false sh
+CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
+ls "$CODEX_HOME_DIR/packages/standalone/releases"
+ln -sfn "$CODEX_HOME_DIR/packages/standalone/releases/<previous-release>" \
+  "$CODEX_HOME_DIR/packages/standalone/current"
 ```
 
-```powershell
-$env:CODEX_INSTALLER_USE_RELEASES_OPENAI_COM='false'; irm https://chatgpt.com/codex/install.ps1 | iex
+### Configure named OpenAI-compatible providers
+
+LocalDex keeps the built-in `openai` provider and its normal ChatGPT/API-key
+authentication. Add custom providers by name in `CODEX_HOME/config.toml`; each
+provider has its own endpoint and bearer-token environment variable:
+
+```toml
+model = "gpt-6-sol"
+model_provider = "openai"
+
+[model_providers.dsv41]
+name = "DSV4.1 endpoint"
+base_url = "http://10.0.13.33:2120/v1"
+env_key = "DSV41_BEARER_TOKEN"
+wire_api = "responses"
+requires_openai_auth = false
+
+[profiles.dsv41]
+model = "QB/DSV4.1-Flash"
+model_provider = "dsv41"
 ```
 
-Codex CLI can also be installed via the following package managers:
+Set `DSV41_BEARER_TOKEN` in the environment before launching LocalDex, then
+select the `dsv41` profile with `codex --profile dsv41`. The bearer value stays
+out of TOML, command-line arguments, and LocalDex logs. Repeat the provider and
+profile sections with distinct names for additional endpoints. Do not set a
+global `openai_base_url` when you need official OpenAI models and custom models
+to share the same session.
 
-```shell
-# Install using npm
-npm install -g @openai/codex
+For Omnigent, put provider definitions in
+`~/.local/share/localdex/config.toml` and model-to-provider mappings in
+`~/.local/share/localdex/models.toml`. This keeps the registrations out of
+Omnigent's global provider catalog while letting one LocalDex harness offer
+official and custom models together:
+
+```toml
+# ~/.local/share/localdex/config.toml
+[model_providers.dsv41]
+name = "DSV4.1 endpoint"
+base_url = "http://10.0.13.33:2120/v1"
+env_key = "DSV41_BEARER_TOKEN"
+wire_api = "responses"
+requires_openai_auth = false
+
+[model_providers.lab]
+name = "Lab endpoint"
+base_url = "https://models.example/v1"
+env_key = "LAB_BEARER_TOKEN"
+wire_api = "responses"
+requires_openai_auth = false
 ```
 
-```shell
-# Install using Homebrew
-brew install --cask codex
+```toml
+# ~/.local/share/localdex/models.toml
+[models."QB/DSV4.1-Flash"]
+provider = "dsv41"
+display_name = "DSV4.1 Flash"
+discover_capabilities = true
+
+[models."lab/coder-32b"]
+provider = "lab"
+display_name = "Lab Coder 32B"
 ```
 
-Then simply run `codex` to get started.
+Export the named bearer variables in the Omnigent host service environment.
+Only models with their configured bearer variable present are offered as
+routable; selecting one routes to its named provider. Official Codex models
+continue to use the normal ChatGPT login and OpenAI endpoints. Installation and
+upgrade never contact or validate a model endpoint.
 
 <details>
 <summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>

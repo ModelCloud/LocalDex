@@ -33,8 +33,16 @@ use super::network;
 const MAX_VERSION_RESPONSE_BYTES: usize = 1024 * 1024;
 
 const VERSION_FILE_NAME: &str = "version.json";
-const GITHUB_LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
-const HOMEBREW_CASK_API_URL: &str = "https://formulae.brew.sh/api/cask/codex.json";
+const GITHUB_LOCALDEX_RELEASES_URL: &str =
+    "https://api.github.com/repos/ModelCloud/LocalDex/releases?per_page=100";
+
+#[derive(Deserialize)]
+struct LocalDexReleaseInfo {
+    tag_name: String,
+    draft: bool,
+    prerelease: bool,
+}
+
 #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
 const DESKTOP_UPDATE_URL: &str = "https://persistent.oaistatic.com/codex-app-prod/appcast-x64.xml";
 #[cfg(all(target_os = "macos", not(target_arch = "x86_64")))]
@@ -389,12 +397,12 @@ fn push_cached_version_details(details: &mut Vec<String>, version_file: &Path) {
 
 fn update_action_label(context: &InstallContext) -> &'static str {
     match &context.method {
-        InstallMethod::Npm => "npm install -g @openai/codex",
-        InstallMethod::Bun => "bun install -g @openai/codex",
-        InstallMethod::VitePlus => "vp install -g @openai/codex",
-        InstallMethod::Pnpm => "pnpm add -g @openai/codex",
-        InstallMethod::Brew => "brew upgrade --cask codex",
-        InstallMethod::Standalone { .. } => "standalone installer",
+        InstallMethod::Npm
+        | InstallMethod::Bun
+        | InstallMethod::VitePlus
+        | InstallMethod::Pnpm
+        | InstallMethod::Brew
+        | InstallMethod::Standalone { .. } => "ModelCloud LocalDex release installer",
         InstallMethod::Other => "manual or unknown",
     }
 }
@@ -404,9 +412,9 @@ async fn fetch_latest_version(
     context: &InstallContext,
 ) -> Result<String, String> {
     match &context.method {
-        InstallMethod::Brew => fetch_homebrew_cask_version(client).await,
         InstallMethod::Npm
         | InstallMethod::Bun
+        | InstallMethod::Brew
         | InstallMethod::VitePlus
         | InstallMethod::Pnpm
         | InstallMethod::Standalone { .. }
@@ -417,27 +425,24 @@ async fn fetch_latest_version(
 async fn fetch_latest_github_release_version(
     client: &RouteAwareClientPool,
 ) -> Result<String, String> {
-    #[derive(Deserialize)]
-    struct ReleaseInfo {
-        tag_name: String,
-    }
-
-    let info = http_get_json::<ReleaseInfo>(client, GITHUB_LATEST_RELEASE_URL).await?;
-    info.tag_name
-        .strip_prefix("rust-v")
-        .map(str::to_string)
-        .ok_or_else(|| format!("failed to parse latest tag {}", info.tag_name))
+    let releases =
+        http_get_json::<Vec<LocalDexReleaseInfo>>(client, GITHUB_LOCALDEX_RELEASES_URL).await?;
+    latest_stable_localdex_release_version(releases)
 }
 
-async fn fetch_homebrew_cask_version(client: &RouteAwareClientPool) -> Result<String, String> {
-    #[derive(Deserialize)]
-    struct HomebrewCaskInfo {
-        version: String,
-    }
-
-    http_get_json::<HomebrewCaskInfo>(client, HOMEBREW_CASK_API_URL)
-        .await
-        .map(|info| info.version)
+fn latest_stable_localdex_release_version(
+    releases: Vec<LocalDexReleaseInfo>,
+) -> Result<String, String> {
+    releases
+        .into_iter()
+        .filter(|release| !release.draft && !release.prerelease)
+        .find_map(|release| {
+            release
+                .tag_name
+                .strip_prefix("localdex-v")
+                .map(str::to_string)
+        })
+        .ok_or_else(|| "no stable LocalDex release was found".to_string())
 }
 
 async fn http_get_json<T>(client: &RouteAwareClientPool, url: &str) -> Result<T, String>
@@ -691,14 +696,14 @@ mod tests {
                 method: InstallMethod::Npm,
                 package_layout: None,
             }),
-            "npm install -g @openai/codex"
+            "ModelCloud LocalDex release installer"
         );
         assert_eq!(
             update_action_label(&InstallContext {
                 method: InstallMethod::Pnpm,
                 package_layout: None,
             }),
-            "pnpm add -g @openai/codex"
+            "ModelCloud LocalDex release installer"
         );
         assert_eq!(
             update_action_label(&InstallContext {
@@ -706,6 +711,35 @@ mod tests {
                 package_layout: None,
             }),
             "manual or unknown"
+        );
+    }
+
+    #[test]
+    fn latest_release_probe_ignores_drafts_prereleases_and_upstream_tags() {
+        assert_eq!(
+            latest_stable_localdex_release_version(vec![
+                LocalDexReleaseInfo {
+                    tag_name: "localdex-v9.0.0-beta.1".to_string(),
+                    draft: false,
+                    prerelease: true,
+                },
+                LocalDexReleaseInfo {
+                    tag_name: "rust-v99.0.0".to_string(),
+                    draft: false,
+                    prerelease: false,
+                },
+                LocalDexReleaseInfo {
+                    tag_name: "localdex-v2.3.4".to_string(),
+                    draft: false,
+                    prerelease: false,
+                },
+                LocalDexReleaseInfo {
+                    tag_name: "localdex-v3.0.0".to_string(),
+                    draft: true,
+                    prerelease: false,
+                },
+            ]),
+            Ok("2.3.4".to_string())
         );
     }
 }

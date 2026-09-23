@@ -10,19 +10,19 @@ use codex_install_context::StandalonePlatform;
 pub enum UpdateAction {
     /// Replace the local daemon after restoring the terminal.
     Daemon(DaemonUpdateSource),
-    /// Update via `npm install -g @openai/codex@latest`.
+    /// Update the LocalDex distribution, regardless of the legacy package manager.
     NpmGlobalLatest,
-    /// Update via `bun install -g @openai/codex@latest`.
+    /// Update the LocalDex distribution, regardless of the legacy package manager.
     BunGlobalLatest,
-    /// Update via `vp install -g @openai/codex@latest`.
+    /// Update the LocalDex distribution, regardless of the legacy package manager.
     VitePlusGlobalLatest,
-    /// Update via `pnpm add -g @openai/codex@latest`.
+    /// Update the LocalDex distribution, regardless of the legacy package manager.
     PnpmGlobalLatest,
-    /// Update via `brew upgrade codex`.
+    /// Update the LocalDex distribution, regardless of the legacy package manager.
     BrewUpgrade,
-    /// Update via `curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh`.
+    /// Update via the ModelCloud LocalDex release installer.
     StandaloneUnix,
-    /// Update via `$env:CODEX_NON_INTERACTIVE=1; irm https://chatgpt.com/codex/install.ps1 | iex`.
+    /// LocalDex does not publish a Windows installer yet.
     StandaloneWindows,
 }
 
@@ -47,25 +47,24 @@ impl UpdateAction {
     pub fn command_args(self) -> (&'static str, &'static [&'static str]) {
         match self {
             UpdateAction::Daemon(source) => ("codex", source.command_args()),
-            UpdateAction::NpmGlobalLatest => ("npm", &["install", "-g", "@openai/codex"]),
-            UpdateAction::BunGlobalLatest => ("bun", &["install", "-g", "@openai/codex"]),
-            UpdateAction::VitePlusGlobalLatest => ("vp", &["install", "-g", "@openai/codex"]),
-            UpdateAction::PnpmGlobalLatest => ("pnpm", &["add", "-g", "@openai/codex"]),
-            UpdateAction::BrewUpgrade => ("brew", &["upgrade", "--cask", "codex"]),
-            UpdateAction::StandaloneUnix => (
+            UpdateAction::NpmGlobalLatest
+            | UpdateAction::BunGlobalLatest
+            | UpdateAction::VitePlusGlobalLatest
+            | UpdateAction::PnpmGlobalLatest
+            | UpdateAction::BrewUpgrade
+            | UpdateAction::StandaloneUnix => (
                 "sh",
                 &[
                     "-c",
-                    "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh",
+                    "curl -fsSL https://raw.githubusercontent.com/ModelCloud/LocalDex/main/scripts/install/install-localdex.sh | sh",
                 ],
             ),
             UpdateAction::StandaloneWindows => (
                 "powershell",
                 &[
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-c",
-                    "$env:CODEX_NON_INTERACTIVE=1; irm https://chatgpt.com/codex/install.ps1 | iex",
+                    "-NoProfile",
+                    "-Command",
+                    "throw 'LocalDex releases currently support Linux x86_64 only.'",
                 ],
             ),
         }
@@ -156,14 +155,14 @@ mod tests {
     }
 
     #[test]
-    fn standalone_update_commands_rerun_latest_installer() {
+    fn update_commands_use_the_localdex_distribution() {
         assert_eq!(
             UpdateAction::StandaloneUnix.command_args(),
             (
                 "sh",
                 &[
                     "-c",
-                    "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh"
+                    "curl -fsSL https://raw.githubusercontent.com/ModelCloud/LocalDex/main/scripts/install/install-localdex.sh | sh"
                 ][..],
             )
         );
@@ -172,10 +171,9 @@ mod tests {
             (
                 "powershell",
                 &[
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-c",
-                    "$env:CODEX_NON_INTERACTIVE=1; irm https://chatgpt.com/codex/install.ps1 | iex"
+                    "-NoProfile",
+                    "-Command",
+                    "throw 'LocalDex releases currently support Linux x86_64 only.'"
                 ][..],
             )
         );
