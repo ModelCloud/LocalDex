@@ -4,20 +4,29 @@
 
 | Requirement                 | Details                                                         |
 | --------------------------- | --------------------------------------------------------------- |
-| Operating systems           | macOS 12+, Ubuntu 20.04+/Debian 10+, or Windows 11 **via WSL2** |
+| Operating systems           | Linux x86_64 (Ubuntu 20.04+/Debian 10+ or compatible) |
 | Git (optional, recommended) | 2.23+ for built-in PR helpers                                   |
 | RAM                         | 4-GB minimum (8-GB recommended)                                 |
 
-### DotSlash
+### Install the LocalDex release
 
-The GitHub Release also contains a [DotSlash](https://dotslash-cli.com/) file for the Codex CLI named `codex`. Using a DotSlash file makes it possible to make a lightweight commit to source control to ensure all contributors use the same version of an executable, regardless of what platform they use for development.
+```bash
+curl -fsSL https://github.com/ModelCloud/LocalDex/releases/latest/download/install-localdex.sh | sh
+```
+
+The installer adds the LocalDex binary as `codex`, installs
+`codex-code-mode-host`, and keeps existing Codex configuration, auth, and
+session history under `CODEX_HOME`. It does not contact configured inference
+endpoints. Releases are versioned; for rollback, point
+`$CODEX_HOME/packages/standalone/current` at a prior directory under
+`$CODEX_HOME/packages/standalone/releases/`.
 
 ### Build from source
 
 ```bash
 # Clone the repository and navigate to the root of the Cargo workspace.
-git clone https://github.com/openai/codex.git
-cd codex/codex-rs
+git clone https://github.com/ModelCloud/LocalDex.git
+cd LocalDex/codex-rs
 
 # Install the Rust toolchain, if necessary.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -31,8 +40,8 @@ cargo install --locked dotslash
 # Install nextest for the `just test` helper.
 cargo install --locked cargo-nextest
 
-# Build Codex.
-cargo build
+# Build LocalDex and its Code Mode companion.
+cargo build --bin codex --bin codex-code-mode-host
 
 # Launch the TUI with a sample prompt.
 cargo run --bin codex -- "explain this codebase to me"

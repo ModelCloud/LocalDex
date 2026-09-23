@@ -63,9 +63,10 @@ pub(crate) async fn request_manual_update(
 const INITIAL_UPDATE_DELAY: Duration = Duration::from_secs(5 * 60);
 const RESTART_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 #[cfg(unix)]
-const INSTALL_URL: &str = "https://chatgpt.com/codex/install.sh";
+const INSTALL_URL: &str = "https://raw.githubusercontent.com/ModelCloud/LocalDex/main/scripts/install/install-localdex.sh";
 #[cfg(windows)]
-const INSTALL_URL: &str = "https://chatgpt.com/codex/install.ps1";
+const INSTALL_URL: &str =
+    "https://raw.githubusercontent.com/ModelCloud/LocalDex/main/scripts/install/install.ps1";
 
 pub(crate) async fn run(
     http_client_factory: HttpClientFactory,

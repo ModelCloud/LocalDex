@@ -1,4 +1,4 @@
-name: LocalDex AMD64 artifact
+name: LocalDex AMD64 installable artifact
 
 on:
   workflow_dispatch:
@@ -8,75 +8,31 @@ permissions:
 
 jobs:
   build:
-    name: Build portable Linux AMD64 bundle
+    name: Build Linux x86_64 LocalDex package
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    defaults:
-      run:
-        working-directory: codex-rs
-    env:
-      TARGET: x86_64-unknown-linux-musl
-      CARGO_INCREMENTAL: "0"
-      AWS_LC_SYS_NO_JITTER_ENTROPY: "1"
-      AWS_LC_SYS_NO_JITTER_ENTROPY_x86_64_unknown_linux_musl: "1"
-
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
-        with:
-          targets: x86_64-unknown-linux-musl
-      - name: Install Linux build dependencies
-        shell: bash
+      - name: Install native build tools
         run: |
-          set -euo pipefail
           sudo apt-get update -y
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends binutils pkg-config libcap-dev
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: 0.14.0
-      - name: Install musl build tools
-        shell: bash
-        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-musl-build-tools.sh"
-      - name: Configure rusty_v8 artifacts
-        uses: ./.github/actions/setup-rusty-v8
-        with:
-          target: x86_64-unknown-linux-musl
-      - name: Build the sandbox helper and embed its digest
-        shell: bash
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends clang mold libssl-dev pkg-config
+      - name: Build LocalDex package
+        env:
+          LOCALDEX_DIST_DIR: dist/localdex
+        run: scripts/build_localdex_linux_amd64.sh
+      - name: Create package checksum
         run: |
           set -euo pipefail
-          cargo build --locked --target "$TARGET" --release --bin bwrap
-          bwrap_path="target/${TARGET}/release/bwrap"
-          strip --strip-debug --strip-unneeded "$bwrap_path"
-          echo "CODEX_BWRAP_SHA256=$(sha256sum "$bwrap_path" | awk '{print $1}')" >> "$GITHUB_ENV"
-      - name: Build LocalDex binaries
-        shell: bash
-        run: |
-          set -euo pipefail
-          export STABLE_GIT_COMMIT="$(git rev-parse HEAD)"
-          cargo build --locked --target "$TARGET" --release \
-            --bin codex \
-            --bin codex-app-server \
-            --bin codex-code-mode-host \
-            --bin codex-responses-api-proxy
-      - name: Package portable bundle
-        shell: bash
-        run: |
-          set -euo pipefail
-          output="localdex-${TARGET}-${GITHUB_SHA}"
-          mkdir -p "$output"
-          for binary in codex codex-app-server codex-code-mode-host codex-responses-api-proxy bwrap; do
-            cp "target/${TARGET}/release/${binary}" "$output/"
-          done
-          tar -C "$output" -czf "${output}.tar.gz" .
-          sha256sum "${output}.tar.gz" > "${output}.tar.gz.sha256"
+          archive="$(find dist/localdex -maxdepth 1 -name 'localdex-*-x86_64-unknown-linux-gnu.tar.gz' -print -quit)"
+          test -n "$archive"
+          cp "$archive" dist/localdex/localdex-package-x86_64-unknown-linux-gnu.tar.gz
+          sha256sum dist/localdex/localdex-package-x86_64-unknown-linux-gnu.tar.gz > dist/localdex/localdex-package-x86_64-unknown-linux-gnu.tar.gz.sha256
+          cp scripts/install/install-localdex.sh dist/localdex/install-localdex.sh
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: localdex-x86_64-linux-musl-${{ github.sha }}
-          path: |
-            codex-rs/localdex-x86_64-unknown-linux-musl-${{ github.sha }}.tar.gz
-            codex-rs/localdex-x86_64-unknown-linux-musl-${{ github.sha }}.tar.gz.sha256
+          name: localdex-linux-x86_64
+          path: dist/localdex/*
           if-no-files-found: error
           retention-days: 30
