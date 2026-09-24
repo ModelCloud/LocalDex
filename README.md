@@ -13,10 +13,10 @@ If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="http
 
 ### Installing and running LocalDex
 
-The supported release currently targets Linux x86_64. The installer downloads
-only the LocalDex release, installs the `codex` command and its Code Mode
-companion, and leaves the existing `CODEX_HOME` auth, configuration, and
-session files in place:
+Linux x86_64 and ARM64 (including NVIDIA GB10 Spark) releases are supported.
+The installer selects the package for the current CPU architecture, installs
+the `codex` command and its Code Mode companion, and leaves the existing
+`CODEX_HOME` auth, configuration, and session files in place:
 
 ```shell
 curl -fsSL https://github.com/ModelCloud/LocalDex/releases/latest/download/install-localdex.sh | sh

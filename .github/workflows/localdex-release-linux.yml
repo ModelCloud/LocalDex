@@ -14,12 +14,28 @@ concurrency:
 
 jobs:
   build:
-    name: Build and publish LocalDex Linux x86_64
-    runs-on: ubuntu-24.04
+    name: Build LocalDex Linux ${{ matrix.arch }} package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            build_script: scripts/build_localdex_linux_amd64.sh
+          - arch: aarch64
+            target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            build_script: scripts/build_localdex_linux_aarch64.sh
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+      - name: Configure V8 sandbox artifacts
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ matrix.target }}
       - name: Install native build tools
         run: |
           sudo apt-get update -y
@@ -40,26 +56,51 @@ jobs:
         env:
           LOCALDEX_PACKAGE_VERSION: ${{ steps.version.outputs.version }}
           LOCALDEX_DIST_DIR: dist/localdex
-        run: scripts/build_localdex_linux_amd64.sh
-      - name: Create checksums and stage installer
+        run: ${{ matrix.build_script }}
+      - name: Stage package and checksum
+        env:
+          LOCALDEX_TARGET: ${{ matrix.target }}
+          LOCALDEX_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          cp scripts/install/install-localdex.sh dist/localdex/install-localdex.sh
-          archive="dist/localdex/localdex-package-x86_64-unknown-linux-gnu.tar.gz"
-          built="dist/localdex/localdex-${{ steps.version.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz"
+          built="dist/localdex/localdex-${LOCALDEX_VERSION}-${LOCALDEX_TARGET}.tar.gz"
+          archive="dist/localdex/localdex-package-${LOCALDEX_TARGET}.tar.gz"
+          test -f "$built"
           cp "$built" "$archive"
           sha256sum "$archive" > "$archive.sha256"
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: localdex-release-${{ matrix.arch }}
+          path: dist/localdex/localdex-package-${{ matrix.target }}.tar.gz*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish LocalDex Linux release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: localdex-release-*
+          merge-multiple: true
+          path: dist/localdex
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          tag="localdex-v${RELEASE_VERSION}"
+          version="${RELEASE_VERSION#localdex-v}"
+          tag="localdex-v${version}"
+          cp scripts/install/install-localdex.sh dist/localdex/install-localdex.sh
           gh release create "$tag" \
             "dist/localdex/localdex-package-x86_64-unknown-linux-gnu.tar.gz" \
             "dist/localdex/localdex-package-x86_64-unknown-linux-gnu.tar.gz.sha256" \
+            "dist/localdex/localdex-package-aarch64-unknown-linux-gnu.tar.gz" \
+            "dist/localdex/localdex-package-aarch64-unknown-linux-gnu.tar.gz.sha256" \
             "dist/localdex/install-localdex.sh" \
-            --title "LocalDex ${RELEASE_VERSION}" \
-            --notes "LocalDex Codex-compatible CLI for Linux x86_64. The archive includes the CLI and codex-code-mode-host companion." \
+            --title "LocalDex ${version}" \
+            --notes "LocalDex Codex-compatible CLI for Linux x86_64 and ARM64. Each package includes the CLI and codex-code-mode-host companion." \
             --verify-tag

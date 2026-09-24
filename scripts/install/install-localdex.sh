@@ -3,7 +3,15 @@
 set -eu
 
 REPOSITORY="ModelCloud/LocalDex"
-TARGET="x86_64-unknown-linux-gnu"
+machine="$(uname -m)"
+case "$machine" in
+  x86_64|amd64) TARGET="x86_64-unknown-linux-gnu" ;;
+  aarch64|arm64) TARGET="aarch64-unknown-linux-gnu" ;;
+  *)
+    echo "Unsupported LocalDex architecture: $machine" >&2
+    exit 1
+    ;;
+esac
 RELEASE="${LOCALDEX_RELEASE:-latest}"
 CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
 STANDALONE_ROOT="$CODEX_HOME_DIR/packages/standalone"
@@ -24,8 +32,8 @@ usage() {
   cat <<'EOF'
 Usage: install-localdex.sh [--release VERSION]
 
-Installs the ModelCloud LocalDex Linux x86_64 distribution as the `codex`
-command. Existing CODEX_HOME configuration, auth, and session data are kept.
+Installs the ModelCloud LocalDex Linux x86_64 or ARM64 distribution as the
+`codex` command. Existing CODEX_HOME configuration, auth, and session data are kept.
 
 Environment:
   LOCALDEX_RELEASE      Release version, or latest (default).
