@@ -9,6 +9,7 @@ use crate::safety_buffering::treatment_from_headers;
 use crate::telemetry::SseTelemetry;
 use codex_client::ByteStream;
 use codex_client::StreamResponse;
+use codex_http_client::RetryAfter;
 use codex_protocol::ResponseUsageMetadata;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::MisalignmentErrorDetails;
@@ -463,15 +464,22 @@ pub fn process_responses_event(
                             .unwrap_or_else(|| "Invalid request.".to_string());
                         response_error = ApiError::InvalidPrompt { message };
                     } else if is_server_overloaded_error(&error) {
-                        response_error = ApiError::ServerOverloaded;
+                        response_error = ApiError::ServerOverloaded { retry_after: None };
                     } else {
-                        let delay = try_parse_retry_after(&error);
+                        let retry_after =
+                            try_parse_retry_delay(&error).and_then(RetryAfter::from_delay);
                         let message = error.message.unwrap_or_default();
                         response_error = match error.code.as_deref() {
                             Some("rate_limit_exceeded" | "slow_down") => {
-                                ApiError::RateLimitExceeded { message, delay }
+                                ApiError::RateLimitExceeded {
+                                    message,
+                                    retry_after,
+                                }
                             }
-                            _ => ApiError::Retryable { message, delay },
+                            _ => ApiError::Retryable {
+                                message,
+                                retry_after,
+                            },
                         };
                     }
                 }
@@ -701,7 +709,7 @@ async fn process_sse_with_treatment(
     }
 }
 
-fn try_parse_retry_after(err: &Error) -> Option<Duration> {
+fn try_parse_retry_delay(err: &Error) -> Option<Duration> {
     if !matches!(
         err.code.as_deref(),
         Some("rate_limit_exceeded" | "slow_down")
@@ -1121,7 +1129,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn rate_limit_error_preserves_retry_delay() {
         let raw_error = r#"{"type":"response.failed","sequence_number":3,"response":{"id":"resp_689bcf18d7f08194bf3440ba62fe05d803fee0cdac429894","object":"response","created_at":1755041560,"status":"failed","background":false,"error":{"code":"rate_limit_exceeded","message":"Rate limit reached for gpt-5.1 in organization org-AAA on tokens per min (TPM): Limit 30000, Used 22999, Requested 12528. Please try again in 11.054s. Visit https://platform.openai.com/account/rate-limits to learn more."}, "usage":null,"user":null,"metadata":{}}}"#;
 
@@ -1132,12 +1140,18 @@ mod tests {
         assert_eq!(events.len(), 1);
 
         match &events[0] {
-            Err(ApiError::RateLimitExceeded { message, delay }) => {
+            Err(ApiError::RateLimitExceeded {
+                message,
+                retry_after,
+            }) => {
                 assert_eq!(
                     message,
                     "Rate limit reached for gpt-5.1 in organization org-AAA on tokens per min (TPM): Limit 30000, Used 22999, Requested 12528. Please try again in 11.054s. Visit https://platform.openai.com/account/rate-limits to learn more."
                 );
-                assert_eq!(*delay, Some(Duration::from_secs_f64(11.054)));
+                assert_eq!(
+                    retry_after.map(RetryAfter::remaining_delay),
+                    Some(Duration::from_secs_f64(11.054))
+                );
             }
             other => panic!("unexpected rate-limit event: {other:?}"),
         }
@@ -1165,7 +1179,7 @@ mod tests {
                     [
                         Err(ApiError::RateLimitExceeded {
                             message: actual,
-                            delay,
+                            retry_after,
                         }),
                     ],
                 )
@@ -1174,11 +1188,11 @@ mod tests {
                     [
                         Err(ApiError::Retryable {
                             message: actual,
-                            delay,
+                            retry_after,
                         }),
                     ],
                 ) => {
-                    assert_eq!((actual.as_str(), *delay), (message, None));
+                    assert_eq!((actual.as_str(), *retry_after), (message, None));
                 }
                 _ => panic!("unexpected events for {code}: {events:?}"),
             }
@@ -2084,7 +2098,7 @@ mod tests {
     }
 
     #[test]
-    fn test_try_parse_retry_after() {
+    fn test_try_parse_retry_delay() {
         let err = Error {
             r#type: None,
             message: Some("Rate limit reached for gpt-5.1 in organization org- on tokens per min (TPM): Limit 1, Used 1, Requested 19304. Please try again in 28ms. Visit https://platform.openai.com/account/rate-limits to learn more.".to_string()),
@@ -2094,12 +2108,12 @@ mod tests {
             misalignment: None,
         };
 
-        let delay = try_parse_retry_after(&err);
+        let delay = try_parse_retry_delay(&err);
         assert_eq!(delay, Some(Duration::from_millis(28)));
     }
 
     #[test]
-    fn test_try_parse_retry_after_no_delay() {
+    fn test_try_parse_retry_delay_no_delay() {
         let err = Error {
             r#type: None,
             message: Some("Rate limit reached for gpt-5.1 in organization <ORG> on tokens per min (TPM): Limit 30000, Used 6899, Requested 24050. Please try again in 1.898s. Visit https://platform.openai.com/account/rate-limits to learn more.".to_string()),
@@ -2108,12 +2122,12 @@ mod tests {
             resets_at: None,
             misalignment: None,
         };
-        let delay = try_parse_retry_after(&err);
+        let delay = try_parse_retry_delay(&err);
         assert_eq!(delay, Some(Duration::from_secs_f64(1.898)));
     }
 
     #[test]
-    fn test_try_parse_retry_after_azure() {
+    fn test_try_parse_retry_delay_azure() {
         let err = Error {
             r#type: None,
             message: Some("Rate limit exceeded. Try again in 35 seconds.".to_string()),
@@ -2122,7 +2136,7 @@ mod tests {
             resets_at: None,
             misalignment: None,
         };
-        let delay = try_parse_retry_after(&err);
+        let delay = try_parse_retry_delay(&err);
         assert_eq!(delay, Some(Duration::from_secs(35)));
     }
 

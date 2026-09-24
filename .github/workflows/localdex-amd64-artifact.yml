@@ -1,19 +1,49 @@
-name: LocalDex AMD64 installable artifact
+name: LocalDex Linux installable artifacts
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - "feature/**"
+    paths:
+      - ".github/workflows/localdex-amd64-artifact.yml"
+      - "scripts/build_localdex_linux_amd64.sh"
+      - "scripts/build_localdex_linux_aarch64.sh"
+      - ".github/actions/setup-rusty-v8/action.yml"
+      - "scripts/build_codex_package.py"
+      - "scripts/codex_package/**"
+      - "scripts/install/install-localdex.sh"
+      - "codex-rs/Cargo.lock"
+      - "third_party/v8/**"
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build Linux x86_64 LocalDex package
-    runs-on: ubuntu-24.04
+    name: Build Linux ${{ matrix.arch }} LocalDex package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            build_script: scripts/build_localdex_linux_amd64.sh
+          - arch: aarch64
+            target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            build_script: scripts/build_localdex_linux_aarch64.sh
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+      - name: Configure V8 sandbox artifacts
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ matrix.target }}
       - name: Install native build tools
         run: |
           sudo apt-get update -y
@@ -21,18 +51,19 @@ jobs:
       - name: Build LocalDex package
         env:
           LOCALDEX_DIST_DIR: dist/localdex
-        run: scripts/build_localdex_linux_amd64.sh
+        run: ${{ matrix.build_script }}
       - name: Create package checksum
         run: |
           set -euo pipefail
-          archive="$(find dist/localdex -maxdepth 1 -name 'localdex-*-x86_64-unknown-linux-gnu.tar.gz' -print -quit)"
+          target="${{ matrix.target }}"
+          archive="$(find dist/localdex -maxdepth 1 -name "localdex-*-${target}.tar.gz" -print -quit)"
           test -n "$archive"
-          cp "$archive" dist/localdex/localdex-package-x86_64-unknown-linux-gnu.tar.gz
-          sha256sum dist/localdex/localdex-package-x86_64-unknown-linux-gnu.tar.gz > dist/localdex/localdex-package-x86_64-unknown-linux-gnu.tar.gz.sha256
+          cp "$archive" "dist/localdex/localdex-package-${target}.tar.gz"
+          sha256sum "dist/localdex/localdex-package-${target}.tar.gz" > "dist/localdex/localdex-package-${target}.tar.gz.sha256"
           cp scripts/install/install-localdex.sh dist/localdex/install-localdex.sh
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: localdex-linux-x86_64
+          name: localdex-linux-${{ matrix.arch }}
           path: dist/localdex/*
           if-no-files-found: error
           retention-days: 30
