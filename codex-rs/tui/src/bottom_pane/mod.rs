@@ -510,6 +510,9 @@ impl BottomPane {
         if let Some(questions) = &mut self.questions {
             questions.set_keymap(keymap);
         }
+        // Show the first shortcut from the same keymap ChatWidget uses to handle queued edits.
+        self.pending_input_preview
+            .set_edit_binding(keymap.primary_hint(KeymapContext::Chat, "edit_queued_message"));
         let interrupt_binding = keymap.primary_hint(KeymapContext::Chat, "interrupt_turn");
         self.pending_input_preview
             .set_interrupt_binding(interrupt_binding);
@@ -602,19 +605,6 @@ impl BottomPane {
 
     pub(crate) fn set_parent_owned_thread(&mut self) {
         self.composer.set_parent_owned_thread();
-        self.request_redraw();
-    }
-
-    /// Update the key hint shown next to queued messages so it matches the
-    /// binding that `ChatWidget` actually listens for.
-    pub(crate) fn set_queued_message_edit_binding(
-        &mut self,
-        binding: Option<crate::key_hint::ShortcutHint>,
-    ) {
-        self.pending_input_preview.set_edit_binding(binding);
-        if let Some(questions) = &mut self.questions {
-            questions.next_hint = binding;
-        }
         self.request_redraw();
     }
 
@@ -1075,13 +1065,15 @@ impl BottomPane {
         local_image_paths: Vec<PathBuf>,
         mention_bindings: Vec<MentionBinding>,
     ) {
-        self.composer.set_text_content_with_mention_bindings(
-            text,
-            text_elements,
-            local_image_paths,
-            mention_bindings,
-        );
-        self.composer.move_cursor_to_end();
+        self.composer.edit_stored_draft(|composer| {
+            composer.set_text_content_with_mention_bindings(
+                text,
+                text_elements,
+                local_image_paths,
+                mention_bindings,
+            );
+            composer.move_cursor_to_end();
+        });
         self.request_redraw();
     }
 
@@ -1150,7 +1142,7 @@ impl BottomPane {
     }
 
     pub(crate) fn composer_pending_pastes(&self) -> Vec<(String, String)> {
-        self.composer.pending_pastes()
+        self.composer.draft_snapshot().pending_pastes
     }
 
     pub(crate) fn apply_external_edit(&mut self, text: String) {
@@ -1173,7 +1165,8 @@ impl BottomPane {
     }
 
     pub(crate) fn set_remote_image_urls(&mut self, urls: Vec<String>) {
-        self.composer.set_remote_image_urls(urls);
+        self.composer
+            .edit_stored_draft(|composer| composer.set_remote_image_urls(urls));
         self.request_redraw();
     }
 
@@ -1188,7 +1181,8 @@ impl BottomPane {
     }
 
     pub(crate) fn set_composer_pending_pastes(&mut self, pending_pastes: Vec<(String, String)>) {
-        self.composer.set_pending_pastes(pending_pastes);
+        self.composer
+            .edit_stored_draft(|composer| composer.set_pending_pastes(pending_pastes));
         self.request_redraw();
     }
 
