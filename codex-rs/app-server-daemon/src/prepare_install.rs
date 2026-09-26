@@ -155,13 +155,15 @@ async fn prepare_from_package(
     let version = manifest.version.to_string();
     let target = platform_target()?;
     let metadata: serde_json::Value = serde_json::from_slice(&manifest_bytes)?;
-    let entrypoint = if cfg!(windows) {
-        "bin/codex.exe"
-    } else {
-        "bin/codex"
-    };
+    let entrypoint = metadata["entrypoint"]
+        .as_str()
+        .context("the CLI package manifest has no executable entrypoint")?;
     anyhow::ensure!(
-        metadata["target"] == target && metadata["entrypoint"] == entrypoint,
+        metadata["target"] == target
+            && matches!(
+                entrypoint,
+                "bin/codex" | "bin/localdex" | "bin/codex.exe" | "bin/localdex.exe"
+            ),
         "the CLI package does not match this platform or executable"
     );
     validate_package(source)?;
@@ -260,7 +262,7 @@ async fn prepare_from_package(
     } else {
         #[cfg(unix)]
         if !stage.path().join("codex").exists() {
-            std::os::unix::fs::symlink("bin/codex", stage.path().join("codex"))?;
+            std::os::unix::fs::symlink(entrypoint, stage.path().join("codex"))?;
         }
         std::fs::rename(stage.path(), &release)?;
     }
@@ -367,11 +369,13 @@ fn package_tree(root: &Path, destination: Option<&Path>) -> Result<String> {
     while let Some(path) = paths.pop() {
         let relative = path.strip_prefix(root)?;
         // The Unix installer adds this alias outside the package layout.
-        if cfg!(unix)
-            && relative == Path::new("codex")
-            && std::fs::read_link(&path).ok().as_deref() == Some(Path::new("bin/codex"))
-        {
-            continue;
+        if cfg!(unix) && relative == Path::new("codex") {
+            let is_codex_alias = std::fs::read_link(&path).ok().is_some_and(|target| {
+                matches!(target.to_str(), Some("bin/codex" | "bin/localdex"))
+            });
+            if is_codex_alias {
+                continue;
+            }
         }
         anyhow::ensure!(
             path.canonicalize()?.starts_with(&canonical_root),
@@ -425,13 +429,21 @@ fn stable_version(value: &str) -> Option<semver::Version> {
 }
 
 fn validate_package(root: &Path) -> Result<()> {
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("codex-package.json"))?)?;
+    let entrypoint = manifest["entrypoint"]
+        .as_str()
+        .context("the CLI package manifest has no executable entrypoint")?;
+    anyhow::ensure!(
+        matches!(
+            entrypoint,
+            "bin/codex" | "bin/localdex" | "bin/codex.exe" | "bin/localdex.exe"
+        ),
+        "the CLI package entrypoint is unsupported"
+    );
     let mut names = vec![
         "codex-package.json",
-        if cfg!(windows) {
-            "bin/codex.exe"
-        } else {
-            "bin/codex"
-        },
+        entrypoint,
         if cfg!(windows) {
             "bin/codex-code-mode-host.exe"
         } else {
