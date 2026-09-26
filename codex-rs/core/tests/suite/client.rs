@@ -71,10 +71,10 @@ use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_message_item_added;
 use core_test_support::responses::ev_output_text_delta;
 use core_test_support::responses::ev_response_created;
+use core_test_support::responses::mount_response_sequence;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::mount_sse_sequence;
-use core_test_support::responses::mount_response_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::sse_failed;
 use core_test_support::responses::start_mock_server;
@@ -499,8 +499,7 @@ async fn responses_continuation_rejection_retries_full_history_and_disables_stor
         ],
     )
     .await;
-    let mut provider =
-        built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
+    let mut provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
     provider.name = "Continuation test provider".to_string();
     provider.base_url = Some(format!("{}/v1", server.uri()));
     provider.supports_websockets = false;
@@ -1479,7 +1478,7 @@ async fn resume_replays_image_tool_outputs_with_detail() {
     .await;
 
     let codex_home = Arc::new(TempDir::new().unwrap());
-    let mut builder = test_codex().with_model("gpt-5.4");
+    let mut builder = test_codex().with_model("gpt-5.5");
     let test = builder
         .resume(&server, codex_home, session_path.clone())
         .await
@@ -1766,6 +1765,7 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
         supports_websockets: false,
         supports_responses_continuation: false,
         supports_standalone_web_search: false,
+        include_internal_metadata: false,
     };
 
     send_request_with_provider(provider).await;
@@ -3286,6 +3286,7 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         supports_websockets: false,
         supports_responses_continuation: false,
         supports_standalone_web_search: false,
+        include_internal_metadata: false,
     };
 
     let codex_home = TempDir::new().unwrap();
@@ -3924,6 +3925,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
         supports_websockets: false,
         supports_responses_continuation: false,
         supports_standalone_web_search: false,
+        include_internal_metadata: false,
     };
 
     // Init session
@@ -4011,6 +4013,7 @@ async fn env_var_overrides_loaded_auth() {
         supports_websockets: false,
         supports_responses_continuation: false,
         supports_standalone_web_search: false,
+        include_internal_metadata: false,
     };
 
     // Init session

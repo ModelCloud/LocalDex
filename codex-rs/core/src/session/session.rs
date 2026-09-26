@@ -1752,6 +1752,7 @@ impl Session {
                     workspace_routing.as_ref().clone(),
                     extensions.model_request_contributors().to_vec(),
                 )
+                .with_executed_tool_calls(executed_tool_calls.clone())
                 .with_restored_history(matches!(
                     &initial_history,
                     InitialHistory::Resumed(_) | InitialHistory::Forked(_)
