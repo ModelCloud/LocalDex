@@ -151,7 +151,7 @@ impl App {
             AppEvent::PluginMentionsLoaded { ref cwd, .. }
                 if cwds_differ(cwd, self.config.cwd.as_path()) => {}
             AppEvent::NewSession { name } => {
-                self.start_fresh_session_with_summary_hint(
+                self.start_fresh_session(
                     tui, app_server, /*session_start_source*/ None,
                     /*initial_user_message*/ None, name,
                 )
@@ -391,7 +391,7 @@ impl App {
                 self.clear_terminal_ui(tui, /*redraw_header*/ false)?;
                 self.reset_app_ui_state_after_clear();
 
-                self.start_fresh_session_with_summary_hint(
+                self.start_fresh_session(
                     tui,
                     app_server,
                     Some(ThreadStartSource::Clear),
@@ -411,7 +411,7 @@ impl App {
                 self.clear_terminal_ui(tui, /*redraw_header*/ false)?;
                 self.reset_app_ui_state_after_clear();
 
-                self.start_fresh_session_with_summary_hint(
+                self.start_fresh_session(
                     tui,
                     app_server,
                     Some(ThreadStartSource::Clear),

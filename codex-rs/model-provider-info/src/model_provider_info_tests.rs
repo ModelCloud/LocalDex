@@ -520,10 +520,8 @@ fn test_merge_configured_localdex_provider_enables_responses_continuation() {
         base_url: Some("http://127.0.0.1:2120/v1".to_string()),
         ..ModelProviderInfo::default()
     };
-    let configured_model_providers = std::collections::HashMap::from([(
-        LOCALDEX_PROVIDER_ID.to_string(),
-        localdex_provider,
-    )]);
+    let configured_model_providers =
+        std::collections::HashMap::from([(LOCALDEX_PROVIDER_ID.to_string(), localdex_provider)]);
 
     let providers = merge_configured_model_providers(
         built_in_model_providers(/*openai_base_url*/ None),

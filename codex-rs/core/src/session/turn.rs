@@ -756,14 +756,18 @@ pub(crate) async fn run_turn(
             }
             Err(err)
                 if matches!(err.details(), CodexErrorDetails::ContextWindowExceeded)
-                    && turn_context.model_info().slug == "QB/DSV4.1-Flash"
                     && !context_overflow_compacted
-                    && !turn_context.config.features.enabled(Feature::TokenBudget) =>
+                    && !turn_context.config.features.enabled(Feature::TokenBudget)
+                    && (turn_context.model_info().slug == "QB/DSV4.1-Flash"
+                        || sess
+                            .services
+                            .thread_extension_data
+                            .get::<crate::guardian::ExhaustedReviewBudget>()
+                            .is_some()) =>
             {
-                // A provider can lower its request limit between capability
-                // refresh and sampling. Retry one summarizing compaction per
-                // model step so a standardized context-overflow response does
-                // not strand the thread or loop forever.
+                // Preserve Guardian's overflow recovery and also retry if a
+                // LocalDex provider lowers its limit after capability refresh.
+                // Only one summarizing compaction is attempted per model step.
                 context_overflow_compacted = true;
                 if sess
                     .services
@@ -2600,7 +2604,7 @@ async fn try_run_sampling_request(
         .features
         .enabled(Feature::ConcurrentReasoningSummaries)
         && turn_context.provider.info().is_openai();
-    let preempt = step_context.preempt.clone().unwrap_or_default();
+    let mut preempt = step_context.preempt.clone().unwrap_or_default();
     let effort = sess
         .reasoning_effort_for_request(&step_context.settings, super::RequestEffortUsage::Sampling)
         .await;
@@ -2699,7 +2703,16 @@ async fn try_run_sampling_request(
                 break Ok(SamplingRequestResult::Preempted);
             }
             _ = preempt.cancelled() => {
-                // TODO: Reconcile any response item already being presented to the client.
+                if let Some(interrupt) = stream.interrupt.take() {
+                    if step_context.settings.model_info.use_responses_lite {
+                        let _ = interrupt.send(());
+                    }
+                    // Drain the response before reusing its connection and history.
+                    preempt = CancellationToken::new();
+                    needs_follow_up = true;
+                    continue;
+                }
+                // TODO: Reconcile any response item already presented to the client.
                 drop(stream);
                 client_session.drop_connection();
                 break Ok(SamplingRequestResult::Completed {
