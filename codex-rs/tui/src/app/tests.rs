@@ -9828,6 +9828,16 @@ async fn localdex_model_selection_switches_provider_with_model() {
         .active_thread_model_setting_update_params("QB/DSV4.1-Flash".to_string())
         .expect("active thread should produce update params");
     assert_eq!(local.model_provider, Some("localdex".to_string()));
+
+    app.config.model = Some("gpt-5.6-sol".to_string());
+    app.config.model_provider_id = "openai".to_string();
+    let local_from_openai = app
+        .active_thread_model_setting_update_params("QB/DSV4.1-Flash".to_string())
+        .expect("active thread should produce update params");
+    assert_eq!(
+        local_from_openai.model_provider,
+        Some("localdex".to_string())
+    );
 }
 
 async fn start_config_write_test_app_server(app: &App) -> Result<AppServerSession> {

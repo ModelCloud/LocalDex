@@ -81,6 +81,10 @@ pub const OPENAI_PROVIDER_ID: &str = "openai";
 /// arbitrary OpenAI-compatible endpoints retain the conservative stateless
 /// default.
 pub const LOCALDEX_PROVIDER_ID: &str = "localdex";
+/// ModelCloud model IDs served by the configured LocalDex endpoint.
+pub fn is_localdex_model(model: &str) -> bool {
+    model.starts_with("QB/") && model.len() > 3
+}
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
 pub const AMAZON_BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
