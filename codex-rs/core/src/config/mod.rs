@@ -95,6 +95,7 @@ use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
 use codex_model_provider_info::built_in_model_providers;
 use codex_model_provider_info::is_localdex_model;
+use codex_model_provider_info::is_localdex_provider_id;
 use codex_model_provider_info::merge_configured_model_providers;
 use codex_models_manager::ModelsManagerConfig;
 use codex_prompts::ResolvedModelMessages;
@@ -3813,11 +3814,8 @@ impl Config {
             .unwrap_or_else(|| "openai".to_string());
         // A QB model must never be sent to the OpenAI/ChatGPT provider. CLI
         // --model and app-server launches both pass through this config load.
-        let model_provider_id = if model
-            .as_deref()
-            .or(cfg.model.as_deref())
-            .is_some_and(is_localdex_model)
-        {
+        let selected_model = model.as_deref().or(cfg.model.as_deref());
+        let model_provider_id = if selected_model.is_some_and(is_localdex_model) {
             if required_model_provider.is_some_and(|provider| provider != LOCALDEX_PROVIDER_ID) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
@@ -3825,6 +3823,16 @@ impl Config {
                 ));
             }
             LOCALDEX_PROVIDER_ID.to_string()
+        } else if selected_model.is_some()
+            && is_localdex_provider_id(&requested_model_provider_id)
+        {
+            if required_model_provider.is_some() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "an OpenAI model cannot use a required LocalDex provider",
+                ));
+            }
+            codex_model_provider_info::OPENAI_PROVIDER_ID.to_string()
         } else {
             requested_model_provider_id
         };

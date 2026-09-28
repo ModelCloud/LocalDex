@@ -395,23 +395,34 @@ impl SessionConfiguration {
         current_environments: &[TurnEnvironmentSelection],
     ) -> ConstraintResult<Self> {
         let mut next_configuration = self.clone();
-        let requested_model_provider = if updates
+        let next_model = updates
             .step_settings
-            .model
-            .as_deref()
-            .is_some_and(codex_model_provider_info::is_localdex_model)
-        {
-            Some(codex_model_provider_info::LOCALDEX_PROVIDER_ID)
-        } else if let Some(model_provider) = updates.model_provider.as_deref() {
-            Some(model_provider)
-        } else if updates.step_settings.model.is_some()
-            && self.original_config_do_not_use.model_provider_id
-                == codex_model_provider_info::LOCALDEX_PROVIDER_ID
-        {
-            Some(codex_model_provider_info::OPENAI_PROVIDER_ID)
-        } else {
-            None
-        };
+            .collaboration_mode
+            .as_ref()
+            .map(|mode| mode.model())
+            .or(updates.step_settings.model.as_deref());
+        let current_model = self.step_settings.collaboration_mode.model();
+        let requested_model_provider =
+            if next_model.is_some_and(codex_model_provider_info::is_localdex_model) {
+                Some(codex_model_provider_info::LOCALDEX_PROVIDER_ID)
+            } else if let Some(model_provider) = updates.model_provider.as_deref()
+                && !codex_model_provider_info::is_localdex_provider_id(model_provider)
+            {
+                Some(model_provider)
+            } else if next_model.is_some()
+                && (updates
+                    .model_provider
+                    .as_deref()
+                    .is_some_and(codex_model_provider_info::is_localdex_provider_id)
+                    || codex_model_provider_info::is_localdex_model(current_model)
+                    || codex_model_provider_info::is_localdex_provider_id(
+                        &self.original_config_do_not_use.model_provider_id,
+                    ))
+            {
+                Some(codex_model_provider_info::OPENAI_PROVIDER_ID)
+            } else {
+                updates.model_provider.as_deref()
+            };
         if let Some(model_provider_id) = requested_model_provider {
             let mut config = (*next_configuration.original_config_do_not_use).clone();
             let model_provider = config
