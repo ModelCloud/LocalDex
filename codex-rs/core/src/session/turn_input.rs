@@ -721,16 +721,15 @@ impl Session {
         // with the same turn plus the newly queued input. Limit this behavior to
         // that provider so official Codex/OpenAI steering retains upstream
         // semantics.
-        if active_task.turn_context.config.model_provider_id == "localdex" {
-            if let Some(sampling_preemption) = active_turn
+        if active_task.turn_context.config.model_provider_id == "localdex"
+            && let Some(sampling_preemption) = active_turn
                 .turn_state
                 .lock()
                 .await
                 .sampling_preemption
                 .clone()
-            {
-                sampling_preemption.cancel();
-            }
+        {
+            sampling_preemption.cancel();
         }
         Ok(active_turn_id.clone())
     }
