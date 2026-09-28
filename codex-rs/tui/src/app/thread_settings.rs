@@ -15,6 +15,7 @@ use codex_app_server_protocol::ThreadSettingsUpdateParams;
 use codex_config::types::ApprovalsReviewer;
 use codex_model_provider_info::LOCALDEX_PROVIDER_ID;
 use codex_model_provider_info::is_localdex_model;
+use codex_model_provider_info::is_localdex_provider_id;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
@@ -83,7 +84,7 @@ impl App {
         // restore the built-in OpenAI provider.
         let model_provider = if is_localdex_model(&model) {
             Some(LOCALDEX_PROVIDER_ID.to_string())
-        } else if self.config.model_provider_id == LOCALDEX_PROVIDER_ID {
+        } else if is_localdex_provider_id(&self.config.model_provider_id) {
             Some("openai".to_string())
         } else {
             None

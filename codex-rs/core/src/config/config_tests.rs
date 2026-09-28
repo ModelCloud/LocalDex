@@ -1117,10 +1117,17 @@ async fn qb_model_selects_localdex_without_changing_official_model_routing() -> 
     let cfg = toml::from_str::<ConfigToml>(
         r#"
 model = "QB/DSV4.1-Flash"
-model_provider = "openai"
+model_provider = "omnigent-localdex-test"
 
 [model_providers.localdex]
 name = "LocalDex"
+base_url = "http://127.0.0.1:2120/v1"
+env_key = "CODEX_LOCAL_OPENAI_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+
+[model_providers.omnigent-localdex-test]
+name = "Omnigent LocalDex"
 base_url = "http://127.0.0.1:2120/v1"
 env_key = "CODEX_LOCAL_OPENAI_API_KEY"
 wire_api = "responses"
