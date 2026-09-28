@@ -59,7 +59,8 @@ pub(crate) fn package_root(codex_home: &Path) -> PathBuf {
 pub(crate) fn managed_codex_bin(codex_home: &Path) -> PathBuf {
     let root = package_root(codex_home);
     let current = root.join("current");
-    let packaged = current.join("bin").join(managed_codex_file_name());
+    let packaged = packaged_entrypoint(&current)
+        .unwrap_or_else(|| current.join("bin").join(managed_codex_file_name()));
     let legacy = current.join(managed_codex_file_name());
     if packaged.is_file()
         || !legacy.is_file() && (cfg!(windows) || root.ends_with("app-server-daemon"))
@@ -68,6 +69,17 @@ pub(crate) fn managed_codex_bin(codex_home: &Path) -> PathBuf {
     } else {
         legacy
     }
+}
+
+fn packaged_entrypoint(package: &Path) -> Option<PathBuf> {
+    let metadata = std::fs::read(package.join("codex-package.json")).ok()?;
+    let metadata: serde_json::Value = serde_json::from_slice(&metadata).ok()?;
+    let entrypoint = metadata["entrypoint"].as_str()?;
+    matches!(
+        entrypoint,
+        "bin/codex" | "bin/localdex" | "bin/codex.exe" | "bin/localdex.exe"
+    )
+    .then(|| package.join(entrypoint))
 }
 
 /// Only latest-channel stable releases may run the public latest-version updater.

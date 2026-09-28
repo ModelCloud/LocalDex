@@ -45,6 +45,7 @@ use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadMemoryMode;
+use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::protocol::ThreadSettingsSnapshot;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TokenUsageInfo;
@@ -546,6 +547,20 @@ impl CodexThread {
         Some(task.turn_context.initial_environments.all_selections())
     }
 
+    /// Returns the named running turn's current selections, including environments that are
+    /// still starting or have failed. Returns `None` if that turn is no longer running.
+    pub async fn current_turn_environment_selections(
+        &self,
+        expected_turn_id: &str,
+    ) -> Option<Vec<TurnEnvironmentSelection>> {
+        let active = self.session.active_turn.lock().await;
+        let task = active.as_ref()?.task.as_ref()?;
+        if task.turn_context.sub_id != expected_turn_id || task.cancellation_token.is_cancelled() {
+            return None;
+        }
+        Some(self.session.services.turn_environments.selections())
+    }
+
     /// Captures a regular turn only after its input is recorded. The caller must flush the rollout.
     pub async fn interrupted_turn(
         &self,
@@ -585,6 +600,21 @@ impl CodexThread {
     ) -> ConstraintResult<ThreadConfigSnapshot> {
         let updates = Self::thread_settings_update(overrides);
         self.session.preview_settings(&updates).await
+    }
+
+    /// Queues settings for future turns and waits for Core to accept or reject them.
+    /// Rejections are returned to the caller instead of emitted as thread errors.
+    pub async fn update_thread_settings(
+        &self,
+        thread_settings: ThreadSettingsOverrides,
+    ) -> CodexResult<()> {
+        let (reply, result) = oneshot::channel();
+        self.submit(Op::ThreadSettings {
+            thread_settings,
+            reply: Some(reply),
+        })
+        .await?;
+        result.await.unwrap_or(Err(CodexErr::InternalAgentDied))
     }
 
     /// Restores thread-owned mutable settings captured from another loaded runtime.

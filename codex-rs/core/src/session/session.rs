@@ -395,7 +395,24 @@ impl SessionConfiguration {
         current_environments: &[TurnEnvironmentSelection],
     ) -> ConstraintResult<Self> {
         let mut next_configuration = self.clone();
-        if let Some(model_provider_id) = &updates.model_provider {
+        let requested_model_provider = if updates
+            .step_settings
+            .model
+            .as_deref()
+            .is_some_and(codex_model_provider_info::is_localdex_model)
+        {
+            Some(codex_model_provider_info::LOCALDEX_PROVIDER_ID)
+        } else if let Some(model_provider) = updates.model_provider.as_deref() {
+            Some(model_provider)
+        } else if updates.step_settings.model.is_some()
+            && self.original_config_do_not_use.model_provider_id
+                == codex_model_provider_info::LOCALDEX_PROVIDER_ID
+        {
+            Some(codex_model_provider_info::OPENAI_PROVIDER_ID)
+        } else {
+            None
+        };
+        if let Some(model_provider_id) = requested_model_provider {
             let mut config = (*next_configuration.original_config_do_not_use).clone();
             let model_provider = config
                 .model_providers
@@ -403,11 +420,11 @@ impl SessionConfiguration {
                 .cloned()
                 .ok_or_else(|| ConstraintError::InvalidValue {
                     field_name: "model_provider",
-                    candidate: model_provider_id.clone(),
+                    candidate: model_provider_id.to_string(),
                     allowed: "a configured model provider".to_string(),
                     requirement_source: codex_config::RequirementSource::Unknown,
                 })?;
-            config.model_provider_id = model_provider_id.clone();
+            config.model_provider_id = model_provider_id.to_string();
             config.model_provider = model_provider;
             next_configuration.original_config_do_not_use = Arc::new(config);
         }
@@ -1752,6 +1769,7 @@ impl Session {
                     workspace_routing.as_ref().clone(),
                     extensions.model_request_contributors().to_vec(),
                 )
+                .with_executed_tool_calls(executed_tool_calls.clone())
                 .with_restored_history(matches!(
                     &initial_history,
                     InitialHistory::Resumed(_) | InitialHistory::Forked(_)

@@ -3,6 +3,7 @@
 use super::InstallMode;
 use super::prepare_from_package;
 use super::validate_package;
+use crate::managed_install::managed_codex_bin;
 use crate::settings::DaemonSettings;
 use pretty_assertions::assert_eq;
 use std::os::unix::fs::PermissionsExt;
@@ -22,12 +23,17 @@ fn daemon(home: &std::path::Path) -> crate::Daemon {
 }
 
 fn package(root: &Path, version: &str) -> PathBuf {
+    package_with_entrypoint(root, version, "bin/codex")
+}
+
+fn package_with_entrypoint(root: &Path, version: &str, entrypoint: &str) -> PathBuf {
     let target = super::platform_target().expect("target");
     for dir in ["bin", "codex-path", "codex-resources/nested"] {
         std::fs::create_dir_all(root.join(dir)).expect("package directory");
     }
-    let bin = root.join("bin/codex");
-    std::fs::write(&bin, format!("#!/bin/sh\necho 'codex {version}'\n")).expect("codex executable");
+    let bin = root.join(entrypoint);
+    std::fs::write(&bin, format!("#!/bin/sh\necho 'codex-cli {version}'\n"))
+        .expect("codex executable");
     for file in [
         "bin/codex-code-mode-host",
         "codex-path/rg",
@@ -52,7 +58,7 @@ fn package(root: &Path, version: &str) -> PathBuf {
     std::fs::write(
         root.join("codex-package.json"),
         serde_json::json!({
-            "version": version, "target": target, "entrypoint": "bin/codex"
+            "version": version, "target": target, "entrypoint": entrypoint
         })
         .to_string(),
     )
@@ -88,6 +94,42 @@ async fn seeds_full_package() {
     assert_eq!(
         std::fs::read_to_string(standalone.join("auto-update-version")).expect("marker"),
         selected.file_name().expect("name").to_string_lossy()
+    );
+    assert!(validate_package(&selected).is_ok());
+}
+
+#[tokio::test]
+async fn seeds_localdex_package_using_manifest_entrypoint() {
+    let temp = tempfile::TempDir::new().expect("temp");
+    let home = temp.path().join("home");
+    let daemon = daemon(&home);
+    let source = temp.path().join("localdex-package");
+    let localdex_bin = package_with_entrypoint(&source, "0.157.1", "bin/localdex");
+
+    prepare_from_package(
+        &daemon,
+        &DaemonSettings::default(),
+        InstallMode::Missing,
+        Some(&source),
+        &localdex_bin,
+        |_| Ok(true),
+    )
+    .await
+    .expect("seed LocalDex package");
+
+    let selected = std::fs::canonicalize(home.join("packages/app-server-daemon/current"))
+        .expect("selected LocalDex release");
+    assert_eq!(
+        managed_codex_bin(&home),
+        home.join("packages/app-server-daemon/current/bin/localdex")
+    );
+    assert_eq!(
+        std::fs::read_to_string(selected.join("codex-package.json")).expect("manifest"),
+        std::fs::read_to_string(source.join("codex-package.json")).expect("source manifest")
+    );
+    assert_eq!(
+        std::fs::read_link(selected.join("codex")).expect("Codex alias"),
+        Path::new("bin/localdex")
     );
     assert!(validate_package(&selected).is_ok());
 }

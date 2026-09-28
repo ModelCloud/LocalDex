@@ -90,9 +90,11 @@ use codex_mcp::McpServerRegistration;
 use codex_mcp::ResolvedMcpCatalog;
 use codex_model_provider::ProviderCapabilities;
 use codex_model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
+use codex_model_provider_info::LOCALDEX_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
 use codex_model_provider_info::built_in_model_providers;
+use codex_model_provider_info::is_localdex_model;
 use codex_model_provider_info::merge_configured_model_providers;
 use codex_models_manager::ModelsManagerConfig;
 use codex_prompts::ResolvedModelMessages;
@@ -773,6 +775,9 @@ pub struct Config {
     /// Generate automatic TUI recaps. Manual `/recap` remains available when disabled.
     pub tui_auto_recap: bool,
 
+    /// Generate suggested next messages in the TUI composer.
+    pub tui_prompt_suggestions: bool,
+
     /// Persisted startup availability NUX state for model tooltips.
     pub model_availability_nux: ModelAvailabilityNuxConfig,
 
@@ -788,6 +793,9 @@ pub struct Config {
 
     /// Override the terminal-specific default for copying transcript mouse selections.
     pub tui_copy_on_select: codex_config::types::CopyOnSelect,
+
+    /// Right-click text paste fallback for the fullscreen TUI.
+    pub tui_right_click_paste: codex_config::types::RightClickPaste,
 
     /// Start the TUI in the specified collaboration mode (plan/default).
 
@@ -1153,6 +1161,7 @@ pub struct CodeModeConfig {
     /// in each code-mode cell response.
     /// Experimental: this option and the response format may change or be removed.
     pub experimental_show_cell_overhead: bool,
+    pub tool_input_schema_max_bytes: Option<usize>,
     pub excluded_tool_namespaces: Vec<String>,
     pub direct_only_tool_namespaces: Vec<String>,
     /// Keep code mode fail-closed when the standalone host is unavailable.
@@ -1164,6 +1173,7 @@ impl Default for CodeModeConfig {
         Self {
             default_exec_yield_time_ms: DEFAULT_CODE_MODE_EXEC_YIELD_TIME_MS,
             experimental_show_cell_overhead: false,
+            tool_input_schema_max_bytes: None,
             excluded_tool_namespaces: Vec::new(),
             direct_only_tool_namespaces: Vec::new(),
             disable_in_process_fallback: false,
@@ -1326,6 +1336,7 @@ pub struct MultiAgentV2Config {
     pub expose_spawn_agent_model_overrides: bool,
     pub wait_agent_enabled: bool,
     pub disable_direct_message: bool,
+    pub message_board_in_memory: bool,
     pub non_code_mode_only: bool,
 }
 
@@ -1346,6 +1357,7 @@ impl MultiAgentV2Config {
             expose_spawn_agent_model_overrides: true,
             wait_agent_enabled: true,
             disable_direct_message: false,
+            message_board_in_memory: false,
             non_code_mode_only: true,
         }
     }
@@ -2721,6 +2733,9 @@ fn resolve_code_mode_config(config_toml: &ConfigToml) -> CodeModeConfig {
         experimental_show_cell_overhead: base
             .and_then(|config| config.experimental_show_cell_overhead)
             .unwrap_or_default(),
+        tool_input_schema_max_bytes: base
+            .and_then(|config| config.tool_input_schema_max_bytes)
+            .map(NonZeroUsize::get),
         excluded_tool_namespaces: base
             .and_then(|config| config.excluded_tool_namespaces.as_ref())
             .cloned()
@@ -2780,6 +2795,9 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
     let disable_direct_message = base
         .and_then(|config| config.disable_direct_message)
         .unwrap_or(default.disable_direct_message);
+    let message_board_in_memory = base
+        .and_then(|config| config.message_board_in_memory)
+        .unwrap_or(default.message_board_in_memory);
     let subagent_developer_instructions = base
         .and_then(|config| config.subagent_developer_instructions.as_ref())
         .map(|instructions| instructions.trim().to_string());
@@ -2810,6 +2828,7 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         expose_spawn_agent_model_overrides,
         wait_agent_enabled,
         disable_direct_message,
+        message_board_in_memory,
         non_code_mode_only,
     }
 }
@@ -3787,10 +3806,28 @@ impl Config {
             merge_configured_model_providers(built_in_model_providers(openai_base_url), cfg.model_providers)
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?;
 
-        let model_provider_id = config_layer_stack.required_model_provider().map(str::to_string)
+        let required_model_provider = config_layer_stack.required_model_provider();
+        let requested_model_provider_id = required_model_provider.map(str::to_string)
             .or(model_provider)
             .or(cfg.model_provider)
             .unwrap_or_else(|| "openai".to_string());
+        // A QB model must never be sent to the OpenAI/ChatGPT provider. CLI
+        // --model and app-server launches both pass through this config load.
+        let model_provider_id = if model
+            .as_deref()
+            .or(cfg.model.as_deref())
+            .is_some_and(is_localdex_model)
+        {
+            if required_model_provider.is_some_and(|provider| provider != LOCALDEX_PROVIDER_ID) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "QB models require the localdex provider, but a different provider is required by managed configuration",
+                ));
+            }
+            LOCALDEX_PROVIDER_ID.to_string()
+        } else {
+            requested_model_provider_id
+        };
         let model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {
@@ -4458,6 +4495,7 @@ impl Config {
                 .map(|t| t.show_server_version_notice)
                 .unwrap_or(true),
             tui_auto_recap: cfg.tui.as_ref().map(|t| t.auto_recap).unwrap_or(/*default*/ true),
+            tui_prompt_suggestions: cfg.tui.as_ref().is_some_and(|t| t.prompt_suggestions),
             model_availability_nux: cfg
                 .tui
                 .as_ref()
@@ -4482,6 +4520,11 @@ impl Config {
                 .tui
                 .as_ref()
                 .map(|tui| tui.copy_on_select)
+                .unwrap_or_default(),
+            tui_right_click_paste: cfg
+                .tui
+                .as_ref()
+                .map(|tui| tui.right_click_paste)
                 .unwrap_or_default(),
             tui_alternate_screen: cfg
                 .tui
