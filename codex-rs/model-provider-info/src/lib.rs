@@ -81,6 +81,10 @@ pub const OPENAI_PROVIDER_ID: &str = "openai";
 /// arbitrary OpenAI-compatible endpoints retain the conservative stateless
 /// default.
 pub const LOCALDEX_PROVIDER_ID: &str = "localdex";
+/// Omnigent creates a session-private provider ID for a LocalDex endpoint.
+pub fn is_localdex_provider_id(provider_id: &str) -> bool {
+    provider_id == LOCALDEX_PROVIDER_ID || provider_id.starts_with("omnigent-localdex-")
+}
 /// ModelCloud model IDs served by the configured LocalDex endpoint.
 pub fn is_localdex_model(model: &str) -> bool {
     model.starts_with("QB/") && model.len() > 3

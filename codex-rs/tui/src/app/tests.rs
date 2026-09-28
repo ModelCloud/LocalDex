@@ -9824,6 +9824,15 @@ async fn localdex_model_selection_switches_provider_with_model() {
         .expect("active thread should produce update params");
     assert_eq!(official.model_provider, Some("openai".to_string()));
 
+    app.config.model_provider_id = "omnigent-localdex-test".to_string();
+    let official_from_omnigent = app
+        .active_thread_model_setting_update_params("gpt-6-sol".to_string())
+        .expect("active thread should produce update params");
+    assert_eq!(
+        official_from_omnigent.model_provider,
+        Some("openai".to_string())
+    );
+
     let local = app
         .active_thread_model_setting_update_params("QB/DSV4.1-Flash".to_string())
         .expect("active thread should produce update params");

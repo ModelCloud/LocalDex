@@ -4862,6 +4862,119 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
 }
 
 #[tokio::test]
+async fn session_switches_between_omnigent_localdex_and_openai() {
+    let mut session = make_session_configuration_for_tests().await;
+    let mut config = (*session.original_config_do_not_use).clone();
+    let mut local_provider = config.model_providers["openai"].clone();
+    local_provider.name = "Omnigent LocalDex".to_string();
+    local_provider.base_url = Some("http://127.0.0.1:2120/v1".to_string());
+    local_provider.requires_openai_auth = false;
+    config
+        .model_providers
+        .insert("localdex".to_string(), local_provider.clone());
+    config
+        .model_providers
+        .insert("omnigent-localdex-test".to_string(), local_provider.clone());
+    config.model_provider_id = "omnigent-localdex-test".to_string();
+    config.model_provider = local_provider;
+    session.original_config_do_not_use = Arc::new(config);
+    let mut step_settings = (*session.step_settings).clone();
+    step_settings.collaboration_mode.settings.model = "QB/DSV4.1-Flash".to_string();
+    session.step_settings = Arc::new(step_settings);
+
+    let official = session
+        .apply(
+            &SessionSettingsUpdate {
+                step_settings: StepSettingsUpdate {
+                    model: Some("gpt-6-sol".to_string()),
+                    ..Default::default()
+                },
+                model_provider: Some("omnigent-localdex-test".to_string()),
+                ..Default::default()
+            },
+            &[],
+        )
+        .expect("switch to OpenAI");
+    assert_eq!(
+        official.original_config_do_not_use.model_provider_id,
+        "openai"
+    );
+
+    let official_with_stale_provider = official
+        .apply(
+            &SessionSettingsUpdate {
+                step_settings: StepSettingsUpdate {
+                    model: Some("gpt-6-sol".to_string()),
+                    ..Default::default()
+                },
+                model_provider: Some("omnigent-localdex-test".to_string()),
+                ..Default::default()
+            },
+            &[],
+        )
+        .expect("keep OpenAI when Omnigent repeats its stale provider");
+    assert_eq!(
+        official_with_stale_provider
+            .original_config_do_not_use
+            .model_provider_id,
+        "openai"
+    );
+
+    let local = official_with_stale_provider
+        .apply(
+            &SessionSettingsUpdate {
+                step_settings: StepSettingsUpdate {
+                    model: Some("QB/DSV4.1-Flash".to_string()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            &[],
+        )
+        .expect("switch back to LocalDex");
+    assert_eq!(
+        local.original_config_do_not_use.model_provider_id,
+        "localdex"
+    );
+
+    let official_again = local
+        .apply(
+            &SessionSettingsUpdate {
+                step_settings: StepSettingsUpdate {
+                    model: Some("gpt-6-sol".to_string()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            &[],
+        )
+        .expect("switch back to OpenAI");
+    assert_eq!(
+        official_again.original_config_do_not_use.model_provider_id,
+        "openai"
+    );
+
+    let mut collaboration_mode = official_again.step_settings.collaboration_mode.clone();
+    collaboration_mode.settings.model = "QB/DSV4.1-Flash".to_string();
+    let local_from_mode = official_again
+        .apply(
+            &SessionSettingsUpdate {
+                step_settings: StepSettingsUpdate {
+                    collaboration_mode: Some(collaboration_mode),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            &[],
+        )
+        .expect("collaboration-mode switch to LocalDex");
+    assert_eq!(
+        local_from_mode.original_config_do_not_use.model_provider_id,
+        "localdex"
+    );
+}
+
+#[tokio::test]
 async fn emit_subagent_session_started_includes_fork_lineage_and_originator() {
     use codex_app_server_protocol::ServerNotification;
     use codex_app_server_protocol::ThreadArchivedNotification;
