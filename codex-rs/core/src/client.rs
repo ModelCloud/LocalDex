@@ -327,11 +327,6 @@ struct HttpSession {
     /// Set when the provider rejects stored-response continuation outright. The session then
     /// stops asking the provider to store responses and always sends full history.
     continuation_disabled: bool,
-    /// One-shot: the next attempt skips continuation and sends full history so the provider can
-    /// store a fresh response. Used when a continuation pointer went stale because the provider
-    /// lost its response store (for example after a restart) rather than because it cannot
-    /// continue at all.
-    continuation_reset_pending: bool,
     /// Consecutive continuation rejections since the last successful continuation. Bounds the
     /// cost for providers that keep rejecting, so a stale-pointer recovery cannot degrade into a
     /// full-history retry on every request.
@@ -350,16 +345,25 @@ const MAX_CONTINUATION_RESETS: u8 = 3;
 /// requests can continue from. An unsupported parameter is not, so it disables continuation for
 /// the session.
 fn is_stale_continuation(status: StatusCode, body: Option<&str>) -> bool {
-    if !matches!(status, StatusCode::NOT_FOUND | StatusCode::GONE) {
+    if !matches!(
+        status,
+        StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND | StatusCode::GONE
+    ) {
         return false;
     }
-    let Some(body) = body else {
-        return true;
+    let Some(error) = body
+        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+        .and_then(|body| body.get("error").cloned())
+    else {
+        return false;
     };
-    let body = body.to_ascii_lowercase();
-    body.contains("response_not_found")
-        || body.contains("previous response not found")
-        || body.contains("previous_response_id")
+    matches!(
+        error.get("code").and_then(serde_json::Value::as_str),
+        Some("response_not_found" | "previous_response_not_found")
+    ) && matches!(
+        error.get("param").and_then(serde_json::Value::as_str),
+        None | Some("previous_response_id")
+    )
 }
 
 struct HttpContinuation {
@@ -1558,12 +1562,6 @@ impl ModelClientSession {
         {
             return None;
         }
-        if self.http_session.continuation_reset_pending {
-            // The previous attempt referenced a response the provider no longer has. Send this
-            // attempt with full history; the response it stores re-arms continuation.
-            self.http_session.continuation_reset_pending = false;
-            return None;
-        }
         let last_response = self.get_last_http_response()?;
         let previous_request = self.http_session.last_request.as_ref()?;
         let items = self.get_incremental_items(request, previous_request, &last_response)?;
@@ -1946,7 +1944,9 @@ impl ModelClientSession {
                         // stores a fresh response that later requests can continue from, so
                         // recover instead of staying stateless for the rest of the session.
                         self.http_session.continuation_resets += 1;
-                        self.http_session.continuation_reset_pending = true;
+                        self.http_session.last_request = None;
+                        self.http_session.last_response_rx = None;
+                        self.http_session.last_response = None;
                         warn!(
                             status = %status,
                             resets = self.http_session.continuation_resets,

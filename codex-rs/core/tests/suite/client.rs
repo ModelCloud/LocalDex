@@ -586,11 +586,26 @@ async fn responses_continuation_stale_pointer_recovers_and_rearms_continuation()
                     ev_function_call("call-2", "unsupported_tool", "{}"),
                     ev_completed("resp2"),
                 ])),
+            // A second restart during the same turn must recover again.
+            ResponseTemplate::new(404).set_body_json(json!({
+                "error": {
+                    "message": "Previous response not found",
+                    "param": "previous_response_id",
+                    "code": "response_not_found",
+                }
+            })),
             ResponseTemplate::new(200)
                 .insert_header("content-type", "text/event-stream")
                 .set_body_string(sse(vec![
                     ev_response_created("resp3"),
+                    ev_function_call("call-3", "unsupported_tool", "{}"),
                     ev_completed("resp3"),
+                ])),
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse(vec![
+                    ev_response_created("resp4"),
+                    ev_completed("resp4"),
                 ])),
         ],
     )
@@ -605,7 +620,7 @@ async fn responses_continuation_stale_pointer_recovers_and_rearms_continuation()
             config.model_provider_id = provider.name.clone();
             config.model_provider = provider;
         })
-        .build(&server)
+        .build_with_auto_env(&server)
         .await
         .unwrap()
         .codex;
@@ -620,7 +635,7 @@ async fn responses_continuation_stale_pointer_recovers_and_rearms_continuation()
     wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let requests = response_mock.requests();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 6);
     let first = requests[0].body_json();
     let rejected_continuation = requests[1].body_json();
     let full_history_retry = requests[2].body_json();
@@ -645,14 +660,19 @@ async fn responses_continuation_stale_pointer_recovers_and_rearms_continuation()
                 .expect("continuation input")
                 .len()
     );
-    // Continuation resumes against the response the retry stored.
+    // Continuation resumes against the response the retry stored, even if it is rejected again.
     assert_eq!(
         rearmed_continuation["previous_response_id"],
         serde_json::Value::String("resp2".to_string())
     );
+    assert_eq!(rearmed_continuation["store"], serde_json::Value::Bool(true));
+    let second_recovery = requests[4].body_json();
+    let second_rearmed = requests[5].body_json();
+    assert!(second_recovery.get("previous_response_id").is_none());
+    assert_eq!(second_recovery["store"], serde_json::Value::Bool(true));
     assert_eq!(
-        rearmed_continuation["store"],
-        serde_json::Value::Bool(true)
+        second_rearmed["previous_response_id"],
+        serde_json::Value::String("resp3".to_string())
     );
 }
 
