@@ -472,8 +472,14 @@ async fn non_openai_responses_requests_include_item_ids_without_passthrough_meta
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_continuation_rejection_retries_full_history_and_disables_storage() {
+async fn responses_continuation_rejection_preserves_stored_response() {
     let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/responses/resp1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "resp1"})))
+        .expect(1)
+        .mount(&server)
+        .await;
     let response_mock = mount_response_sequence(
         &server,
         vec![
@@ -527,7 +533,7 @@ async fn responses_continuation_rejection_retries_full_history_and_disables_stor
     assert_eq!(requests.len(), 3);
     let first = requests[0].body_json();
     let rejected_continuation = requests[1].body_json();
-    let stateless_retry = requests[2].body_json();
+    let continuation_retry = requests[2].body_json();
     assert_eq!(first["store"], serde_json::Value::Bool(true));
     assert!(first.get("previous_response_id").is_none());
     assert_eq!(
@@ -541,10 +547,121 @@ async fn responses_continuation_rejection_retries_full_history_and_disables_stor
             .len()
             < first["input"].as_array().expect("first input").len()
     );
-    assert!(stateless_retry.get("previous_response_id").is_none());
-    assert_eq!(stateless_retry["store"], serde_json::Value::Bool(false));
+    assert_eq!(continuation_retry["previous_response_id"], "resp1");
+    assert_eq!(continuation_retry["store"], serde_json::Value::Bool(true));
+    assert_eq!(continuation_retry["input"], rejected_continuation["input"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_continuation_stale_pointer_recovers_and_rearms_continuation() {
+    let server = MockServer::start().await;
+    for response_id in ["resp1", "resp2"] {
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/responses/{response_id}")))
+            .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+                "error": {
+                    "message": "Response not found",
+                    "code": "response_not_found",
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    let response_mock = mount_response_sequence(
+        &server,
+        vec![
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse(vec![
+                    ev_response_created("resp1"),
+                    ev_function_call("call-1", "unsupported_tool", "{}"),
+                    ev_completed("resp1"),
+                ])),
+            // The provider restarted and no longer holds the referenced response, but it still
+            // supports continuation.
+            ResponseTemplate::new(404).set_body_json(json!({
+                "error": {
+                    "message": "Previous response not found",
+                    "type": "invalid_request_error",
+                    "param": "previous_response_id",
+                    "code": "response_not_found",
+                }
+            })),
+            // The full-history retry stores a fresh response and the turn continues.
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse(vec![
+                    ev_response_created("resp2"),
+                    ev_function_call("call-2", "unsupported_tool", "{}"),
+                    ev_completed("resp2"),
+                ])),
+            // A second restart during the same turn must recover again.
+            ResponseTemplate::new(404).set_body_json(json!({
+                "error": {
+                    "message": "Previous response not found",
+                    "param": "previous_response_id",
+                    "code": "response_not_found",
+                }
+            })),
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse(vec![
+                    ev_response_created("resp3"),
+                    ev_function_call("call-3", "unsupported_tool", "{}"),
+                    ev_completed("resp3"),
+                ])),
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse(vec![
+                    ev_response_created("resp4"),
+                    ev_completed("resp4"),
+                ])),
+        ],
+    )
+    .await;
+    let mut provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
+    provider.name = "Stale continuation test provider".to_string();
+    provider.base_url = Some(format!("{}/v1", server.uri()));
+    provider.supports_websockets = false;
+    provider.supports_responses_continuation = true;
+    let codex = test_codex()
+        .with_config(move |config| {
+            config.model_provider_id = provider.name.clone();
+            config.model_provider = provider;
+        })
+        .build_with_auto_env(&server)
+        .await
+        .unwrap()
+        .codex;
+
+    codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "hello".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await
+        .unwrap();
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 6);
+    let first = requests[0].body_json();
+    let rejected_continuation = requests[1].body_json();
+    let full_history_retry = requests[2].body_json();
+    let rearmed_continuation = requests[3].body_json();
+    assert_eq!(first["store"], serde_json::Value::Bool(true));
+    assert!(first.get("previous_response_id").is_none());
+    assert_eq!(
+        rejected_continuation["previous_response_id"],
+        serde_json::Value::String("resp1".to_string())
+    );
+    // A stale pointer is recoverable, so the retry must keep storing responses; otherwise the
+    // provider can never be continued again for the rest of the session.
+    assert!(full_history_retry.get("previous_response_id").is_none());
+    assert_eq!(full_history_retry["store"], serde_json::Value::Bool(true));
     assert!(
-        stateless_retry["input"]
+        full_history_retry["input"]
             .as_array()
             .expect("retry input")
             .len()
@@ -553,6 +670,77 @@ async fn responses_continuation_rejection_retries_full_history_and_disables_stor
                 .expect("continuation input")
                 .len()
     );
+    // Continuation resumes against the response the retry stored, even if it is rejected again.
+    assert_eq!(
+        rearmed_continuation["previous_response_id"],
+        serde_json::Value::String("resp2".to_string())
+    );
+    assert_eq!(rearmed_continuation["store"], serde_json::Value::Bool(true));
+    let second_recovery = requests[4].body_json();
+    let second_rearmed = requests[5].body_json();
+    assert!(second_recovery.get("previous_response_id").is_none());
+    assert_eq!(second_recovery["store"], serde_json::Value::Bool(true));
+    assert_eq!(
+        second_rearmed["previous_response_id"],
+        serde_json::Value::String("resp3".to_string())
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_continuation_probe_failure_does_not_replay_history() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/responses/resp1"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+    let response_mock = mount_response_sequence(
+        &server,
+        vec![
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse(vec![
+                    ev_response_created("resp1"),
+                    ev_function_call("call-1", "unsupported_tool", "{}"),
+                    ev_completed("resp1"),
+                ])),
+            ResponseTemplate::new(400).set_body_json(json!({
+                "error": {
+                    "message": "temporary request rejection",
+                    "code": "invalid_request",
+                }
+            })),
+        ],
+    )
+    .await;
+    let mut provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
+    provider.name = "Continuation probe failure test provider".to_string();
+    provider.base_url = Some(format!("{}/v1", server.uri()));
+    provider.supports_websockets = false;
+    provider.supports_responses_continuation = true;
+    provider.request_max_retries = Some(0);
+    let codex = test_codex()
+        .with_config(move |config| {
+            config.model_provider_id = provider.name.clone();
+            config.model_provider = provider;
+        })
+        .build_with_auto_env(&server)
+        .await
+        .unwrap()
+        .codex;
+
+    codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "hello".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await
+        .unwrap();
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].body_json()["previous_response_id"], "resp1");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
