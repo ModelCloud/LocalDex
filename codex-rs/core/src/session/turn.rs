@@ -175,7 +175,15 @@ pub(crate) async fn run_turn(
     drain_async_hook_results(&sess, &turn_context, /*before_user_prompt*/ true).await;
 
     let mut client_session =
-        prewarmed_client_session.unwrap_or_else(|| sess.services.model_client.new_session());
+        if sess.services.model_client.provider_info() == turn_context.provider.info() {
+            prewarmed_client_session.unwrap_or_else(|| sess.services.model_client.new_session())
+        } else {
+            // A settings update can switch providers after the session-scoped client was
+            // created. Discard prewarm prepared for the old provider.
+            sess.model_client_for_provider(&turn_context.provider)
+                .await
+                .new_session()
+        };
     // TODO(ccunningham): Pre-turn compaction runs before context updates and the
     // new user message are recorded. Estimate pending incoming items (context
     // diffs/full reinjection + user input) and trigger compaction preemptively

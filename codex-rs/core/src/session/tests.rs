@@ -5032,6 +5032,10 @@ async fn session_switches_between_omnigent_localdex_and_openai() {
         official.original_config_do_not_use.model_provider_id,
         "openai"
     );
+    assert_eq!(
+        official.provider.info(),
+        &official.original_config_do_not_use.model_provider
+    );
 
     let official_with_stale_provider = official
         .apply(
@@ -5069,6 +5073,10 @@ async fn session_switches_between_omnigent_localdex_and_openai() {
         local.original_config_do_not_use.model_provider_id,
         "localdex"
     );
+    assert_eq!(
+        local.provider.info(),
+        &local.original_config_do_not_use.model_provider
+    );
 
     let official_again = local
         .apply(
@@ -5085,6 +5093,10 @@ async fn session_switches_between_omnigent_localdex_and_openai() {
     assert_eq!(
         official_again.original_config_do_not_use.model_provider_id,
         "openai"
+    );
+    assert_eq!(
+        official_again.provider.info(),
+        &official_again.original_config_do_not_use.model_provider
     );
 
     let mut collaboration_mode = official_again.step_settings.collaboration_mode.clone();
@@ -6809,6 +6821,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
             config.workspace_routing_context(),
             Vec::new(),
         ),
+        alternate_model_clients: Mutex::new(Vec::new()),
         executed_tool_calls: executed_tool_calls.clone(),
         code_mode_service: crate::tools::code_mode::CodeModeService::new(
             thread_id,
@@ -9085,6 +9098,7 @@ where
             config.workspace_routing_context(),
             Vec::new(),
         ),
+        alternate_model_clients: Mutex::new(Vec::new()),
         executed_tool_calls: executed_tool_calls.clone(),
         code_mode_service: crate::tools::code_mode::CodeModeService::new(
             thread_id,

@@ -139,6 +139,100 @@ fn test_model_provider() -> SharedModelProvider {
 }
 
 #[tokio::test]
+async fn model_client_rebinds_provider_without_changing_in_flight_client() -> anyhow::Result<()> {
+    let original = test_model_client(SessionSource::Exec);
+    let openai_info =
+        create_oss_provider_with_base_url("https://api.openai.com/v1", WireApi::Responses);
+    let openai_provider = create_model_provider(openai_info, /*auth_manager*/ None);
+    let switched = original.with_provider(openai_provider);
+
+    let original_setup = original
+        .current_client_setup(super::ClientRouting::ConfiguredProvider)
+        .await?;
+    let switched_setup = switched
+        .current_client_setup(super::ClientRouting::ConfiguredProvider)
+        .await?;
+    assert_eq!(
+        (
+            original_setup.api_provider.base_url,
+            switched_setup.api_provider.base_url,
+        ),
+        (
+            "https://example.com/v1".to_string(),
+            "https://api.openai.com/v1".to_string(),
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn openai_request_omits_plaintext_reasoning_from_local_provider() -> anyhow::Result<()> {
+    let plaintext: ResponseItem = serde_json::from_value(json!({
+        "type": "reasoning",
+        "summary": [],
+        "content": [{"type": "reasoning_text", "text": "local reasoning"}],
+        "encrypted_content": null,
+    }))?;
+    let encrypted: ResponseItem = serde_json::from_value(json!({
+        "type": "reasoning",
+        "summary": [],
+        "encrypted_content": "opaque",
+    }))?;
+    let prompt = Prompt {
+        input: vec![plaintext, encrypted],
+        ..Default::default()
+    };
+    let local = test_model_client(SessionSource::Exec);
+    let official = local.with_provider(create_model_provider(
+        ModelProviderInfo::create_openai_provider(Some("https://api.openai.com/v1".to_string())),
+        /*auth_manager*/ None,
+    ));
+    let model = test_model_info();
+    let metadata = test_responses_metadata_for_client(
+        &local,
+        /*turn_id*/ None,
+        format!("{}:0", local.state.thread_id),
+        /*parent_thread_id*/ None,
+        TestCodexResponsesRequestKind::Turn,
+    );
+    let local_request = local.build_responses_request(
+        &prompt,
+        &model,
+        /*effort*/ None,
+        codex_protocol::config_types::ReasoningSummary::None,
+        /*service_tier*/ None,
+        &metadata,
+        /*include_internal*/ false,
+    )?;
+    let official_request = official.build_responses_request(
+        &prompt,
+        &model,
+        /*effort*/ None,
+        codex_protocol::config_types::ReasoningSummary::None,
+        /*service_tier*/ None,
+        &metadata,
+        /*include_internal*/ false,
+    )?;
+    let count_reasoning = |items: &[ResponseItem]| {
+        items
+            .iter()
+            .filter(|item| matches!(item, ResponseItem::Reasoning { .. }))
+            .count()
+    };
+    assert_eq!(count_reasoning(&prompt.input), 2);
+    assert_eq!(count_reasoning(&local_request.input), 2);
+    assert_eq!(count_reasoning(&official_request.input), 1);
+    assert!(official_request.input.iter().any(|item| matches!(
+        item,
+        ResponseItem::Reasoning {
+            encrypted_content: Some(_),
+            ..
+        }
+    )));
+    Ok(())
+}
+
+#[tokio::test]
 async fn workspace_routed_http_rejects_redirects_without_a_routing_header() {
     use codex_client::HttpTransport;
     use codex_login::WorkspaceRouting;
