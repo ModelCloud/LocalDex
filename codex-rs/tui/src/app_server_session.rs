@@ -126,6 +126,7 @@ use codex_app_server_protocol::TurnSteerParams;
 use codex_app_server_protocol::TurnSteerResponse;
 use codex_app_server_protocol::UserInput;
 use codex_config::ConfigLayerSource;
+use codex_features::Feature;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::ThreadId;
 use codex_protocol::approvals::GuardianAssessmentEvent;
@@ -1911,10 +1912,14 @@ fn new_thread_reasoning_overrides(config: &Config) -> Option<HashMap<String, ser
 
 fn service_tier_override_from_config(config: &Config) -> Option<Option<String>> {
     let local_settings = LocalSettings::from(config);
-    config.service_tier.clone().map(Some).or_else(|| {
-        (local_settings.notices.fast_default_opt_out == Some(true))
-            .then(|| Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string()))
-    })
+    service_tier_resolution::configured_service_tier(config, &local_settings.notices)
+        .or_else(|| {
+            config
+                .features
+                .enabled(Feature::FastMode)
+                .then(|| SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
+        })
+        .map(Some)
 }
 
 fn sandbox_mode_from_permission_profile(
