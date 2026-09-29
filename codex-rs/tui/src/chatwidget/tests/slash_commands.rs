@@ -3382,7 +3382,7 @@ async fn user_turn_preserves_flex_without_catalog_support() {
 }
 
 #[tokio::test]
-async fn model_switch_recomputes_catalog_default_service_tier() {
+async fn model_switch_does_not_enable_catalog_default_fast_tier() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5.2")).await;
     chat.thread_id = Some(ThreadId::new());
     set_chatgpt_auth(&mut chat);
@@ -3401,10 +3401,7 @@ async fn model_switch_recomputes_catalog_default_service_tier() {
     assert_eq!(chat.current_service_tier(), None);
 
     chat.set_model("gpt-5.4");
-    assert_eq!(
-        chat.current_service_tier(),
-        Some(ServiceTier::Fast.request_value())
-    );
+    assert_eq!(chat.current_service_tier(), None);
 
     chat.set_model("gpt-5.2");
     assert_eq!(chat.current_service_tier(), None);

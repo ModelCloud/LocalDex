@@ -36,10 +36,9 @@ pub(crate) fn effective_service_tier(
         Some(service_tier) if service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE => configured,
         Some(service_tier) if model_supports_service_tier(preset, service_tier) => configured,
         Some(_) => None,
-        None => preset
-            .default_service_tier
-            .clone()
-            .filter(|service_tier| model_supports_service_tier(preset, service_tier)),
+        // The catalog advertises available tiers, but must not opt the user
+        // into a paid Fast tier merely because a model is selected or resumed.
+        None => None,
     }
 }
 
