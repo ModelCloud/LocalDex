@@ -169,6 +169,12 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
         remote_models.sort_by_key(|model| model.priority);
 
         let mut presets: Vec<ModelPreset> = remote_models.into_iter().map(Into::into).collect();
+        // Fast is available as an explicit choice, never as a catalog default.
+        // Apply this after conversion so a remote /models refresh cannot
+        // reintroduce an implicit priority tier.
+        for preset in &mut presets {
+            preset.default_service_tier = None;
+        }
         let uses_codex_backend = self
             .auth_manager()
             .is_some_and(AuthManager::current_auth_uses_codex_backend);

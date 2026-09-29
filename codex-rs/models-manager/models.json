@@ -332,7 +332,7 @@
       ],
       "supports_search_tool": true,
       "supports_experimental_context": false,
-      "default_service_tier": "priority",
+      "default_service_tier": null,
       "service_tiers": [
         {
           "id": "priority",
@@ -500,7 +500,7 @@
       ],
       "supports_search_tool": true,
       "supports_experimental_context": false,
-      "default_service_tier": "priority",
+      "default_service_tier": null,
       "service_tiers": [
         {
           "id": "priority",
