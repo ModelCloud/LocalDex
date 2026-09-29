@@ -11,6 +11,7 @@
 //! A [`ModelClientSession`] is created per turn and is used to stream one or more Responses API
 //! requests during that turn. It caches a Responses WebSocket connection (opened lazily) and stores
 //! per-turn state such as the `x-codex-turn-state` token used for sticky routing.
+//! HTTP Responses continuation is returned to the conversation's client between turns.
 //! Cached connections, incremental response state, and turn routing are discarded when auth
 //! ownership changes.
 //!
@@ -218,6 +219,7 @@ struct ModelClientState {
     disable_websockets: AtomicBool,
     agent_identity_session_fallback: AgentIdentitySessionFallback,
     cached_websocket_session: StdMutex<WebsocketSession>,
+    cached_http_session: StdMutex<HttpSession>,
 }
 
 enum ClientRouting {
@@ -277,9 +279,10 @@ pub struct ModelClient {
 /// A turn-scoped streaming session created from a [`ModelClient`].
 ///
 /// The session establishes a Responses WebSocket connection lazily and reuses it across multiple
-/// requests within the turn. It also caches per-turn state:
+/// requests within the turn. It borrows continuation state from the conversation and owns routing
+/// state for this turn:
 ///
-/// - The last full request, so subsequent calls can reuse incremental websocket request payloads
+/// - The last full request, so subsequent calls can reuse incremental Responses request payloads
 ///   only when the current request is an incremental extension of the previous one.
 /// - The `x-codex-turn-state` sticky-routing token, which must be replayed for all requests within
 ///   the same turn.
@@ -317,10 +320,11 @@ struct WebsocketContinuation {
     from_untraced_warmup: bool,
 }
 
-/// Per-turn state for HTTP Responses continuation. Unlike WebSocket continuation this is kept
-/// only in the client, but it still uses the exact protocol items received from the server.
+/// Conversation-scoped HTTP continuation, borrowed by the active turn. The compatibility
+/// baseline uses the exact protocol items received from the server.
 #[derive(Debug, Default)]
 struct HttpSession {
+    auth_owner_generation: Option<u64>,
     last_request: Option<ResponsesApiRequest>,
     last_response_rx: Option<oneshot::Receiver<LastResponse>>,
     last_response: Option<LastResponse>,
@@ -567,6 +571,7 @@ impl ModelClient {
             disable_websockets: AtomicBool::new(false),
             agent_identity_session_fallback: AgentIdentitySessionFallback::default(),
             cached_websocket_session: StdMutex::new(WebsocketSession::default()),
+            cached_http_session: StdMutex::new(HttpSession::default()),
         });
         client
     }
@@ -635,6 +640,7 @@ impl ModelClient {
                 disable_websockets: AtomicBool::new(false),
                 agent_identity_session_fallback: AgentIdentitySessionFallback::default(),
                 cached_websocket_session: StdMutex::new(WebsocketSession::default()),
+                cached_http_session: StdMutex::new(HttpSession::default()),
             }),
             agent_identity_policy,
             prompt_cache_key_override: None,
@@ -711,10 +717,23 @@ impl ModelClient {
             websocket_session.reset(Some("other"));
             websocket_session.auth_owner_generation = auth_owner_generation;
         }
+        let mut http_session = std::mem::take(
+            &mut *self
+                .state
+                .cached_http_session
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        if http_session.auth_owner_generation != auth_owner_generation {
+            http_session = HttpSession {
+                auth_owner_generation,
+                ..Default::default()
+            };
+        }
         ModelClientSession {
             client: self.clone(),
             websocket_session,
-            http_session: HttpSession::default(),
+            http_session,
             turn_state: Arc::new(OnceLock::new()),
         }
     }
@@ -1458,6 +1477,15 @@ impl Drop for ModelClientSession {
         let websocket_session = std::mem::take(&mut self.websocket_session);
         self.client
             .store_cached_websocket_session(websocket_session);
+        if self.client.provider_info().supports_responses_continuation {
+            *self
+                .client
+                .state
+                .cached_http_session
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                std::mem::take(&mut self.http_session);
+        }
     }
 }
 
@@ -1842,6 +1870,15 @@ impl ModelClientSession {
                 .client
                 .current_client_setup(ClientRouting::Workspace)
                 .await?;
+            if self.http_session.auth_owner_generation != client_setup.auth_owner_generation
+                || self.client.auth_owner_generation() != client_setup.auth_owner_generation
+            {
+                self.http_session = HttpSession {
+                    auth_owner_generation: client_setup.auth_owner_generation,
+                    ..Default::default()
+                };
+                self.turn_state = Arc::new(OnceLock::new());
+            }
             let include_internal = self
                 .client
                 .state

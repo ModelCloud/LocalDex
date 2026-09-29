@@ -323,8 +323,7 @@ async fn responses_requests_preserve_item_turn_metadata_across_turns() {
     assert_eq!(first["store"], serde_json::Value::Bool(false));
     assert_eq!(second["store"], serde_json::Value::Bool(false));
     assert!(first.get("previous_response_id").is_none());
-    // A fresh turn is intentionally stateless even though its responses are retained. A response
-    // id is only valid for the strict append sequence within a single active turn.
+    // Providers without stored-response continuation replay history across turns.
     assert!(second.get("previous_response_id").is_none());
     let first_turn_id = first["client_metadata"]["turn_id"]
         .as_str()

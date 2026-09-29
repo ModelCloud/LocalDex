@@ -54,6 +54,7 @@ mod auto_review;
 mod catalog_permission_messages;
 mod cli_stream;
 mod client;
+mod client_http_continuation;
 mod client_websockets;
 mod cloud_config;
 mod code_mode;

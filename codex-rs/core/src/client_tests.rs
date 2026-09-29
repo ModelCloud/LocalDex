@@ -102,6 +102,9 @@ use wiremock::matchers::path;
 
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
 
+#[path = "client_http_continuation_tests.rs"]
+mod http_continuation;
+
 fn test_model_client(session_source: SessionSource) -> ModelClient {
     test_model_client_with_thread_id(ThreadId::new(), session_source)
 }
