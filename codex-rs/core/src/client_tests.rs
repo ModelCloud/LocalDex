@@ -139,6 +139,33 @@ fn test_model_provider() -> SharedModelProvider {
 }
 
 #[tokio::test]
+async fn model_client_rebinds_provider_without_changing_in_flight_client() -> anyhow::Result<()> {
+    let original = test_model_client(SessionSource::Exec);
+    let openai_info =
+        create_oss_provider_with_base_url("https://api.openai.com/v1", WireApi::Responses);
+    let openai_provider = create_model_provider(openai_info, /*auth_manager*/ None);
+    let switched = original.with_provider(openai_provider);
+
+    let original_setup = original
+        .current_client_setup(super::ClientRouting::ConfiguredProvider)
+        .await?;
+    let switched_setup = switched
+        .current_client_setup(super::ClientRouting::ConfiguredProvider)
+        .await?;
+    assert_eq!(
+        (
+            original_setup.api_provider.base_url,
+            switched_setup.api_provider.base_url,
+        ),
+        (
+            "https://example.com/v1".to_string(),
+            "https://api.openai.com/v1".to_string(),
+        )
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn workspace_routed_http_rejects_redirects_without_a_routing_header() {
     use codex_client::HttpTransport;
     use codex_login::WorkspaceRouting;

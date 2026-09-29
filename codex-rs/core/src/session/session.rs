@@ -437,6 +437,12 @@ impl SessionConfiguration {
                     allowed: "a configured model provider".to_string(),
                     requirement_source: codex_config::RequirementSource::Unknown,
                 })?;
+            if next_configuration.provider.info() != &model_provider {
+                next_configuration.provider = codex_model_provider::create_model_provider(
+                    model_provider.clone(),
+                    next_configuration.provider.auth_manager(),
+                );
+            }
             config.model_provider_id = model_provider_id.to_string();
             config.model_provider = model_provider;
             next_configuration.original_config_do_not_use = Arc::new(config);
@@ -686,6 +692,27 @@ async fn warm_plugins_and_skills_for_session_init(
 }
 
 impl Session {
+    pub(crate) async fn model_client_for_provider(
+        &self,
+        provider: &SharedModelProvider,
+    ) -> ModelClient {
+        if self.services.model_client.provider_info() == provider.info() {
+            return self.services.model_client.clone();
+        }
+
+        let mut clients = self.services.alternate_model_clients.lock().await;
+        if let Some(client) = clients
+            .iter()
+            .find(|client| client.provider_info() == provider.info())
+        {
+            return client.clone();
+        }
+
+        let client = self.services.model_client.with_provider(provider.clone());
+        clients.push(client.clone());
+        client
+    }
+
     /// Returns the concrete identity for this thread.
     pub(crate) fn thread_id(&self) -> ThreadId {
         self.thread_id
@@ -1797,6 +1824,7 @@ impl Session {
                     tx_event.clone(),
                     codex_responses_headers,
                 ),
+                alternate_model_clients: Mutex::new(Vec::new()),
                 executed_tool_calls: executed_tool_calls.clone(),
                 code_mode_service: crate::tools::code_mode::CodeModeService::new(
                     thread_id,

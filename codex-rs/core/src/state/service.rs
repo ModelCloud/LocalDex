@@ -97,6 +97,8 @@ pub(crate) struct SessionServices {
     pub(crate) time_provider: Arc<dyn TimeProvider>,
     /// Session-scoped model client shared across turns.
     pub(crate) model_client: ModelClient,
+    /// Clients for providers selected after the session starts.
+    pub(crate) alternate_model_clients: Mutex<Vec<ModelClient>>,
     pub(crate) executed_tool_calls: ExecutedToolCalls,
     pub(crate) code_mode_service: CodeModeService,
     pub(crate) tool_search_handler_cache: ToolSearchHandlerCache,

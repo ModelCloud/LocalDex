@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use codex_exec_server::LOCAL_ENVIRONMENT_ID;
 use codex_exec_server::MAX_SELECTED_CAPABILITY_ROOTS;
@@ -162,7 +163,16 @@ impl Session {
             ensure_configs_stay_owner_provided(current_environments, &environments.environments)?;
         }
 
-        current.apply(updates, current_environments)
+        let mut next = current.apply(updates, current_environments)?;
+        if next.provider.info() != current.provider.info() {
+            // The current provider may use provider-specific credentials. Rebind from the
+            // session's base auth manager so a later switch back to OpenAI restores its auth.
+            next.provider = codex_model_provider::create_model_provider(
+                next.original_config_do_not_use.model_provider.clone(),
+                Some(Arc::clone(&self.services.auth_manager)),
+            );
+        }
+        Ok(next)
     }
 
     /// Activates the environments accepted for a new task. Configuration may have arrived for

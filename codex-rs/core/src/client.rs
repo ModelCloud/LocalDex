@@ -529,6 +529,48 @@ fn sideband_websocket_auth_headers(api_auth: &dyn AuthProvider) -> ApiHeaderMap 
 }
 
 impl ModelClient {
+    pub(crate) fn provider_info(&self) -> &ModelProviderInfo {
+        self.state.provider.info()
+    }
+
+    /// Keeps in-flight turns on their original provider while future turns use the selected one.
+    pub(crate) fn with_provider(&self, provider: SharedModelProvider) -> Self {
+        if self.provider_info() == provider.info() {
+            return self.clone();
+        }
+
+        let state = &self.state;
+        let codex_api_key_env_enabled = provider
+            .auth_manager()
+            .as_ref()
+            .is_some_and(|manager| manager.codex_api_key_env_enabled());
+        let auth_env_telemetry =
+            collect_auth_env_telemetry(provider.info(), codex_api_key_env_enabled);
+        let include_attestation = provider.supports_attestation();
+        let mut client = self.clone();
+        client.state = Arc::new(ModelClientState {
+            thread_id: state.thread_id,
+            provider,
+            workspace_routing: state.workspace_routing.clone(),
+            auth_env_telemetry,
+            session_source: state.session_source.clone(),
+            originator: state.originator.clone(),
+            model_verbosity: state.model_verbosity.clone(),
+            content_item_kinds_enabled: state.content_item_kinds_enabled,
+            reasoning_effort_override_enabled: state.reasoning_effort_override_enabled,
+            enable_request_compression: state.enable_request_compression,
+            include_timing_metrics: state.include_timing_metrics,
+            beta_features_header: state.beta_features_header.clone(),
+            concurrent_reasoning_summaries_enabled: state.concurrent_reasoning_summaries_enabled,
+            include_attestation,
+            attestation_provider: state.attestation_provider.clone(),
+            disable_websockets: AtomicBool::new(false),
+            agent_identity_session_fallback: AgentIdentitySessionFallback::default(),
+            cached_websocket_session: StdMutex::new(WebsocketSession::default()),
+        });
+        client
+    }
+
     #[allow(clippy::too_many_arguments)]
     /// Creates a new session-scoped `ModelClient`.
     ///
