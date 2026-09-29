@@ -748,6 +748,15 @@ pub(crate) async fn run_turn(
                         ) {
                             return Err(err);
                         }
+                        sess.send_event(
+                            &turn_context,
+                            EventMsg::Warning(WarningEvent {
+                                message: format!(
+                                    "Post-turn compaction failed; the completed turn was preserved. Automatic compaction will not be retried until the conversation changes. Error: {err}"
+                                ),
+                            }),
+                        )
+                        .await;
                         warn!(error = %err, "Post-turn compaction failed; preserving the completed turn");
                     }
                     break;
@@ -1506,54 +1515,112 @@ async fn run_auto_compact(
     reason: CompactionReason,
     phase: CompactionPhase,
 ) -> CodexResult<()> {
-    let turn_context = &step_context.turn;
+    let turn_context = Arc::clone(&step_context.turn);
     let _profile_guard = turn_context.turn_timing_state.begin_compaction();
-    if turn_context.config.features.enabled(Feature::TokenBudget) {
-        // Compaction is the reset request, so force a new context window
-        // instead of consuming a pending `new_context` tool request.
-        crate::compact_token_budget::run_inline_auto_compact_task(
-            Arc::clone(sess),
-            step_context,
-            initial_context_injection,
+    let tokens_before = sess.get_total_token_usage().await;
+    if sess.failed_auto_compact_token_count().await == Some(tokens_before) {
+        let message = format!(
+            "Automatic compaction for this unchanged context already failed or made no progress ({tokens_before} estimated tokens). It was not sent again. Add or edit conversation content before retrying."
+        );
+        sess.send_event(
+            turn_context.as_ref(),
+            EventMsg::Warning(WarningEvent {
+                message: message.clone(),
+            }),
         )
-        .await?;
-        return Ok(());
+        .await;
+        return Err(CodexErr::Fatal(message));
     }
 
-    match turn_context.provider.capabilities().remote_compaction {
-        RemoteCompactionSupport::V2 => {
-            emit_compact_metric(
-                &sess.services.session_telemetry,
-                "remote_v2",
-                /*manual*/ false,
-            );
-            run_inline_remote_auto_compact_task_v2(
-                Arc::clone(sess),
+    let compact_sess = Arc::clone(sess);
+    let compact_turn_context = Arc::clone(&turn_context);
+    let compact_result = async move {
+        if compact_turn_context
+            .config
+            .features
+            .enabled(Feature::TokenBudget)
+        {
+            // Compaction is the reset request, so force a new context window
+            // instead of consuming a pending `new_context` tool request.
+            crate::compact_token_budget::run_inline_auto_compact_task(
+                Arc::clone(&compact_sess),
                 step_context,
-                fallback_step_context,
-                client_session,
                 initial_context_injection,
-                reason,
-                phase,
             )
             .await?;
+        } else {
+            match compact_turn_context
+                .provider
+                .capabilities()
+                .remote_compaction
+            {
+                RemoteCompactionSupport::V2 => {
+                    emit_compact_metric(
+                        &sess.services.session_telemetry,
+                        "remote_v2",
+                        /*manual*/ false,
+                    );
+                    run_inline_remote_auto_compact_task_v2(
+                        Arc::clone(&compact_sess),
+                        step_context,
+                        fallback_step_context,
+                        client_session,
+                        initial_context_injection,
+                        reason,
+                        phase,
+                    )
+                    .await?;
+                }
+                RemoteCompactionSupport::Unsupported => {
+                    emit_compact_metric(
+                        &sess.services.session_telemetry,
+                        "local",
+                        /*manual*/ false,
+                    );
+                    run_inline_auto_compact_task(
+                        Arc::clone(&compact_sess),
+                        compact_turn_context,
+                        initial_context_injection,
+                        reason,
+                        phase,
+                    )
+                    .await?;
+                }
+            }
         }
-        RemoteCompactionSupport::Unsupported => {
-            emit_compact_metric(
-                &sess.services.session_telemetry,
-                "local",
-                /*manual*/ false,
-            );
-            run_inline_auto_compact_task(
-                Arc::clone(sess),
-                Arc::clone(turn_context),
-                initial_context_injection,
-                reason,
-                phase,
-            )
-            .await?;
-        }
+        Ok::<(), CodexErr>(())
     }
+    .await;
+
+    if let Err(err) = compact_result {
+        if !matches!(
+            err.details(),
+            CodexErrorDetails::Interrupted | CodexErrorDetails::TurnAborted
+        ) {
+            sess.set_failed_auto_compact_token_count(Some(sess.get_total_token_usage().await))
+                .await;
+        }
+        return Err(err);
+    }
+
+    let tokens_after = sess.get_total_token_usage().await;
+    if tokens_before > 0 && tokens_after >= tokens_before {
+        sess.set_failed_auto_compact_token_count(Some(tokens_after))
+            .await;
+        let message = format!(
+            "Automatic compaction completed without reducing estimated context ({tokens_before} tokens before, {tokens_after} after). Stopping to prevent repeated compaction of the same context. Edit or shorten the conversation before retrying."
+        );
+        sess.send_event(
+            turn_context.as_ref(),
+            EventMsg::Warning(WarningEvent {
+                message: message.clone(),
+            }),
+        )
+        .await;
+        return Err(CodexErr::Fatal(message));
+    }
+
+    sess.set_failed_auto_compact_token_count(None).await;
     Ok(())
 }
 
