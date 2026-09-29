@@ -1003,6 +1003,20 @@ impl ModelClient {
             input.retain(|item| !matches!(item, ResponseItem::ConfigurationUpdate { .. }));
         }
         let is_openai = self.state.provider.info().is_openai();
+        if is_openai {
+            // OpenAI accepts historical reasoning only when it carries opaque encrypted
+            // content. Local providers can emit plaintext reasoning; keep it in the
+            // session history for a later local turn, but omit it from this request.
+            input.retain(|item| {
+                !matches!(
+                    item,
+                    ResponseItem::Reasoning {
+                        encrypted_content: None,
+                        ..
+                    }
+                )
+            });
+        }
         let (instructions, tools) = if model_info.use_responses_lite {
             // These prompt-only items are rebuilt on every request. Hash their visible payloads
             // within the thread so retries and resumed sessions preserve their identity.
