@@ -324,26 +324,16 @@ struct HttpSession {
     last_request: Option<ResponsesApiRequest>,
     last_response_rx: Option<oneshot::Receiver<LastResponse>>,
     last_response: Option<LastResponse>,
-    /// Set when the provider rejects stored-response continuation outright. The session then
-    /// stops asking the provider to store responses and always sends full history.
-    continuation_disabled: bool,
     /// Consecutive continuation rejections since the last successful continuation. Bounds the
     /// cost for providers that keep rejecting, so a stale-pointer recovery cannot degrade into a
     /// full-history retry on every request.
     continuation_resets: u8,
 }
 
-/// How many consecutive continuation rejections a session absorbs before falling back to
-/// stateless requests. A provider that lost its response store needs a single reset to
-/// re-establish a fresh chain; more than this means continuation is not usable.
+/// Maximum consecutive confirmed stale-response recoveries before surfacing the error.
 const MAX_CONTINUATION_RESETS: u8 = 3;
 
-/// Whether a rejected continuation means the referenced response is gone, as opposed to the
-/// provider not supporting continuation at all.
-///
-/// A stale pointer is recoverable: retrying with full history stores a fresh response that later
-/// requests can continue from. An unsupported parameter is not, so it disables continuation for
-/// the session.
+/// Whether a retrieval error confirms that the stored response no longer exists.
 fn is_stale_continuation(status: StatusCode, body: Option<&str>) -> bool {
     if !matches!(
         status,
@@ -1552,13 +1542,12 @@ impl ModelClientSession {
     /// The model's reasoning and function calls stay in their original `ResponseItem` form. If
     /// the request is no longer a strict append, callers intentionally fall back to full history.
     fn prepare_http_request(&mut self, request: &ResponsesApiRequest) -> Option<HttpContinuation> {
-        if self.http_session.continuation_disabled
-            || !self
-                .client
-                .state
-                .provider
-                .info()
-                .supports_responses_continuation
+        if !self
+            .client
+            .state
+            .provider
+            .info()
+            .supports_responses_continuation
         {
             return None;
         }
@@ -1791,6 +1780,7 @@ impl ModelClientSession {
             .map(AuthManager::unauthorized_recovery);
         let mut provider_auth_recovery_attempted = false;
         let mut pending_retry = PendingUnauthorizedRetry::default();
+        let mut continuation_probe_retries = 0;
         loop {
             let client_setup = self
                 .client
@@ -1840,11 +1830,6 @@ impl ModelClientSession {
                 responses_metadata,
                 include_internal,
             )?;
-            if self.http_session.continuation_disabled {
-                // The provider rejected stored-response continuation. Do not keep asking it to
-                // retain future requests after switching this session back to stateless mode.
-                request.store = false;
-            }
             self.client.set_guardian_metadata(
                 &mut request.client_metadata,
                 responses_metadata.parent_response_id.as_deref(),
@@ -1906,6 +1891,8 @@ impl ModelClientSession {
             )
             .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
             let is_continuation_request = request.previous_response_id.is_some();
+            let continuation_id = request.previous_response_id.clone();
+            let probe_headers = options.extra_headers.clone();
             let stream_result = client.stream_request(request, options).await;
 
             match stream_result {
@@ -1925,41 +1912,6 @@ impl ModelClientSession {
                     self.http_session.last_response_rx = Some(last_response_rx);
                     self.http_session.last_response = None;
                     return Ok(stream);
-                }
-                Err(ApiError::Transport(TransportError::Http { status, body, .. }))
-                    if is_continuation_request
-                        && matches!(
-                            status,
-                            StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND | StatusCode::GONE
-                        ) =>
-                {
-                    // A configured endpoint can advertise continuation incorrectly, or it can
-                    // lose its response store (across a restart, say) while still supporting
-                    // continuation. Either way, retry this request once with the exact full
-                    // history.
-                    if is_stale_continuation(status, body.as_deref())
-                        && self.http_session.continuation_resets < MAX_CONTINUATION_RESETS
-                    {
-                        // Only the pointer is stale, not the feature. Sending full history
-                        // stores a fresh response that later requests can continue from, so
-                        // recover instead of staying stateless for the rest of the session.
-                        self.http_session.continuation_resets += 1;
-                        self.http_session.last_request = None;
-                        self.http_session.last_response_rx = None;
-                        self.http_session.last_response = None;
-                        warn!(
-                            status = %status,
-                            resets = self.http_session.continuation_resets,
-                            "Responses continuation pointer is stale; retrying with full history"
-                        );
-                    } else {
-                        warn!(
-                            status = %status,
-                            "Responses continuation rejected; retrying with full history and disabling it for this session"
-                        );
-                        self.http_session.continuation_disabled = true;
-                    }
-                    continue;
                 }
                 Err(ApiError::Transport(unauthorized_transport))
                     if self
@@ -1990,6 +1942,77 @@ impl ModelClientSession {
                     continue;
                 }
                 Err(err) => {
+                    if let Some(continuation_id) = continuation_id.as_deref() {
+                        let transport_failure = matches!(
+                            &err,
+                            ApiError::Transport(
+                                TransportError::Timeout
+                                    | TransportError::Connection(_)
+                                    | TransportError::Network(_)
+                                    | TransportError::RetryLimit
+                            )
+                        );
+                        let mut endpoint_healthy = !transport_failure;
+                        if transport_failure {
+                            let deadline = Instant::now() + Duration::from_secs(20);
+                            while let Some(remaining) =
+                                deadline.checked_duration_since(Instant::now())
+                            {
+                                if matches!(
+                                    tokio::time::timeout(
+                                        remaining.min(Duration::from_secs(3)),
+                                        client.check_health(probe_headers.clone())
+                                    )
+                                    .await,
+                                    Ok(Ok(()))
+                                ) {
+                                    endpoint_healthy = true;
+                                    break;
+                                }
+                                tokio::time::sleep(Duration::from_millis(500)).await;
+                            }
+                        }
+                        if endpoint_healthy {
+                            match tokio::time::timeout(
+                                Duration::from_secs(5),
+                                client.retrieve_response(continuation_id, probe_headers),
+                            )
+                            .await
+                            {
+                                Ok(Ok(())) if continuation_probe_retries < 1 => {
+                                    continuation_probe_retries += 1;
+                                    warn!(
+                                        "Responses continuation failed but its response is stored; retrying the delta"
+                                    );
+                                    continue;
+                                }
+                                Ok(Err(ApiError::Transport(TransportError::Http {
+                                    status,
+                                    body,
+                                    ..
+                                }))) if is_stale_continuation(status, body.as_deref())
+                                    && self.http_session.continuation_resets
+                                        < MAX_CONTINUATION_RESETS =>
+                                {
+                                    self.http_session.continuation_resets += 1;
+                                    self.http_session.last_request = None;
+                                    self.http_session.last_response_rx = None;
+                                    self.http_session.last_response = None;
+                                    warn!(
+                                        status = %status,
+                                        resets = self.http_session.continuation_resets,
+                                        "Responses continuation no longer exists; retrying with full history"
+                                    );
+                                    continue;
+                                }
+                                Ok(Ok(())) | Ok(Err(_)) | Err(_) => {}
+                            }
+                        } else {
+                            warn!(
+                                "Responses endpoint is unavailable; preserving continuation pointer"
+                            );
+                        }
+                    }
                     let response_debug_context =
                         extract_response_debug_context_from_api_error(&err);
                     let err = self.client.state.provider.map_api_error(err);

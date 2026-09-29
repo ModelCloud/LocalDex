@@ -21,7 +21,9 @@ use http::Method;
 use serde_json::Value;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::time::Duration;
 use tracing::instrument;
+use url::Url;
 
 pub struct ResponsesClient<T: HttpTransport> {
     session: EndpointSession<T>,
@@ -55,6 +57,56 @@ impl<T: HttpTransport> ResponsesClient<T> {
             session: self.session.with_request_telemetry(request),
             sse_telemetry: sse,
         }
+    }
+
+    /// Checks whether a stored response is still available for continuation.
+    /// Only the status is needed, so leave the potentially large response body unread.
+    pub async fn retrieve_response(
+        &self,
+        response_id: &str,
+        extra_headers: HeaderMap,
+    ) -> Result<(), ApiError> {
+        let encoded_id: String =
+            url::form_urlencoded::byte_serialize(response_id.as_bytes()).collect();
+        self.session
+            .stream_encoded_json_with(
+                Method::GET,
+                &format!("/responses/{encoded_id}"),
+                extra_headers,
+                /*body*/ None,
+                |_| {},
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Checks the health route alongside a provider's `/v1` API root.
+    /// A successful check only establishes reachability, not response-ID validity.
+    pub async fn check_health(&self, extra_headers: HeaderMap) -> Result<(), ApiError> {
+        let mut url = Url::parse(&self.session.provider().base_url).map_err(|_| {
+            ApiError::InvalidRequest {
+                message: "invalid Responses provider URL".to_string(),
+            }
+        })?;
+        let base_path = url.path().trim_end_matches('/');
+        let root_path = base_path.strip_suffix("/v1").unwrap_or(base_path);
+        url.set_path(&format!("{root_path}/health"));
+        url.set_query(None);
+        let health_url = url.to_string();
+        self.session
+            .execute_with(
+                Method::GET,
+                "/health",
+                extra_headers,
+                /*body*/ None,
+                |request| {
+                    request.url.clone_from(&health_url);
+                    request.timeout = Some(Duration::from_secs(2));
+                    request.response_body_limit_bytes = Some(4096);
+                },
+            )
+            .await?;
+        Ok(())
     }
 
     #[instrument(
