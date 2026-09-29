@@ -81,6 +81,10 @@ pub const OPENAI_PROVIDER_ID: &str = "openai";
 /// arbitrary OpenAI-compatible endpoints retain the conservative stateless
 /// default.
 pub const LOCALDEX_PROVIDER_ID: &str = "localdex";
+/// LocalDex may spend several minutes prefilling a very large prompt before it
+/// emits the next SSE event. Keep the stream alive for up to 15 minutes so the
+/// client does not treat a valid cold prefill as a dead connection.
+const LOCALDEX_STREAM_IDLE_TIMEOUT_MS: u64 = 900_000;
 /// Omnigent creates a session-private provider ID for a LocalDex endpoint.
 pub fn is_localdex_provider_id(provider_id: &str) -> bool {
     provider_id == LOCALDEX_PROVIDER_ID || provider_id.starts_with("omnigent-localdex-")
@@ -719,8 +723,14 @@ pub fn merge_configured_model_providers(
         // capability flag, so make the supported behavior available without a
         // per-host configuration migration. All other configured providers
         // remain opt-in because `store=true` changes retention semantics.
-        if key == LOCALDEX_PROVIDER_ID {
+        if is_localdex_provider_id(&key) {
             provider.supports_responses_continuation = true;
+            // Do not automatically replay large LocalDex prompts on either
+            // request or stream errors. Surface failures instead of silently
+            // consuming minutes of prefill on repeated attempts.
+            provider.request_max_retries = Some(0);
+            provider.stream_max_retries = Some(0);
+            provider.stream_idle_timeout_ms = Some(LOCALDEX_STREAM_IDLE_TIMEOUT_MS);
         }
         if matches!(
             key.as_str(),
