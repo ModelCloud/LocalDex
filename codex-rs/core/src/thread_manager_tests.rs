@@ -55,6 +55,24 @@ use wiremock::MockServer;
 
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
 
+#[tokio::test]
+async fn localdex_model_is_in_catalog_while_openai_is_selected() {
+    let mut config = test_config().await;
+    config.model_provider_id = "openai".to_string();
+    config
+        .model_providers
+        .insert("localdex".to_string(), config.model_provider.clone());
+
+    let catalog = super::localdex_model_catalog_for_config(&config)
+        .expect("registered LocalDex provider should add its model catalog");
+    assert!(
+        catalog
+            .models
+            .iter()
+            .any(|model| model.slug == "QB/DSV4.1-Flash")
+    );
+}
+
 struct ParentInstructionsProvider(codex_extension_api::Instructions);
 
 impl codex_extension_api::UserInstructionsProvider for ParentInstructionsProvider {
@@ -2765,6 +2783,7 @@ fn interrupted_fork_snapshot_appends_interrupt_boundary() {
                 turn_id: None,
                 started_at: None,
                 reason: TurnAbortReason::Interrupted,
+                error: None,
                 completed_at: None,
                 duration_ms: None,
             })),
@@ -2788,6 +2807,7 @@ fn interrupted_fork_snapshot_appends_interrupt_boundary() {
                 turn_id: None,
                 started_at: None,
                 reason: TurnAbortReason::Interrupted,
+                error: None,
                 completed_at: None,
                 duration_ms: None,
             })),
@@ -2818,6 +2838,7 @@ fn disabled_interrupted_fork_snapshot_appends_only_interrupt_event() {
                 turn_id: None,
                 started_at: None,
                 reason: TurnAbortReason::Interrupted,
+                error: None,
                 completed_at: None,
                 duration_ms: None,
             })),
@@ -2840,6 +2861,7 @@ fn disabled_interrupted_fork_snapshot_appends_only_interrupt_event() {
                 turn_id: None,
                 started_at: None,
                 reason: TurnAbortReason::Interrupted,
+                error: None,
                 completed_at: None,
                 duration_ms: None,
             },
@@ -2858,6 +2880,7 @@ fn interrupted_snapshot_is_not_mid_turn() {
             turn_id: Some("turn-1".to_string()),
             started_at: None,
             reason: TurnAbortReason::Interrupted,
+            error: None,
             completed_at: None,
             duration_ms: None,
         })),
@@ -3038,6 +3061,7 @@ async fn interrupted_fork_snapshot_does_not_synthesize_turn_id_for_legacy_histor
             turn_id: expected_turn_id,
             started_at: None,
             reason: TurnAbortReason::Interrupted,
+            error: None,
             completed_at: None,
             duration_ms: None,
         }),
@@ -3160,6 +3184,7 @@ async fn interrupted_fork_snapshot_preserves_explicit_turn_id() {
                 turn_id: Some(turn_id),
                 started_at: None,
                 reason: TurnAbortReason::Interrupted,
+                error: None,
             completed_at: None,
             duration_ms: None,
             })) if turn_id == "turn-explicit"

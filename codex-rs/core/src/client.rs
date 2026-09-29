@@ -1526,7 +1526,7 @@ impl ModelClientSession {
             .http_session
             .last_response_rx
             .as_mut()
-            .map(|receiver| receiver.try_recv())?;
+            .map(tokio::sync::oneshot::Receiver::try_recv)?;
         match result {
             Ok(last_response) => {
                 self.http_session.last_response_rx = None;
@@ -2032,6 +2032,7 @@ impl ModelClientSession {
         request_trace: Option<W3cTraceContext>,
         inference_trace: &InferenceTraceContext,
     ) -> Result<WebsocketStreamOutcome> {
+        let after_prewarm = !warmup && self.websocket_session.last_response_from_untraced_warmup;
         let provider = Arc::clone(&self.client.state.provider);
         let auth_manager = provider.auth_manager();
 
@@ -2250,6 +2251,10 @@ impl ModelClientSession {
                     ("mode", mode),
                     ("reason", reason),
                     ("phase", if warmup { "warmup" } else { "generation" }),
+                    (
+                        "after_prewarm",
+                        if after_prewarm { "true" } else { "false" },
+                    ),
                 ],
             );
             let stream_result = websocket_connection
@@ -2534,24 +2539,23 @@ const RESPONSE_STREAM_CHANNEL_CAPACITY: usize = 1600;
 const STREAM_DROPPED_REASON: &str = "response stream dropped before provider terminal event";
 
 fn map_response_stream(
-    api_stream: codex_api::ResponseStream,
+    mut api_stream: codex_api::ResponseStream,
     session_telemetry: SessionTelemetry,
     inference_trace_attempt: InferenceTraceAttempt,
     provider: SharedModelProvider,
     interceptors: Vec<Box<dyn codex_extension_api::ModelResponseInterceptor>>,
 ) -> (ResponseStream, oneshot::Receiver<LastResponse>) {
-    // `codex_api::ResponseStream` owns cancellation of the upstream request on
-    // drop, so retain the stream itself rather than destructuring its fields.
-    // Moving fields out of a Drop type would lose that cancellation path.
-    let mut api_stream = api_stream;
     let upstream_request_id = api_stream.upstream_request_id.take();
-    map_response_events(
+    let interrupt = api_stream.interrupt.take();
+    let (mut stream, last_response) = map_response_events(
         upstream_request_id,
         crate::model_request::intercept_stream(Box::pin(api_stream), interceptors),
         session_telemetry,
         inference_trace_attempt,
         provider,
-    )
+    );
+    stream.interrupt = interrupt;
+    (stream, last_response)
 }
 
 fn map_response_events<S>(
@@ -2698,6 +2702,7 @@ where
     (
         ResponseStream {
             rx_event,
+            interrupt: None,
             consumer_dropped: consumer_dropped_for_stream,
         },
         rx_last_response,

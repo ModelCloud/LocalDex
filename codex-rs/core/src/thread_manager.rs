@@ -437,15 +437,24 @@ pub fn build_models_manager(
     // The LocalDex endpoint only describes the local model. Supply the merged
     // catalog so one picker can also select the bundled upstream Codex models;
     // an explicit user catalog remains authoritative.
-    let model_catalog = config.model_catalog.clone().or_else(|| {
-        (config.model_provider_id == "localdex")
-            .then(codex_models_manager::model_info::localdex_model_catalog)
-    });
+    let model_catalog = localdex_model_catalog_for_config(config);
     let manager = provider.models_manager(config.codex_home.to_path_buf(), model_catalog);
     manager.set_api_key_model_discovery_enabled(
         config.features.enabled(Feature::ApiKeyModelDiscovery),
     );
     manager
+}
+
+fn localdex_model_catalog_for_config(
+    config: &Config,
+) -> Option<codex_protocol::openai_models::ModelsResponse> {
+    config.model_catalog.clone().or_else(|| {
+        // Include the local model whenever LocalDex is registered, even when
+        // this session currently uses OpenAI. The app-server's model picker
+        // must let a live thread switch to QB without restarting it.
+        (config.model_provider_id == "localdex" || config.model_providers.contains_key("localdex"))
+            .then(codex_models_manager::model_info::localdex_model_catalog)
+    })
 }
 
 pub fn thread_store_from_config(
@@ -2631,6 +2640,7 @@ fn append_interrupted_boundary(
     let aborted_event = RolloutItem::EventMsg(EventMsg::TurnAborted(TurnAbortedEvent {
         turn_id,
         reason: TurnAbortReason::Interrupted,
+        error: None,
         started_at,
         completed_at: None,
         duration_ms: None,

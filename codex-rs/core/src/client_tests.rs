@@ -2100,6 +2100,7 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
                 tokio_util::sync::CancellationToken::new(),
             ),
             upstream_request_id: None,
+            interrupt: None,
         },
         test_session_telemetry(),
         attempt,
