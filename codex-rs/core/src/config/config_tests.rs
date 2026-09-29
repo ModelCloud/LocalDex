@@ -1111,6 +1111,65 @@ env_http_headers = { "x-openai-internal-codex-residency" = "CODEX_TEST_UNSET_RES
     Ok(())
 }
 
+#[tokio::test]
+async fn qb_model_selects_localdex_without_changing_official_model_routing() -> std::io::Result<()>
+{
+    let cfg = toml::from_str::<ConfigToml>(
+        r#"
+model = "QB/DSV4.1-Flash"
+model_provider = "omnigent-localdex-test"
+
+[model_providers.localdex]
+name = "LocalDex"
+base_url = "http://127.0.0.1:2120/v1"
+env_key = "CODEX_LOCAL_OPENAI_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+
+[model_providers.omnigent-localdex-test]
+name = "Omnigent LocalDex"
+base_url = "http://127.0.0.1:2120/v1"
+env_key = "CODEX_LOCAL_OPENAI_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+"#,
+    )
+    .expect("valid LocalDex provider config");
+    let stack = ConfigLayerStack::new(
+        Vec::new(),
+        ConfigRequirements::default(),
+        ConfigRequirementsToml::default(),
+    )?;
+    let local = Config::load_config_with_layer_stack(
+        LOCAL_FS.as_ref(),
+        cfg.clone(),
+        ConfigOverrides::default(),
+        tempdir()?.abs(),
+        stack,
+    )
+    .await?;
+    assert_eq!(local.model_provider_id, "localdex");
+
+    let stack = ConfigLayerStack::new(
+        Vec::new(),
+        ConfigRequirements::default(),
+        ConfigRequirementsToml::default(),
+    )?;
+    let official = Config::load_config_with_layer_stack(
+        LOCAL_FS.as_ref(),
+        cfg,
+        ConfigOverrides {
+            model: Some("gpt-5.6-sol".to_string()),
+            ..Default::default()
+        },
+        tempdir()?.abs(),
+        stack,
+    )
+    .await?;
+    assert_eq!(official.model_provider_id, "openai");
+    Ok(())
+}
+
 #[test]
 fn accepts_amazon_bedrock_aws_profile_override() {
     let cfg = toml::from_str::<ConfigToml>(

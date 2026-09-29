@@ -523,16 +523,14 @@ impl ModelInfo {
     }
 
     pub fn auto_compact_token_limit(&self) -> Option<i64> {
-        let context_limit = self
-            .resolved_context_window()
-            .map(|context_window| (context_window * 9) / 10);
-        let config_limit = self.auto_compact_token_limit;
-        if let Some(context_limit) = context_limit {
-            return Some(
-                config_limit.map_or(context_limit, |limit| std::cmp::min(limit, context_limit)),
-            );
+        match (
+            self.resolved_context_window(),
+            self.auto_compact_token_limit,
+        ) {
+            (Some(_), Some(config_limit)) => Some(config_limit.min(self.usable_context_window()?)),
+            (Some(context_window), None) => Some(context_window.saturating_mul(9) / 10),
+            (None, config_limit) => config_limit,
         }
-        config_limit
     }
 }
 
@@ -1878,8 +1876,20 @@ mod tests {
                 model.usable_context_window(),
                 model.auto_compact_token_limit(),
             ),
-            (Some(272_000), Some(258_400), Some(244_800))
+            (Some(272_000), Some(258_400), Some(250_000))
         );
+    }
+
+    #[test]
+    fn explicit_auto_compact_limit_can_reserve_fixed_headroom() {
+        let model = ModelInfo {
+            context_window: Some(393_216),
+            auto_compact_token_limit: Some(389_020),
+            effective_context_window_percent: 100,
+            ..test_model(/*spec*/ None)
+        };
+
+        assert_eq!(model.auto_compact_token_limit(), Some(389_020));
     }
 
     #[test]

@@ -25,7 +25,9 @@ pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 const PERSONALITY_SECTION_HEADER: &str = "# Personality";
 const LOCALDEX_DSV41_FLASH: &str = "QB/DSV4.1-Flash";
 const LOCALDEX_DSV41_FLASH_CONTEXT_WINDOW: i64 = 262_144;
-const LOCALDEX_DSV41_FLASH_AUTO_COMPACT_TOKEN_LIMIT: i64 = 235_929;
+const LOCALDEX_DSV41_FLASH_COMPACTION_HEADROOM: i64 = 4_196;
+const LOCALDEX_DSV41_FLASH_AUTO_COMPACT_TOKEN_LIMIT: i64 =
+    LOCALDEX_DSV41_FLASH_CONTEXT_WINDOW - LOCALDEX_DSV41_FLASH_COMPACTION_HEADROOM;
 const LOCALDEX_RUNTIME_CAPABILITIES_FILE: &str = "localdex-runtime-capabilities.json";
 
 #[derive(Deserialize)]
@@ -97,7 +99,8 @@ fn apply_localdex_runtime_capabilities(mut model: ModelInfo) -> ModelInfo {
     };
     model.context_window = Some(context_window);
     model.max_context_window = None;
-    model.auto_compact_token_limit = Some(context_window.saturating_mul(9) / 10);
+    model.auto_compact_token_limit =
+        Some(context_window.saturating_sub(LOCALDEX_DSV41_FLASH_COMPACTION_HEADROOM));
     model
 }
 
@@ -285,15 +288,14 @@ fn localdex_dsv41_flash_model_info() -> ModelInfo {
         supports_image_detail_original: false,
         // The endpoint reserves two tokens for its prompt template, exposing
         // a 262,142-token request budget from a 262,144-token context window.
-        // Compact well before that hard request limit so a model switch can
-        // recover an existing larger-context thread before its next request.
+        // Reserve 4,196 tokens for new input and the compaction request.
         context_window: Some(LOCALDEX_DSV41_FLASH_CONTEXT_WINDOW),
         // A live endpoint capability snapshot may raise or lower this value;
         // do not cap that authoritative result to the bundled fallback.
         max_context_window: None,
         auto_compact_token_limit: Some(LOCALDEX_DSV41_FLASH_AUTO_COMPACT_TOKEN_LIMIT),
         comp_hash: None,
-        effective_context_window_percent: 95,
+        effective_context_window_percent: 100,
         experimental_supported_tools: Vec::new(),
         input_modalities: vec![InputModality::Text],
         used_fallback_model_metadata: false,

@@ -556,6 +556,107 @@ async fn responses_continuation_rejection_retries_full_history_and_disables_stor
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_continuation_stale_pointer_recovers_and_rearms_continuation() {
+    let server = MockServer::start().await;
+    let response_mock = mount_response_sequence(
+        &server,
+        vec![
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse(vec![
+                    ev_response_created("resp1"),
+                    ev_function_call("call-1", "unsupported_tool", "{}"),
+                    ev_completed("resp1"),
+                ])),
+            // The provider restarted and no longer holds the referenced response, but it still
+            // supports continuation.
+            ResponseTemplate::new(404).set_body_json(json!({
+                "error": {
+                    "message": "Previous response not found",
+                    "type": "invalid_request_error",
+                    "param": "previous_response_id",
+                    "code": "response_not_found",
+                }
+            })),
+            // The full-history retry stores a fresh response and the turn continues.
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse(vec![
+                    ev_response_created("resp2"),
+                    ev_function_call("call-2", "unsupported_tool", "{}"),
+                    ev_completed("resp2"),
+                ])),
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse(vec![
+                    ev_response_created("resp3"),
+                    ev_completed("resp3"),
+                ])),
+        ],
+    )
+    .await;
+    let mut provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
+    provider.name = "Stale continuation test provider".to_string();
+    provider.base_url = Some(format!("{}/v1", server.uri()));
+    provider.supports_websockets = false;
+    provider.supports_responses_continuation = true;
+    let codex = test_codex()
+        .with_config(move |config| {
+            config.model_provider_id = provider.name.clone();
+            config.model_provider = provider;
+        })
+        .build(&server)
+        .await
+        .unwrap()
+        .codex;
+
+    codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "hello".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await
+        .unwrap();
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 4);
+    let first = requests[0].body_json();
+    let rejected_continuation = requests[1].body_json();
+    let full_history_retry = requests[2].body_json();
+    let rearmed_continuation = requests[3].body_json();
+    assert_eq!(first["store"], serde_json::Value::Bool(true));
+    assert!(first.get("previous_response_id").is_none());
+    assert_eq!(
+        rejected_continuation["previous_response_id"],
+        serde_json::Value::String("resp1".to_string())
+    );
+    // A stale pointer is recoverable, so the retry must keep storing responses; otherwise the
+    // provider can never be continued again for the rest of the session.
+    assert!(full_history_retry.get("previous_response_id").is_none());
+    assert_eq!(full_history_retry["store"], serde_json::Value::Bool(true));
+    assert!(
+        full_history_retry["input"]
+            .as_array()
+            .expect("retry input")
+            .len()
+            > rejected_continuation["input"]
+                .as_array()
+                .expect("continuation input")
+                .len()
+    );
+    // Continuation resumes against the response the retry stored.
+    assert_eq!(
+        rearmed_continuation["previous_response_id"],
+        serde_json::Value::String("resp2".to_string())
+    );
+    assert_eq!(
+        rearmed_continuation["store"],
+        serde_json::Value::Bool(true)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sends_audio_urls_to_responses() {
     skip_if_no_network!();
 

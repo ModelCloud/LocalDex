@@ -90,9 +90,12 @@ use codex_mcp::McpServerRegistration;
 use codex_mcp::ResolvedMcpCatalog;
 use codex_model_provider::ProviderCapabilities;
 use codex_model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
+use codex_model_provider_info::LOCALDEX_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
 use codex_model_provider_info::built_in_model_providers;
+use codex_model_provider_info::is_localdex_model;
+use codex_model_provider_info::is_localdex_provider_id;
 use codex_model_provider_info::merge_configured_model_providers;
 use codex_models_manager::ModelsManagerConfig;
 use codex_prompts::ResolvedModelMessages;
@@ -3804,10 +3807,35 @@ impl Config {
             merge_configured_model_providers(built_in_model_providers(openai_base_url), cfg.model_providers)
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?;
 
-        let model_provider_id = config_layer_stack.required_model_provider().map(str::to_string)
+        let required_model_provider = config_layer_stack.required_model_provider();
+        let requested_model_provider_id = required_model_provider.map(str::to_string)
             .or(model_provider)
             .or(cfg.model_provider)
             .unwrap_or_else(|| "openai".to_string());
+        // A QB model must never be sent to the OpenAI/ChatGPT provider. CLI
+        // --model and app-server launches both pass through this config load.
+        let selected_model = model.as_deref().or(cfg.model.as_deref());
+        let model_provider_id = if selected_model.is_some_and(is_localdex_model) {
+            if required_model_provider.is_some_and(|provider| provider != LOCALDEX_PROVIDER_ID) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "QB models require the localdex provider, but a different provider is required by managed configuration",
+                ));
+            }
+            LOCALDEX_PROVIDER_ID.to_string()
+        } else if selected_model.is_some()
+            && is_localdex_provider_id(&requested_model_provider_id)
+        {
+            if required_model_provider.is_some() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "an OpenAI model cannot use a required LocalDex provider",
+                ));
+            }
+            codex_model_provider_info::OPENAI_PROVIDER_ID.to_string()
+        } else {
+            requested_model_provider_id
+        };
         let model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {

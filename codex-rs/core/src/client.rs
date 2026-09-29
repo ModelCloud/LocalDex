@@ -324,7 +324,42 @@ struct HttpSession {
     last_request: Option<ResponsesApiRequest>,
     last_response_rx: Option<oneshot::Receiver<LastResponse>>,
     last_response: Option<LastResponse>,
+    /// Set when the provider rejects stored-response continuation outright. The session then
+    /// stops asking the provider to store responses and always sends full history.
     continuation_disabled: bool,
+    /// One-shot: the next attempt skips continuation and sends full history so the provider can
+    /// store a fresh response. Used when a continuation pointer went stale because the provider
+    /// lost its response store (for example after a restart) rather than because it cannot
+    /// continue at all.
+    continuation_reset_pending: bool,
+    /// Consecutive continuation rejections since the last successful continuation. Bounds the
+    /// cost for providers that keep rejecting, so a stale-pointer recovery cannot degrade into a
+    /// full-history retry on every request.
+    continuation_resets: u8,
+}
+
+/// How many consecutive continuation rejections a session absorbs before falling back to
+/// stateless requests. A provider that lost its response store needs a single reset to
+/// re-establish a fresh chain; more than this means continuation is not usable.
+const MAX_CONTINUATION_RESETS: u8 = 3;
+
+/// Whether a rejected continuation means the referenced response is gone, as opposed to the
+/// provider not supporting continuation at all.
+///
+/// A stale pointer is recoverable: retrying with full history stores a fresh response that later
+/// requests can continue from. An unsupported parameter is not, so it disables continuation for
+/// the session.
+fn is_stale_continuation(status: StatusCode, body: Option<&str>) -> bool {
+    if !matches!(status, StatusCode::NOT_FOUND | StatusCode::GONE) {
+        return false;
+    }
+    let Some(body) = body else {
+        return true;
+    };
+    let body = body.to_ascii_lowercase();
+    body.contains("response_not_found")
+        || body.contains("previous response not found")
+        || body.contains("previous_response_id")
 }
 
 struct HttpContinuation {
@@ -1523,6 +1558,12 @@ impl ModelClientSession {
         {
             return None;
         }
+        if self.http_session.continuation_reset_pending {
+            // The previous attempt referenced a response the provider no longer has. Send this
+            // attempt with full history; the response it stores re-arms continuation.
+            self.http_session.continuation_reset_pending = false;
+            return None;
+        }
         let last_response = self.get_last_http_response()?;
         let previous_request = self.http_session.last_request.as_ref()?;
         let items = self.get_incremental_items(request, previous_request, &last_response)?;
@@ -1871,6 +1912,10 @@ impl ModelClientSession {
 
             match stream_result {
                 Ok(stream) => {
+                    if is_continuation_request {
+                        // The provider accepted the continuation, so the chain is healthy again.
+                        self.http_session.continuation_resets = 0;
+                    }
                     let (stream, last_response_rx) = map_response_stream(
                         stream,
                         request_session_telemetry,
@@ -1883,21 +1928,37 @@ impl ModelClientSession {
                     self.http_session.last_response = None;
                     return Ok(stream);
                 }
-                Err(ApiError::Transport(TransportError::Http { status, .. }))
+                Err(ApiError::Transport(TransportError::Http { status, body, .. }))
                     if is_continuation_request
                         && matches!(
                             status,
                             StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND | StatusCode::GONE
                         ) =>
                 {
-                    // A configured endpoint can advertise continuation incorrectly or lose its
-                    // response store. Retry this request once with the exact full history, then
-                    // stay stateless for the remainder of the session.
-                    warn!(
-                        status = %status,
-                        "Responses continuation rejected; retrying with full history and disabling it for this session"
-                    );
-                    self.http_session.continuation_disabled = true;
+                    // A configured endpoint can advertise continuation incorrectly, or it can
+                    // lose its response store (across a restart, say) while still supporting
+                    // continuation. Either way, retry this request once with the exact full
+                    // history.
+                    if is_stale_continuation(status, body.as_deref())
+                        && self.http_session.continuation_resets < MAX_CONTINUATION_RESETS
+                    {
+                        // Only the pointer is stale, not the feature. Sending full history
+                        // stores a fresh response that later requests can continue from, so
+                        // recover instead of staying stateless for the rest of the session.
+                        self.http_session.continuation_resets += 1;
+                        self.http_session.continuation_reset_pending = true;
+                        warn!(
+                            status = %status,
+                            resets = self.http_session.continuation_resets,
+                            "Responses continuation pointer is stale; retrying with full history"
+                        );
+                    } else {
+                        warn!(
+                            status = %status,
+                            "Responses continuation rejected; retrying with full history and disabling it for this session"
+                        );
+                        self.http_session.continuation_disabled = true;
+                    }
                     continue;
                 }
                 Err(ApiError::Transport(unauthorized_transport))
