@@ -5593,21 +5593,6 @@ async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result
         requirements_toml,
     )
     .map_err(std::io::Error::other)?;
-    let refreshed_toml = refreshed_layer_stack
-        .effective_config()
-        .try_into()
-        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
-    let refreshed_config = Config::load_config_with_layer_stack(
-        LOCAL_FS.as_ref(),
-        refreshed_toml,
-        ConfigOverrides {
-            cwd: Some(codex_home.path().to_path_buf()),
-            ..Default::default()
-        },
-        codex_home.abs(),
-        refreshed_layer_stack,
-    )
-    .await?;
     let thread_layer_stack = ConfigLayerStack::new(
         vec![
             ConfigLayerEntry::new(
@@ -5675,13 +5660,12 @@ async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result
         thread_layer_stack,
     )
     .await?;
-    let zsh_path = refreshed_config.zsh_path.clone();
     let config = Config::rebuild_with_session_layers(
         &thread_config.config_layer_stack,
         thread_config.cwd.to_path_buf(),
-        &refreshed_config.config_layer_stack,
-        refreshed_config.codex_home.clone(),
-        zsh_path.map(AbsolutePathBuf::try_from).transpose()?,
+        &refreshed_layer_stack,
+        codex_home.abs(),
+        /*default_zsh_path*/ None,
     )
     .await?;
 
@@ -5763,17 +5747,6 @@ async fn rebuild_with_session_layers_refreshes_plugin_derived_mcp_config() -> an
         Default::default(),
         Default::default(),
     )?;
-    let refreshed_config = Config::load_config_with_layer_stack(
-        LOCAL_FS.as_ref(),
-        refreshed_layer_stack.effective_config().try_into()?,
-        ConfigOverrides {
-            cwd: Some(codex_home.path().to_path_buf()),
-            ..Default::default()
-        },
-        codex_home.abs(),
-        refreshed_layer_stack,
-    )
-    .await?;
     let thread_layer_stack = ConfigLayerStack::new(
         vec![ConfigLayerEntry::new(
             ConfigLayerSource::User {
@@ -5803,13 +5776,12 @@ async fn rebuild_with_session_layers_refreshes_plugin_derived_mcp_config() -> an
         thread_layer_stack,
     )
     .await?;
-    let zsh_path = refreshed_config.zsh_path.clone();
     let config = Config::rebuild_with_session_layers(
         &thread_config.config_layer_stack,
         thread_config.cwd.to_path_buf(),
-        &refreshed_config.config_layer_stack,
-        refreshed_config.codex_home.clone(),
-        zsh_path.map(AbsolutePathBuf::try_from).transpose()?,
+        &refreshed_layer_stack,
+        codex_home.abs(),
+        /*default_zsh_path*/ None,
     )
     .await?;
     let plugins_manager =
@@ -8514,6 +8486,8 @@ async fn load_config_uses_auto_review_guardian_policy_config_and_template() -> s
             experimental_policy_template: Some(
                 "  Configured template: {{ tenant_policy_config }}  ".to_string(),
             ),
+            experimental_conversation_history_prompt: None,
+            conversation_history_max_output_tokens: None,
         }),
         ..Default::default()
     };
@@ -8571,6 +8545,8 @@ async fn requirements_guardian_policy_beats_auto_review() -> std::io::Result<()>
                 policy: Some("Use the user-configured guardian policy.".to_string()),
                 extra_policy: Some("Use the user-configured additional policy.".to_string()),
                 experimental_policy_template: None,
+                experimental_conversation_history_prompt: None,
+                conversation_history_max_output_tokens: None,
             }),
             ..Default::default()
         };
@@ -8610,6 +8586,8 @@ async fn load_config_ignores_empty_auto_review_guardian_policy_config() -> std::
             policy: Some("   ".to_string()),
             extra_policy: Some("   ".to_string()),
             experimental_policy_template: None,
+            experimental_conversation_history_prompt: Some(String::new()),
+            conversation_history_max_output_tokens: None,
         }),
         ..Default::default()
     };
@@ -8625,8 +8603,12 @@ async fn load_config_ignores_empty_auto_review_guardian_policy_config() -> std::
     .await?;
 
     assert_eq!(
-        (config.guardian_policy_config, config.guardian_extra_policy),
-        (None, None)
+        (
+            config.guardian_policy_config,
+            config.guardian_extra_policy,
+            config.guardian_conversation_history_prompt,
+        ),
+        (None, None, None)
     );
 
     Ok(())
@@ -11628,6 +11610,7 @@ use_xaa = true
 
     assert!(config.features.enabled(Feature::ViewImage));
     assert!(!config.features.enabled(Feature::ShellTool));
+    assert!(config.features.enabled(Feature::UseXaa));
     assert!(
         !config
             .startup_warnings
@@ -11667,6 +11650,7 @@ use_xaa = false
     assert!(!config.features.enabled(Feature::UnifiedExec));
     assert!(config.features.enabled(Feature::ShellTool));
     assert!(!config.features.enabled(Feature::UnifiedExecZshFork));
+    assert!(!config.features.enabled(Feature::UseXaa));
     assert!(
         !config
             .startup_warnings

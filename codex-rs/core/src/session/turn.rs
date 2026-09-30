@@ -212,7 +212,7 @@ pub(crate) async fn run_turn(
             return Err(err);
         }
         let error = err.to_codex_protocol_error();
-        sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
+        sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone(), err.details())
             .await;
         // Publish the failure only after prompt hooks finish, so clients cannot react to
         // an error by steering follow-up input into a turn still preserving its prompt.
@@ -290,11 +290,13 @@ pub(crate) async fn run_turn(
     let (world_state, display_roots) = tokio::join!(
         sess.record_context_updates_and_set_reference_context_item(first_step_context.as_ref()),
         async {
-            if first_step_context
-                .turn
-                .config
-                .features
-                .enabled(Feature::CwdRelativeTurnDiffs)
+            // Guardian must not wait for remote Git discovery just to display diff paths.
+            if crate::guardian::is_basic_session_source(&turn_context.session_source)
+                || first_step_context
+                    .turn
+                    .config
+                    .features
+                    .enabled(Feature::CwdRelativeTurnDiffs)
             {
                 first_step_context
                     .environments
@@ -649,8 +651,12 @@ pub(crate) async fn run_turn(
                             return Err(err);
                         }
                         let error = err.to_codex_protocol_error();
-                        sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
-                            .await;
+                        sess.emit_turn_error_lifecycle(
+                            turn_context.as_ref(),
+                            error.clone(),
+                            err.details(),
+                        )
+                        .await;
                         return Ok(None);
                     }
                     if run_pending_session_start_hooks(&sess, &turn_context).await {
@@ -756,6 +762,16 @@ pub(crate) async fn run_turn(
                         ) {
                             return Err(err);
                         }
+                        let error = err.to_codex_protocol_error();
+                        if matches!(error, CodexErrorInfo::UsageLimitExceeded) {
+                            // Preserve the completed answer while stopping automatic work.
+                            sess.emit_turn_error_lifecycle(
+                                turn_context.as_ref(),
+                                error,
+                                err.details(),
+                            )
+                            .await;
+                        }
                         sess.send_event(
                             &turn_context,
                             EventMsg::Warning(WarningEvent {
@@ -823,8 +839,12 @@ pub(crate) async fn run_turn(
             {
                 sess.track_turn_codex_error(turn_context.as_ref(), &codex_error);
                 let error = CodexErrorInfo::BadRequest;
-                sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
-                    .await;
+                sess.emit_turn_error_lifecycle(
+                    turn_context.as_ref(),
+                    error.clone(),
+                    codex_error.details(),
+                )
+                .await;
                 let event = EventMsg::Error(ErrorEvent {
                     misalignment: None,
                     message: "Invalid image in your last message. Please remove it and try again."
@@ -843,7 +863,7 @@ pub(crate) async fn run_turn(
                     sess.conversation.retire_handoffs_for_misalignment().await;
                 }
                 let error = e.to_codex_protocol_error();
-                sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
+                sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone(), e.details())
                     .await;
                 sess.track_turn_codex_error(turn_context.as_ref(), &e);
                 let event = EventMsg::Error(e.to_error_event(/*message_prefix*/ None));
@@ -1525,6 +1545,12 @@ async fn run_auto_compact(
 ) -> CodexResult<()> {
     let turn_context = Arc::clone(&step_context.turn);
     let _profile_guard = turn_context.turn_timing_state.begin_compaction();
+    let _compaction_span = trace_span!(
+        "codex.compaction",
+        codex.turn.phase = "compaction",
+        conversation.id = %sess.thread_id,
+        turn.id = %turn_context.sub_id,
+    );
     let tokens_before = sess.get_total_token_usage().await;
     if sess.failed_auto_compact_token_count().await == Some(tokens_before) {
         let message = format!(
@@ -1539,6 +1565,16 @@ async fn run_auto_compact(
         .await;
         return Err(CodexErr::Fatal(message));
     }
+
+    // Remote V2 compaction responses do not report the post-compaction token total. The next
+    // sampling response refreshes it, so comparing immediately would reject successful remote
+    // compaction as if it made no progress.
+    let can_measure_compaction_progress =
+        turn_context.config.features.enabled(Feature::TokenBudget)
+            || matches!(
+                turn_context.provider.capabilities().remote_compaction,
+                RemoteCompactionSupport::Unsupported
+            );
 
     let compact_sess = Arc::clone(sess);
     let compact_turn_context = Arc::clone(&turn_context);
@@ -1612,7 +1648,7 @@ async fn run_auto_compact(
     }
 
     let tokens_after = sess.get_total_token_usage().await;
-    if tokens_before > 0 && tokens_after >= tokens_before {
+    if can_measure_compaction_progress && tokens_before > 0 && tokens_after >= tokens_before {
         sess.set_failed_auto_compact_token_count(Some(tokens_after))
             .await;
         let message = format!(
@@ -1820,7 +1856,7 @@ async fn run_sampling_request(
             err,
             client_session,
             &sess,
-            &turn_context,
+            &step_context,
             ResponsesStreamRequest::Sampling,
         )
         .or_cancel(&preempt)
@@ -2674,6 +2710,13 @@ async fn try_run_sampling_request(
         turn_context.provider.info().name.as_str(),
     );
     let sampling_timing_guard = turn_context.turn_timing_state.begin_sampling();
+    // Do not enter this span: overlapping tools must not retain it past sampling.
+    let sampling_span = trace_span!(
+        "codex.sampling",
+        codex.turn.phase = "sampling",
+        conversation.id = %sess.thread_id,
+        turn.id = %turn_context.sub_id,
+    );
     let uses_sequential_cutoff_reasoning_summaries = turn_context
         .config
         .features
@@ -2936,6 +2979,14 @@ async fn try_run_sampling_request(
                         .enabled(Feature::DeferMailboxPreemption)
                     && sess.input_queue.has_pending_mailbox_items().await
                 {
+                    tracing::event!(
+                        name: "codex.mailbox_preemption",
+                        target: "codex_otel.trace_safe",
+                        tracing::Level::INFO,
+                        event.name = "codex.mailbox_preemption",
+                        conversation.id = %sess.thread_id,
+                        turn.id = %turn_context.sub_id,
+                    );
                     break Ok(SamplingRequestResult::Completed {
                         needs_follow_up: true,
                         last_agent_message,
@@ -3276,6 +3327,7 @@ async fn try_run_sampling_request(
             }
         }
     };
+    drop(sampling_span);
     drop(sampling_timing_guard);
 
     flush_assistant_text_segments_all(
@@ -3286,13 +3338,16 @@ async fn try_run_sampling_request(
     )
     .await;
 
-    let tool_blocking_timing_guard = if in_flight.is_empty() {
-        None
-    } else {
-        Some(turn_context.turn_timing_state.begin_tool_blocking())
-    };
-    drain_in_flight(&mut in_flight, sess.clone(), &step_context).await?;
-    drop(tool_blocking_timing_guard);
+    if !in_flight.is_empty() {
+        let _tool_blocking_timing_guard = turn_context.turn_timing_state.begin_tool_blocking();
+        let _tool_blocking_span = trace_span!(
+            "codex.tool_blocking",
+            codex.turn.phase = "tool_blocking",
+            conversation.id = %sess.thread_id,
+            turn.id = %turn_context.sub_id,
+        );
+        drain_in_flight(&mut in_flight, sess.clone(), &step_context).await?;
+    }
 
     if should_emit_token_count {
         // A tool call such as request_user_input can intentionally pause the turn. Emit token
