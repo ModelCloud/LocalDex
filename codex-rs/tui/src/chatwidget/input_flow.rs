@@ -209,6 +209,7 @@ impl ChatWidget {
                 .push_back(QueuedUserMessage {
                     user_message,
                     action,
+                    delivery: MessageDelivery::Unsent,
                     pending_pastes,
                     source,
                 });
@@ -241,6 +242,7 @@ impl ChatWidget {
             || self.input_queue.suppress_queue_autosend
             || self.input_queue.rate_limit_recovery_pending
             || self.input_queue.recovered_queue
+            || self.input_queue.has_unconfirmed_messages()
         {
             return false;
         }
