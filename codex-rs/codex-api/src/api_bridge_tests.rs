@@ -154,6 +154,7 @@ fn map_api_error_maps_context_length_exceeded_from_400_body() {
     })
     .to_string();
     let err = map_api_error(ApiError::Transport(TransportError::Http {
+        retry_after: None,
         status: http::StatusCode::BAD_REQUEST,
         url: Some("http://example.com/v1/responses".to_string()),
         headers: None,

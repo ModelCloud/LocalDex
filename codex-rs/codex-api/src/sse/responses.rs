@@ -498,6 +498,9 @@ pub fn process_responses_event(
                     .and_then(Value::as_str)
             });
             let reason = reason.unwrap_or("unknown");
+            if reason == "context_length_exceeded" {
+                return Err(ResponsesEventError::Api(ApiError::ContextWindowExceeded));
+            }
             let message = format!("Incomplete response returned, reason: {reason}");
             return Err(ResponsesEventError::Api(ApiError::Stream(message)));
         }
@@ -1210,6 +1213,26 @@ mod tests {
         assert_eq!(events.len(), 1);
 
         assert_matches!(events[0], Err(ApiError::ContextWindowExceeded));
+    }
+
+    #[tokio::test]
+    async fn incomplete_context_window_is_classified_for_compaction_recovery() {
+        for (reason, expected_context_error) in [
+            ("context_length_exceeded", true),
+            ("max_output_tokens", false),
+        ] {
+            let event = json!({
+                "type": "response.incomplete",
+                "response": { "incomplete_details": { "reason": reason } },
+            });
+            let sse = format!("event: response.incomplete\ndata: {event}\n\n");
+            let events = collect_events(&[sse.as_bytes()]).await;
+            if expected_context_error {
+                assert_matches!(events.as_slice(), [Err(ApiError::ContextWindowExceeded)]);
+            } else {
+                assert_matches!(events.as_slice(), [Err(ApiError::Stream(_))]);
+            }
+        }
     }
 
     #[tokio::test]
