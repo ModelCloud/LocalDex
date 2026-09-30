@@ -1,5 +1,9 @@
 # Rust/codex-rs
 
+## LocalDex artifacts after a merge
+
+After each PR merges into ModelCloud/LocalDex `main`, publish installable packages for Linux x86_64, Linux ARM64, and macOS ARM64 from the same merged commit. Follow [.codex/skills/localdex-release/SKILL.md](.codex/skills/localdex-release/SKILL.md). The workspace version can remain unchanged across merges, so check the artifact's source commit as well as its version.
+
 In the codex-rs folder where the rust code lives:
 
 - Crate names are prefixed with `codex-`. For example, the `core` folder's crate is named `codex-core`
