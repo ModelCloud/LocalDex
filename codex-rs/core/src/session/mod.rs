@@ -1436,6 +1436,17 @@ impl Session {
         state.get_total_token_usage(state.server_reasoning_included())
     }
 
+    pub(crate) async fn failed_auto_compact_token_count(&self) -> Option<i64> {
+        self.state.lock().await.failed_auto_compact_token_count()
+    }
+
+    pub(crate) async fn set_failed_auto_compact_token_count(&self, token_count: Option<i64>) {
+        self.state
+            .lock()
+            .await
+            .set_failed_auto_compact_token_count(token_count);
+    }
+
     pub(crate) async fn auto_compact_window_snapshot(&self) -> AutoCompactWindowSnapshot {
         let state = self.state.lock().await;
         state.auto_compact_window_snapshot()
