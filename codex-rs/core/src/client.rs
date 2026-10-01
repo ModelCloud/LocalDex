@@ -330,10 +330,29 @@ struct HttpSession {
     last_request: Option<ResponsesApiRequest>,
     last_response_rx: Option<oneshot::Receiver<LastResponse>>,
     last_response: Option<LastResponse>,
+    /// The last *stored* response and the request that produced it, captured
+    /// before the in-flight request replaced them.
+    ///
+    /// A LocalDex steer preempts the live request before the provider stores
+    /// its response, so the replacement request must be able to resume from
+    /// the last stored point instead of resending the whole conversation.
+    resume_point: Option<HttpResumePoint>,
     /// Consecutive continuation rejections since the last successful continuation. Bounds the
     /// cost for providers that keep rejecting, so a stale-pointer recovery cannot degrade into a
     /// full-history retry on every request.
     continuation_resets: u8,
+}
+
+/// A resumable HTTP continuation: the stored response and the exact request
+/// that produced it.
+///
+/// Restoring this pair lets the next request be reduced to the items appended
+/// after that response, which keeps the provider's prompt cache warm even when
+/// the intervening request was torn down before it completed.
+#[derive(Debug, Clone)]
+struct HttpResumePoint {
+    request: ResponsesApiRequest,
+    response: LastResponse,
 }
 
 /// Maximum consecutive confirmed stale-response recoveries before surfacing the error.
@@ -1956,10 +1975,26 @@ impl ModelClientSession {
             // Keep a full request as the client-side compatibility baseline. The wire request can
             // then be reduced to just new items when the previous response is stored remotely.
             let full_request = request.clone();
-            if let Some(continuation) = self.prepare_http_request(&request) {
+            let resume_point = if let Some(continuation) = self.prepare_http_request(&request) {
+                // `prepare_http_request` resolved the stored response this request is extending
+                // into `http_session.last_response`. Remember that pair so a steer can resume
+                // from it if this request is torn down before its own response is stored.
+                let resume_point = match (
+                    &self.http_session.last_request,
+                    &self.http_session.last_response,
+                ) {
+                    (Some(last_request), Some(last_response)) => Some(HttpResumePoint {
+                        request: last_request.clone(),
+                        response: last_response.clone(),
+                    }),
+                    _ => None,
+                };
                 request.previous_response_id = Some(continuation.response_id);
                 request.input = continuation.items;
-            }
+                resume_point
+            } else {
+                None
+            };
             self.client
                 .prepare_response_items_for_request(&mut request.input);
             if crate::guardian::is_basic_session_source(&self.client.state.session_source) {
@@ -2011,6 +2046,7 @@ impl ModelClientSession {
                     self.http_session.last_request = Some(full_request);
                     self.http_session.last_response_rx = Some(last_response_rx);
                     self.http_session.last_response = None;
+                    self.http_session.resume_point = resume_point;
                     return Ok(stream);
                 }
                 Err(ApiError::Transport(unauthorized_transport))
@@ -2582,6 +2618,25 @@ impl ModelClientSession {
     /// Drops the cached WebSocket connection and its continuation state.
     pub(crate) fn drop_connection(&mut self) {
         self.websocket_session.reset(Some("other"));
+    }
+
+    /// Restore the HTTP continuation to the last stored response after a
+    /// steered request was torn down before the provider stored its response.
+    ///
+    /// Returns `true` when a resume point was installed, so the replacement
+    /// request can be sent as a `previous_response_id` continuation. When no
+    /// resume point is available the existing state is left untouched: it
+    /// either already points at the last stored response (the request was
+    /// preempted before its response was created) or falls back to a
+    /// full-history request.
+    pub(crate) fn resume_http_continuation(&mut self) -> bool {
+        let Some(resume_point) = self.http_session.resume_point.take() else {
+            return false;
+        };
+        self.http_session.last_request = Some(resume_point.request);
+        self.http_session.last_response = Some(resume_point.response);
+        self.http_session.last_response_rx = None;
+        true
     }
 
     /// Permanently disables WebSockets for this Codex session and resets WebSocket state.

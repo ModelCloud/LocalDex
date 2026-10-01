@@ -553,7 +553,22 @@ pub(crate) async fn run_turn(
                         // stream. Keep the turn alive and consume the input that
                         // steer already appended before issuing the replacement
                         // request.
-                        SamplingRequestResult::Preempted => {
+                        SamplingRequestResult::Preempted { partial_items } => {
+                            // The provider never stored the preempted response, so its
+                            // partial output is missing from history. Replay what the
+                            // user already saw, then resume the HTTP continuation from
+                            // the last stored response so the replacement request stays
+                            // a `previous_response_id` delta instead of resending the
+                            // whole conversation.
+                            if !partial_items.is_empty() {
+                                sess.record_conversation_items(
+                                    turn_context.as_ref(),
+                                    turn_context.model_info(),
+                                    &partial_items,
+                                )
+                                .await;
+                            }
+                            client_session.resume_http_continuation();
                             can_drain_pending_input = true;
                             continue;
                         }
@@ -2021,7 +2036,30 @@ enum SamplingRequestResult {
     },
     /// The local provider stream was intentionally replaced by a same-turn
     /// steer. This is not a failed request and must not emit TurnAborted.
-    Preempted,
+    ///
+    /// Carries the assistant output that had already been streamed to the
+    /// client so the replacement request can replay it instead of discarding
+    /// everything the model produced after the last stored response.
+    Preempted { partial_items: Vec<ResponseItem> },
+}
+
+/// Replay assistant text streamed before a steer preempted the provider stream.
+///
+/// The preempted response is never stored by the provider, so its partial
+/// output is absent from history. Recording the visible text as an assistant
+/// message keeps the conversation the user saw intact and lets the follow-up
+/// request be reduced to a delta on the last stored response.
+fn partial_assistant_items(text: String) -> Vec<ResponseItem> {
+    if text.trim().is_empty() {
+        return Vec::new();
+    }
+    vec![ResponseItem::Message {
+        id: None,
+        role: "assistant".to_string(),
+        content: vec![ContentItem::OutputText { text }],
+        phase: None,
+        internal_chat_message_metadata_passthrough: None,
+    }]
 }
 
 async fn arm_localdex_sampling_preemption(
@@ -2749,7 +2787,9 @@ async fn try_run_sampling_request(
             }
         } => {
             client_session.drop_connection();
-            return Ok(SamplingRequestResult::Preempted);
+            return Ok(SamplingRequestResult::Preempted {
+                partial_items: Vec::new(),
+            });
         }
         _ = preempt.cancelled() => {
             client_session.drop_connection();
@@ -2765,6 +2805,10 @@ async fn try_run_sampling_request(
     let mut needs_follow_up = false;
     let mut last_agent_message: Option<String> = None;
     let mut active_item: Option<TurnItem> = None;
+    // Assistant text already streamed to the client for the in-flight item.
+    // If a steer preempts the stream this is replayed into history so the
+    // replacement request does not discard what the user already saw.
+    let mut streamed_assistant_text = String::new();
     let mut active_tool_argument_diff_consumer: Option<(
         String,
         Box<dyn ToolArgumentDiffConsumer>,
@@ -2818,7 +2862,11 @@ async fn try_run_sampling_request(
             } => {
                 drop(stream);
                 client_session.drop_connection();
-                break Ok(SamplingRequestResult::Preempted);
+                break Ok(SamplingRequestResult::Preempted {
+                    partial_items: partial_assistant_items(std::mem::take(
+                        &mut streamed_assistant_text,
+                    )),
+                });
             }
             _ = preempt.cancelled() => {
                 if let Some(interrupt) = stream.interrupt.take() {
@@ -2865,6 +2913,9 @@ async fn try_run_sampling_request(
                 }
             }
             ResponseEvent::OutputItemDone(mut item) => {
+                // The completed item is recorded through `handle_output_item_done`; drop the
+                // streamed-delta buffer so a later preempt cannot replay it twice.
+                streamed_assistant_text.clear();
                 assign_missing_streamed_response_item_id(&mut item, active_item.as_ref());
                 sess.reserve_assistant_message_order(&turn_context, &item)
                     .await;
@@ -3185,6 +3236,7 @@ async fn try_run_sampling_request(
                     if !active_item_is_streaming_to_client {
                         continue;
                     }
+                    streamed_assistant_text.push_str(&delta);
                     let item_id = active.id();
                     if matches!(active, TurnItem::AgentMessage(_)) {
                         let parsed = assistant_message_stream_parsers.parse_delta(&item_id, &delta);
