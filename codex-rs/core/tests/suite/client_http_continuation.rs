@@ -12,8 +12,12 @@ use serde_json::json;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 
+#[test_case::test_case(false; "standard")]
+#[test_case::test_case(true; "responses_lite")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_http_continuation_survives_user_turns() -> anyhow::Result<()> {
+async fn responses_http_continuation_survives_user_turns(
+    responses_lite: bool,
+) -> anyhow::Result<()> {
     let server = MockServer::start().await;
     let response_mock = mount_response_sequence(
         &server,
@@ -64,10 +68,16 @@ async fn responses_http_continuation_survives_user_turns() -> anyhow::Result<()>
     let mut provider =
         create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), WireApi::Responses);
     provider.supports_responses_continuation = true;
+    provider.request_max_retries = Some(0);
+    provider.stream_max_retries = Some(0);
     let test = test_codex()
+        .with_model_info_override("gpt-5.5", move |model_info| {
+            model_info.use_responses_lite = responses_lite;
+        })
         .with_config(move |config| {
             config.model_provider_id = provider.name.clone();
             config.model_provider = provider;
+            config.base_instructions = Some("Stable base instructions".to_string());
         })
         .build_with_auto_env(&server)
         .await?;
@@ -77,6 +87,24 @@ async fn responses_http_continuation_survives_user_turns() -> anyhow::Result<()>
 
     let requests = response_mock.requests();
     assert_eq!(requests.len(), 4);
+    let first_input = requests[0].input();
+    let instructions_index = usize::from(responses_lite);
+    assert_eq!(first_input[instructions_index]["role"], "developer");
+    assert_eq!(
+        first_input[instructions_index]["content"],
+        json!([{"type": "input_text", "text": "Stable base instructions"}]),
+    );
+    let first_body = requests[0].body_json();
+    let tools = if responses_lite {
+        assert_eq!(first_input[0]["type"], "additional_tools");
+        first_input[0]["tools"].as_array().unwrap()
+    } else {
+        first_body["tools"].as_array().unwrap()
+    };
+    assert!(!tools.is_empty());
+    if !responses_lite {
+        assert!(tools.iter().all(|tool| tool["type"] != "namespace"));
+    }
     assert_eq!(
         requests
             .iter()

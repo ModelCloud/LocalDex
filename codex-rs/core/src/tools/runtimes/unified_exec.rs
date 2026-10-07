@@ -45,6 +45,7 @@ use crate::unified_exec::UnifiedExecError;
 use crate::unified_exec::UnifiedExecProcess;
 use crate::unified_exec::UnifiedExecProcessManager;
 use codex_core_plugins::PluginMetricsSidecar;
+use codex_features::Feature;
 use codex_network_proxy::CREDENTIAL_BROKER_ACTIVE_ENV_KEY;
 use codex_network_proxy::ManagedNetworkSandboxContext;
 use codex_network_proxy::NetworkProxy;
@@ -63,6 +64,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 mod launch;
+mod snapshot_metrics;
 
 use launch::with_launch_failure_events;
 
@@ -312,6 +314,11 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecAttempt> for UnifiedExecRunt
         } else {
             environment_shell
         };
+        let snapshot_metrics = snapshot_metrics::SnapshotMetrics::start(
+            req,
+            &ctx.step_context.turn.config,
+            &self.shell_mode,
+        );
         let shell_snapshot = if environment_is_remote
             || credential_broker_available
                 && launch_sandbox_permissions.requires_escalated_permissions()
@@ -338,6 +345,9 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecAttempt> for UnifiedExecRunt
                 )
                 .await
         };
+        let snapshot_wait = snapshot_metrics
+            .as_ref()
+            .map(|metrics| metrics.started_at.elapsed());
         let shell_snapshot_location = shell_snapshot.as_ref().map(|snapshot| snapshot.path());
         let mut env = exec_env_for_sandbox_permissions(&req.env, launch_sandbox_permissions);
         let snapshot_credential_context = if let Some(snapshot) = shell_snapshot.as_ref()
@@ -511,18 +521,34 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecAttempt> for UnifiedExecRunt
         };
         #[cfg(not(unix))]
         let runtime_path_prepends = RuntimePathPrepends::default();
-        let mut command = if environment_is_remote {
-            base_command.to_vec()
-        } else {
-            maybe_wrap_shell_lc_with_snapshot(
-                base_command,
+        // Restore the executor's PATH directories inside the shell so nested commands can
+        // still find bundled tools even if login startup clears the inherited PATH.
+        // `base_command` already carries the requested login mode; keep it if setup is unavailable.
+        // `hook_command` is the raw script the helper needs to prepend setup inside that same shell.
+        let mut command = base_command.to_vec();
+        if ctx.session.enabled(Feature::LoginShellPackagePath)
+            && req.shell.is_posix_login()
+            && !explicit_env_overrides.contains_key("PATH")
+            && let Ok(info) = req.turn_environment.environment.info().await
+            && let Some(command_with_path_prepends) = req
+                .shell
+                .derive_exec_args_with_path_prepends(&req.hook_command, &info.prepend_path_dirs)
+        {
+            command = command_with_path_prepends;
+        }
+        let mut snapshot_used = false;
+        if !environment_is_remote {
+            let wrapped = maybe_wrap_shell_lc_with_snapshot(
+                &command,
                 shell,
                 shell_snapshot_location.as_ref(),
                 &explicit_env_overrides,
                 &env,
                 &runtime_path_prepends,
-            )
-        };
+            );
+            snapshot_used = wrapped != command;
+            command = wrapped;
+        }
         let brokered_shell_snapshot_missing = !environment_is_remote
             && managed_network.is_some()
             && env
@@ -546,6 +572,12 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecAttempt> for UnifiedExecRunt
                 ));
             }
             network.restore_and_disable_brokered_credentials(&mut env, &mut command);
+        }
+        if let Some(metrics) = snapshot_metrics
+            && let Some(wait) = snapshot_wait
+        {
+            let outcome = if snapshot_used { "used" } else { "fallback" };
+            metrics.record(&ctx.step_context.session_telemetry, wait, outcome);
         }
         if req.shell_snapshot.is_some() {
             let exports =
@@ -774,6 +806,7 @@ mod tests {
     fn test_turn_environment(cwd: PathUri) -> TurnEnvironment {
         TurnEnvironment::new(
             TurnEnvironmentSelection {
+                selected_capability_roots: Default::default(),
                 environment_id: LOCAL_ENVIRONMENT_ID.to_string(),
                 cwd,
                 workspace_roots: Vec::new(),
