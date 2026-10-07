@@ -27,6 +27,7 @@ async fn prompt_suggestion_only_follows_enabled_successful_live_turns() {
         chat.prompt_suggestion_summary = Some(codex_protocol::config_types::ReasoningSummary::None);
         let turn = Turn {
             id: "turn".into(),
+            root_turn_id: None,
             items: vec![],
             items_view: Default::default(),
             status: TurnStatus::InProgress,

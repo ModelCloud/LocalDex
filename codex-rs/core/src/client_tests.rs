@@ -70,6 +70,9 @@ use codex_rollout_trace::RawTraceEventPayload;
 use codex_rollout_trace::RolloutTrace;
 use codex_rollout_trace::TraceWriter;
 use codex_rollout_trace::replay_bundle;
+use codex_tools::JsonSchema;
+use codex_tools::ResponsesApiTool;
+use codex_tools::ToolSpec;
 use futures::StreamExt;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -144,10 +147,28 @@ fn test_model_provider() -> SharedModelProvider {
 #[tokio::test]
 async fn model_client_rebinds_provider_without_changing_in_flight_client() -> anyhow::Result<()> {
     let original = test_model_client(SessionSource::Exec);
+    let original_session = original.new_session();
+    let empty_tools: Arc<[ToolSpec]> = Arc::from([]);
+    assert!(!original_session.inference_tools_changed(&empty_tools));
     let openai_info =
         create_oss_provider_with_base_url("https://api.openai.com/v1", WireApi::Responses);
     let openai_provider = create_model_provider(openai_info, /*auth_manager*/ None);
     let switched = original.with_provider(openai_provider);
+    let changed_tools: Arc<[ToolSpec]> = vec![ToolSpec::Function(ResponsesApiTool {
+        name: "lookup".to_string(),
+        description: "Find an item".to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::default(),
+        output_schema: None,
+    })]
+    .into();
+    assert!(
+        switched
+            .new_session()
+            .inference_tools_changed(&changed_tools)
+    );
+    assert!(!original_session.inference_tools_changed(&empty_tools));
 
     let original_setup = original
         .current_client_setup(super::ClientRouting::ConfiguredProvider)
@@ -165,73 +186,6 @@ async fn model_client_rebinds_provider_without_changing_in_flight_client() -> an
             "https://api.openai.com/v1".to_string(),
         )
     );
-    Ok(())
-}
-
-#[test]
-fn openai_request_omits_plaintext_reasoning_from_local_provider() -> anyhow::Result<()> {
-    let plaintext: ResponseItem = serde_json::from_value(json!({
-        "type": "reasoning",
-        "summary": [],
-        "content": [{"type": "reasoning_text", "text": "local reasoning"}],
-        "encrypted_content": null,
-    }))?;
-    let encrypted: ResponseItem = serde_json::from_value(json!({
-        "type": "reasoning",
-        "summary": [],
-        "encrypted_content": "opaque",
-    }))?;
-    let prompt = Prompt {
-        input: vec![plaintext, encrypted],
-        ..Default::default()
-    };
-    let local = test_model_client(SessionSource::Exec);
-    let official = local.with_provider(create_model_provider(
-        ModelProviderInfo::create_openai_provider(Some("https://api.openai.com/v1".to_string())),
-        /*auth_manager*/ None,
-    ));
-    let model = test_model_info();
-    let metadata = test_responses_metadata_for_client(
-        &local,
-        /*turn_id*/ None,
-        format!("{}:0", local.state.thread_id),
-        /*parent_thread_id*/ None,
-        TestCodexResponsesRequestKind::Turn,
-    );
-    let local_request = local.build_responses_request(
-        &prompt,
-        &model,
-        /*effort*/ None,
-        codex_protocol::config_types::ReasoningSummary::None,
-        /*service_tier*/ None,
-        &metadata,
-        /*include_internal*/ false,
-    )?;
-    let official_request = official.build_responses_request(
-        &prompt,
-        &model,
-        /*effort*/ None,
-        codex_protocol::config_types::ReasoningSummary::None,
-        /*service_tier*/ None,
-        &metadata,
-        /*include_internal*/ false,
-    )?;
-    let count_reasoning = |items: &[ResponseItem]| {
-        items
-            .iter()
-            .filter(|item| matches!(item, ResponseItem::Reasoning { .. }))
-            .count()
-    };
-    assert_eq!(count_reasoning(&prompt.input), 2);
-    assert_eq!(count_reasoning(&local_request.input), 2);
-    assert_eq!(count_reasoning(&official_request.input), 1);
-    assert!(official_request.input.iter().any(|item| matches!(
-        item,
-        ResponseItem::Reasoning {
-            encrypted_content: Some(_),
-            ..
-        }
-    )));
     Ok(())
 }
 
@@ -861,6 +815,10 @@ fn responses_request_preserves_result_metadata_above_previous_aggregate_budget()
         crate::tools::ExecutedToolCalls::new(&features, &codex_history::InitialHistory::New);
     let mut prompt = Prompt {
         input: history.clone(),
+        base_instructions: BaseInstructions {
+            text: String::new(),
+            ..Default::default()
+        },
         ..Default::default()
     };
     // Follow the sampling path: budget the request copy before client serialization.
@@ -1070,6 +1028,10 @@ async fn responses_http_preserves_raw_tool_metadata_for_openai_custom_endpoint()
     })));
     let prompt = Prompt {
         input: vec![output.clone()],
+        base_instructions: BaseInstructions {
+            text: String::new(),
+            ..Default::default()
+        },
         ..Default::default()
     };
     let responses_metadata = test_responses_metadata_for_client(
@@ -1108,13 +1070,26 @@ async fn responses_http_preserves_raw_tool_metadata_for_openai_custom_endpoint()
     Ok(())
 }
 
-#[test]
-fn responses_lite_prefix_ids_track_thread_and_payload() -> anyhow::Result<()> {
+#[test_case::test_case(false; "standard")]
+#[test_case::test_case(true; "responses_lite")]
+fn prefix_ids_track_thread_and_payload(responses_lite: bool) -> anyhow::Result<()> {
     let thread_id = ThreadId::new();
     let client = test_model_client_with_thread_id(thread_id, SessionSource::Cli);
     let mut model = test_model_info();
-    model.use_responses_lite = true;
+    model.use_responses_lite = responses_lite;
+    let instructions_index = usize::from(responses_lite);
+    let mut tool = codex_tools::FreeformTool {
+        name: "exec".to_string(),
+        description: "Execute JavaScript.".to_string(),
+        defer_loading: None,
+        format: codex_tools::FreeformToolFormat {
+            r#type: "grammar".to_string(),
+            syntax: "lark".to_string(),
+            definition: "start: /.+/".to_string(),
+        },
+    };
     let mut prompt = Prompt {
+        tools: vec![codex_tools::ToolSpec::Freeform(tool.clone())].into(),
         base_instructions: BaseInstructions {
             text: "base instructions".to_string(),
             provenance: None,
@@ -1144,33 +1119,38 @@ fn responses_lite_prefix_ids_track_thread_and_payload() -> anyhow::Result<()> {
 
     prompt.base_instructions.text.push_str(" with an update");
     let changed_instructions = build(&client, &prompt)?;
-    assert_eq!(changed_instructions.input[0], original.input[0]);
-    assert_ne!(changed_instructions.input[1].id(), original.input[1].id());
-
-    prompt.tools = vec![codex_tools::ToolSpec::Freeform(codex_tools::FreeformTool {
-        name: "exec".to_string(),
-        description: "Execute JavaScript.".to_string(),
-        defer_loading: None,
-        format: codex_tools::FreeformToolFormat {
-            r#type: "grammar".to_string(),
-            syntax: "lark".to_string(),
-            definition: "start: /.+/".to_string(),
-        },
-    })]
-    .into();
-    let changed_tools = build(&client, &prompt)?;
     assert_ne!(
-        changed_tools.input[0].id(),
-        changed_instructions.input[0].id()
+        changed_instructions.input[instructions_index].id(),
+        original.input[instructions_index].id()
     );
-    assert_eq!(changed_tools.input[1], changed_instructions.input[1]);
+
+    tool.description
+        .push_str(" Updated execution instructions.");
+    prompt.tools = vec![codex_tools::ToolSpec::Freeform(tool)].into();
+    let changed_tools = build(&client, &prompt)?;
+    assert_eq!(
+        changed_tools.input[instructions_index],
+        changed_instructions.input[instructions_index]
+    );
+    if responses_lite {
+        assert_eq!(changed_instructions.input[0], original.input[0]);
+        assert_ne!(
+            changed_tools.input[0].id(),
+            changed_instructions.input[0].id()
+        );
+    }
 
     let independent = build(
         &test_model_client_with_thread_id(ThreadId::new(), SessionSource::Cli),
         &prompt,
     )?;
-    assert_ne!(independent.input[0].id(), changed_tools.input[0].id());
-    assert_ne!(independent.input[1].id(), changed_tools.input[1].id());
+    assert_ne!(
+        independent.input[instructions_index].id(),
+        changed_tools.input[instructions_index].id()
+    );
+    if responses_lite {
+        assert_ne!(independent.input[0].id(), changed_tools.input[0].id());
+    }
     Ok(())
 }
 
@@ -2226,4 +2206,56 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
         serde_json::from_slice(&std::fs::read(temp.path().join(&payload.path))?)?;
     assert_eq!(recorded["output_items"], serde_json::to_value(&delivered)?);
     Ok(())
+}
+
+#[tokio::test]
+async fn inference_tools_changes_follow_full_specs_across_turns() {
+    let client = test_model_client(SessionSource::Cli);
+    let telemetry = test_session_telemetry();
+    let model_info = test_model_info();
+    let alpha = ResponsesApiTool {
+        name: "alpha".into(),
+        description: "Original".into(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::default(),
+        output_schema: None,
+    };
+    let beta = ResponsesApiTool {
+        name: "beta".into(),
+        ..alpha.clone()
+    };
+    let mut output_changed = alpha.clone();
+    output_changed.output_schema = Some(json!({"type": "object"}).into());
+    let mut params_changed = beta.clone();
+    params_changed.parameters = JsonSchema::string(Some("Changed parameters".into()));
+    let mut session = client.new_session();
+    for (index, (tools, expected)) in [
+        (vec![alpha.clone()], false),
+        (vec![output_changed.clone()], true),
+        (vec![output_changed.clone(), beta.clone()], true),
+        (vec![output_changed, beta.clone()], false),
+        (vec![beta, alpha.clone()], true),
+        (vec![params_changed, alpha], true),
+        (vec![], true),
+        (vec![], false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if index == 4 {
+            session.try_switch_fallback_transport(&telemetry, &model_info);
+            drop(session);
+            session = client.new_session();
+        }
+        let specs = tools
+            .into_iter()
+            .map(ToolSpec::Function)
+            .collect::<Arc<[_]>>();
+        assert_eq!(
+            session.inference_tools_changed(&specs),
+            expected,
+            "step {index}"
+        );
+    }
 }

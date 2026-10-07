@@ -8,20 +8,28 @@ use codex_model_provider::create_model_provider;
 use codex_model_provider_info::WireApi;
 use codex_model_provider_info::create_oss_provider_with_base_url;
 use codex_protocol::config_types::ReasoningSummary;
+use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::SessionSource;
+use codex_tools::JsonSchema;
+use codex_tools::ResponsesApiTool;
+use codex_tools::ToolSpec;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
-#[test]
-fn http_continuation_retains_pending_completion_and_checks_reuse_boundaries() -> anyhow::Result<()>
-{
+#[test_case::test_case(false; "standard")]
+#[test_case::test_case(true; "responses_lite")]
+fn http_continuation_retains_pending_completion_and_checks_reuse_boundaries(
+    responses_lite: bool,
+) -> anyhow::Result<()> {
     for scenario in [
         "same_provider",
         "other_provider",
         "other_owner",
         "other_model",
         "edited_history",
+        "changed_instructions",
+        "changed_tools",
     ] {
         let base = test_model_client(SessionSource::Cli);
         let mut provider = base.provider_info().clone();
@@ -36,26 +44,57 @@ fn http_continuation_retains_pending_completion_and_checks_reuse_boundaries() ->
             "type": "message", "role": "user",
             "content": [{"type": "input_text", "text": "next prompt"}],
         }))?;
-        let previous = client.build_responses_request(
-            &Prompt {
-                input: vec![first],
-                ..Default::default()
+        let mut model = test_model_info();
+        model.use_responses_lite = responses_lite;
+        let mut tool = ResponsesApiTool {
+            name: "lookup".to_string(),
+            description: "Find an item".to_string(),
+            strict: false,
+            defer_loading: None,
+            parameters: JsonSchema::default(),
+            output_schema: None,
+        };
+        let mut prompt = Prompt {
+            input: vec![first],
+            tools: vec![ToolSpec::Function(tool.clone())].into(),
+            base_instructions: BaseInstructions {
+                text: "Stable base instructions".to_string(),
+                provenance: None,
             },
-            &test_model_info(),
-            /*effort*/ None,
-            ReasoningSummary::None,
-            /*service_tier*/ None,
-            &test_responses_metadata_for_client(
-                &client,
-                /*turn_id*/ None,
-                format!("{}:0", client.state.thread_id),
-                /*parent_thread_id*/ None,
-                super::TestCodexResponsesRequestKind::Turn,
-            ),
-            /*include_internal*/ false,
-        )?;
-        let mut current = previous.clone();
-        current.input.push(next.clone());
+            ..Default::default()
+        };
+        let build = |prompt: &Prompt| {
+            client.build_responses_request(
+                prompt,
+                &model,
+                /*effort*/ None,
+                ReasoningSummary::None,
+                /*service_tier*/ None,
+                &test_responses_metadata_for_client(
+                    &client,
+                    /*turn_id*/ None,
+                    format!("{}:0", client.state.thread_id),
+                    /*parent_thread_id*/ None,
+                    super::TestCodexResponsesRequestKind::Turn,
+                ),
+                /*include_internal*/ false,
+            )
+        };
+        let previous = build(&prompt)?;
+        prompt.input.push(next.clone());
+        if scenario == "changed_instructions" {
+            prompt.base_instructions.text.push_str(" with an update");
+        }
+        if scenario == "changed_tools" {
+            tool.description.push_str(" with an update");
+            prompt.tools = vec![ToolSpec::Function(tool)].into();
+        }
+        if scenario == "edited_history" {
+            prompt.input[0] = next.clone();
+        }
+        // Rebuild the prefix exactly as the next request does, so its generated IDs
+        // and instructions must remain compatible with the stored response.
+        let mut current = build(&prompt)?;
         let mut turn = client.new_session();
         turn.http_session.last_request = Some(previous);
         let (sender, receiver) = tokio::sync::oneshot::channel();
@@ -85,9 +124,6 @@ fn http_continuation_retains_pending_completion_and_checks_reuse_boundaries() ->
         if scenario == "other_model" {
             current.model = "another-model".to_string();
         }
-        if scenario == "edited_history" {
-            current.input[0] = next.clone();
-        }
         let mut turn = next_client.new_session();
         assert_eq!(
             turn.prepare_http_request(&current)
@@ -103,9 +139,11 @@ fn http_continuation_retains_pending_completion_and_checks_reuse_boundaries() ->
 /// it. The replacement request must resume from the last stored response
 /// instead of resending the whole conversation, and must replay the assistant
 /// text that was already streamed to the client.
-#[test]
-fn http_continuation_resumes_from_last_stored_response_after_steer_preemption() -> anyhow::Result<()>
-{
+#[test_case::test_case(false; "standard")]
+#[test_case::test_case(true; "responses_lite")]
+fn http_continuation_resumes_from_last_stored_response_after_steer_preemption(
+    responses_lite: bool,
+) -> anyhow::Result<()> {
     let base = test_model_client(SessionSource::Cli);
     let mut provider = base.provider_info().clone();
     provider.supports_responses_continuation = true;
@@ -127,13 +165,15 @@ fn http_continuation_resumes_from_last_stored_response_after_steer_preemption() 
     let streamed_partial = message("assistant", "partial answer")?;
     let steer_prompt = message("user", "steer")?;
 
+    let mut model = test_model_info();
+    model.use_responses_lite = responses_lite;
     let build = |input: Vec<ResponseItem>| -> anyhow::Result<super::super::ResponsesApiRequest> {
         Ok(client.build_responses_request(
             &Prompt {
                 input,
                 ..Default::default()
             },
-            &test_model_info(),
+            &model,
             /*effort*/ None,
             ReasoningSummary::None,
             /*service_tier*/ None,
