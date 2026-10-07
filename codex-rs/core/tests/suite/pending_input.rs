@@ -1938,7 +1938,7 @@ fn call_output_text(body: &Value, output_type: &str, call_id: &str) -> Option<St
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn steer_reconnects_websocket_and_sends_full_history() -> anyhow::Result<()> {
+async fn localdex_steer_reconnects_websocket_and_sends_full_history() -> anyhow::Result<()> {
     core_test_support::skip_if_no_network!(Ok(()));
 
     let server = responses::start_websocket_server(vec![
@@ -1958,8 +1958,19 @@ async fn steer_reconnects_websocket_and_sends_full_history() -> anyhow::Result<(
     ])
     .await;
     let test = test_codex()
-        .with_model("gpt-5.4")
+        .with_model("QB/DSV4.1-Flash")
         .with_config(|config| {
+            let providers = codex_model_provider_info::merge_configured_model_providers(
+                Default::default(),
+                std::collections::HashMap::from([(
+                    "localdex".to_string(),
+                    config.model_provider.clone(),
+                )]),
+            )
+            .expect("LocalDex websocket provider should normalize");
+            config.model_provider_id = "localdex".to_string();
+            config.model_provider = providers["localdex"].clone();
+            config.model_providers.extend(providers);
             config
                 .features
                 .enable(Feature::InstantInterrupt)

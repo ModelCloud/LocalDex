@@ -230,6 +230,11 @@ pub struct ModelProviderInfo {
     #[serde(skip)]
     #[schemars(skip)]
     pub include_internal_metadata: bool,
+    /// Runtime-only LocalDex compatibility, assigned from the configured provider ID.
+    /// Generic Responses providers retain upstream authentication and capability defaults.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub localdex_compatibility: bool,
 }
 
 /// AWS SigV4 auth configuration for a model provider.
@@ -585,6 +590,7 @@ other non-default provider fields are not supported"
             requires_openai_auth: true,
             supports_websockets: true,
             supports_responses_continuation: false,
+            localdex_compatibility: false,
             supports_standalone_web_search: true,
             capabilities: None,
             include_internal_metadata: true,
@@ -626,6 +632,7 @@ other non-default provider fields are not supported"
             requires_openai_auth: false,
             supports_websockets: false,
             supports_responses_continuation: false,
+            localdex_compatibility: false,
             supports_standalone_web_search: false,
             capabilities: None,
             include_internal_metadata: false,
@@ -733,7 +740,8 @@ pub fn merge_configured_model_providers(
         // capability flag, so make the supported behavior available without a
         // per-host configuration migration. All other configured providers
         // remain opt-in because `store=true` changes retention semantics.
-        if is_localdex_provider_id(&key) {
+        provider.localdex_compatibility = is_localdex_provider_id(&key);
+        if provider.localdex_compatibility {
             provider.supports_responses_continuation = true;
             // Do not automatically replay large LocalDex prompts on either
             // request or stream errors. Surface failures instead of silently
@@ -815,6 +823,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
+        localdex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
         include_internal_metadata: false,

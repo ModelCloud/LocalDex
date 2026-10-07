@@ -737,7 +737,24 @@ impl Session {
             return client.clone();
         }
 
-        let client = self.services.model_client.with_provider(provider.clone());
+        // A LocalDex provider intentionally has no cached OpenAI auth. When a
+        // thread started there, recover the session-owned auth for its next
+        // upstream provider rather than inheriting that empty provider scope.
+        let provider = if self
+            .services
+            .model_client
+            .provider_info()
+            .localdex_compatibility
+            && !provider.info().localdex_compatibility
+        {
+            codex_model_provider::create_model_provider(
+                provider.info().clone(),
+                Some(Arc::clone(&self.services.auth_manager)),
+            )
+        } else {
+            provider.clone()
+        };
+        let client = self.services.model_client.with_provider(provider);
         clients.push(client.clone());
         client
     }

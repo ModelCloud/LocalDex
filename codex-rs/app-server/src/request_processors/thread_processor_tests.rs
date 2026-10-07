@@ -613,6 +613,7 @@ mod thread_processor_behavior_tests {
             requires_openai_auth: false,
             supports_websockets: true,
             supports_responses_continuation: false,
+            localdex_compatibility: false,
             supports_standalone_web_search: false,
             capabilities: None,
             include_internal_metadata: false,

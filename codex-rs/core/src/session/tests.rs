@@ -5222,14 +5222,16 @@ async fn session_switches_between_omnigent_localdex_and_openai() {
     local_provider.name = "Omnigent LocalDex".to_string();
     local_provider.base_url = Some("http://127.0.0.1:2120/v1".to_string());
     local_provider.requires_openai_auth = false;
-    config
-        .model_providers
-        .insert("localdex".to_string(), local_provider.clone());
-    config
-        .model_providers
-        .insert("omnigent-localdex-test".to_string(), local_provider.clone());
+    config.model_providers = codex_model_provider_info::merge_configured_model_providers(
+        config.model_providers,
+        std::collections::HashMap::from([
+            ("localdex".to_string(), local_provider.clone()),
+            ("omnigent-localdex-test".to_string(), local_provider),
+        ]),
+    )
+    .expect("LocalDex providers should normalize");
     config.model_provider_id = "omnigent-localdex-test".to_string();
-    config.model_provider = local_provider;
+    config.model_provider = config.model_providers["omnigent-localdex-test"].clone();
     session.original_config_do_not_use = Arc::new(config);
     let mut step_settings = (*session.step_settings).clone();
     step_settings.collaboration_mode.settings.model = "QB/DSV4.1-Flash".to_string();
@@ -5256,6 +5258,8 @@ async fn session_switches_between_omnigent_localdex_and_openai() {
         official.provider.info(),
         &official.original_config_do_not_use.model_provider
     );
+
+    assert!(official.provider.capabilities().namespace_tools);
 
     let official_with_stale_provider = official
         .apply(
@@ -5297,6 +5301,8 @@ async fn session_switches_between_omnigent_localdex_and_openai() {
         local.provider.info(),
         &local.original_config_do_not_use.model_provider
     );
+
+    assert!(!local.provider.capabilities().namespace_tools);
 
     let official_again = local
         .apply(
@@ -12245,8 +12251,10 @@ async fn remote_compaction_v2_retains_only_the_selected_step(first_attempt: Firs
     recv_terminal_event(&events, TerminalEventKind::TurnAborted).await;
 }
 
+#[test_case::test_case(true; "runtime_provider_provenance")]
+#[test_case::test_case(false; "pure_openai_without_runtime_provenance")]
 #[tokio::test]
-async fn interrupting_compaction_fallback_retains_last_known_step_context() {
+async fn interrupting_compaction_fallback_retains_last_known_step_context(with_provenance: bool) {
     let (release_primary, primary_gate) = tokio::sync::oneshot::channel();
     let (release_fallback, fallback_gate) = tokio::sync::oneshot::channel();
     let (server, _) = start_streaming_sse_server(vec![
@@ -12279,6 +12287,13 @@ async fn interrupting_compaction_fallback_retains_last_known_step_context() {
             realtime_active: Some(turn.realtime_active),
         }))
         .await;
+    if with_provenance {
+        session.state.lock().await.previous_turn_provider =
+            Some((turn.config.model_provider_id.clone(), turn.provider.clone()));
+    } else {
+        assert!(session.state.lock().await.previous_turn_provider.is_none());
+        assert!(!turn.provider.info().localdex_compatibility);
+    }
     session
         .record_conversation_items(
             &turn,

@@ -31,8 +31,9 @@ impl Default for ProviderCapabilities {
 
 impl ProviderCapabilities {
     pub(crate) fn from_config(info: &ModelProviderInfo) -> Self {
-        // Portable endpoints only guarantee ordinary Responses function tools.
-        let supports_openai_only_tools = info.requires_openai_auth;
+        // Only LocalDex endpoints use the portable function-tool compatibility surface.
+        // Generic configured providers retain upstream capability defaults.
+        let supports_openai_only_tools = !info.localdex_compatibility;
         let defaults = Self {
             namespace_tools: supports_openai_only_tools,
             image_generation: supports_openai_only_tools,

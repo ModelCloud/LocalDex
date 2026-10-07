@@ -189,6 +189,11 @@ fn sanitize_directory(lines: Vec<String>) -> Vec<String> {
     lines
         .into_iter()
         .map(|line| {
+            // Keep the CLI title stable across releases without changing provider/auth output.
+            let line = line.replace(
+                &format!("OpenAI Codex (v{})", crate::version::CODEX_CLI_VERSION),
+                "OpenAI Codex (v0.0.0)",
+            );
             if let Some((prefix, value)) = line.split_once("Directory:") {
                 let padding = &value[..value.len() - value.trim_start().len()];
                 format!("{prefix}Directory:{padding}[[workspace]]")

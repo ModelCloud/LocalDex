@@ -96,6 +96,7 @@ base_url = "http://localhost:11434/v1"
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
+        localdex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
         include_internal_metadata: false,
@@ -136,6 +137,7 @@ query_params = { api-version = "2025-04-01-preview" }
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
+        localdex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
         include_internal_metadata: false,
@@ -180,6 +182,7 @@ supports_standalone_web_search = true
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
+        localdex_compatibility: false,
         supports_standalone_web_search: true,
         capabilities: None,
         include_internal_metadata: false,
@@ -371,6 +374,7 @@ fn test_create_amazon_bedrock_provider() {
             requires_openai_auth: false,
             supports_websockets: false,
             supports_responses_continuation: false,
+            localdex_compatibility: false,
             supports_standalone_web_search: false,
             capabilities: None,
             include_internal_metadata: false,
@@ -537,6 +541,7 @@ fn test_merge_configured_localdex_provider_enables_responses_continuation() {
         providers[LOCALDEX_PROVIDER_ID].supports_responses_continuation,
         "LocalDex should enable its supported continuation protocol by default"
     );
+    assert!(providers[LOCALDEX_PROVIDER_ID].localdex_compatibility);
 }
 
 #[test]
@@ -728,6 +733,7 @@ fn test_validate_provider_aws_rejects_conflicting_auth() {
         env_key: Some("AWS_BEARER_TOKEN_BEDROCK".to_string()),
         supports_websockets: false,
         supports_responses_continuation: false,
+        localdex_compatibility: false,
         ..ModelProviderInfo::create_openai_provider(/*base_url*/ None)
     };
 
@@ -749,6 +755,7 @@ fn test_validate_provider_aws_rejects_websockets() {
         requires_openai_auth: false,
         supports_websockets: true,
         supports_responses_continuation: false,
+        localdex_compatibility: false,
         ..ModelProviderInfo::create_openai_provider(/*base_url*/ None)
     };
 

@@ -190,6 +190,8 @@ pub(crate) fn auth_manager_for_provider(
 ) -> Option<Arc<AuthManager>> {
     match provider.auth.clone() {
         Some(config) => Some(AuthManager::external_bearer_only(config)),
+        // Keep LocalDex inference, discovery, and cache identity on the same auth scope.
+        None if provider.localdex_compatibility && !provider.requires_openai_auth => None,
         None => auth_manager,
     }
 }
