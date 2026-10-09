@@ -1052,7 +1052,7 @@ pub enum ResponseItem {
         #[ts(optional)]
         id: Option<ResponseItemId>,
         summary: Vec<ReasoningItemReasoningSummary>,
-        #[serde(default, skip_serializing_if = "should_serialize_reasoning_content")]
+        #[serde(default, skip_serializing_if = "should_skip_reasoning_content")]
         #[ts(optional)]
         content: Option<Vec<ReasoningItemContent>>,
         encrypted_content: Option<String>,
@@ -1623,13 +1623,12 @@ fn render_command_prefix(prefix: &[String]) -> String {
     format!("[{tokens}]")
 }
 
-fn should_serialize_reasoning_content(content: &Option<Vec<ReasoningItemContent>>) -> bool {
-    match content {
-        Some(content) => !content
+fn should_skip_reasoning_content(content: &Option<Vec<ReasoningItemContent>>) -> bool {
+    content.as_ref().is_none_or(|content| {
+        !content
             .iter()
-            .any(|c| matches!(c, ReasoningItemContent::ReasoningText { .. })),
-        None => false,
-    }
+            .any(|c| matches!(c, ReasoningItemContent::ReasoningText { .. }))
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
