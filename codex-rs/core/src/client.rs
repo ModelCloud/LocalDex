@@ -182,6 +182,20 @@ const MEMORIES_SUMMARIZE_ENDPOINT: &str = "/memories/trace_summarize";
 pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration =
     Duration::from_millis(DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS);
 
+fn omit_reasoning_content_for_official_provider(
+    input: &mut [ResponseItem],
+    localdex_compatibility: bool,
+) {
+    if localdex_compatibility {
+        return;
+    }
+    for item in input {
+        if let ResponseItem::Reasoning { content, .. } = item {
+            *content = None;
+        }
+    }
+}
+
 fn session_telemetry_for_request(
     session_telemetry: &SessionTelemetry,
     request: &ResponsesApiRequest,
@@ -1152,6 +1166,13 @@ impl ModelClient {
     }
 
     fn prepare_response_items_for_request(&self, input: &mut [ResponseItem]) {
+        // A local provider can return plaintext reasoning for its own continuation.
+        // Official Responses models reject nonempty reasoning `content` in replayed
+        // input. Keep the session history intact and adapt only the outbound copy.
+        omit_reasoning_content_for_official_provider(
+            input,
+            self.state.provider.info().localdex_compatibility,
+        );
         for item in input {
             if item.id().is_some_and(|id| !id.is_prefixed()) {
                 item.set_id(/*new_id*/ None);
