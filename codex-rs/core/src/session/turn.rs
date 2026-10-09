@@ -1572,8 +1572,9 @@ async fn run_auto_compact(
         turn.id = %turn_context.sub_id,
     );
     let localdex_compaction = turn_context.provider.info().localdex_compatibility;
-    let tokens_before = sess.get_total_token_usage().await;
-    if localdex_compaction && sess.failed_auto_compact_token_count().await == Some(tokens_before) {
+    let context_before = sess.auto_compact_context_key().await;
+    let tokens_before = context_before.token_count;
+    if localdex_compaction && sess.failed_auto_compact_context().await == Some(context_before) {
         let message = format!(
             "Automatic compaction for this unchanged context already failed or made no progress ({tokens_before} estimated tokens). It was not sent again. Add or edit conversation content before retrying."
         );
@@ -1660,7 +1661,7 @@ async fn run_auto_compact(
                 CodexErrorDetails::Interrupted | CodexErrorDetails::TurnAborted
             )
         {
-            sess.set_failed_auto_compact_token_count(Some(sess.get_total_token_usage().await))
+            sess.set_failed_auto_compact_context(Some(sess.auto_compact_context_key().await))
                 .await;
         }
         return Err(err);
@@ -1671,7 +1672,7 @@ async fn run_auto_compact(
         && let Some(estimated_after) = sess.get_estimated_token_count(turn_context.as_ref()).await
         && estimated_after >= estimated_before
     {
-        sess.set_failed_auto_compact_token_count(Some(sess.get_total_token_usage().await))
+        sess.set_failed_auto_compact_context(Some(sess.auto_compact_context_key().await))
             .await;
         let message = format!(
             "Automatic compaction completed without reducing estimated context ({estimated_before} tokens before, {estimated_after} after). Stopping to prevent repeated compaction of the same context. Edit or shorten the conversation before retrying."
@@ -1687,7 +1688,7 @@ async fn run_auto_compact(
     }
 
     if localdex_compaction {
-        sess.set_failed_auto_compact_token_count(None).await;
+        sess.set_failed_auto_compact_context(None).await;
     }
     Ok(())
 }

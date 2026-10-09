@@ -312,6 +312,7 @@ use crate::rollout::map_session_init_error;
 use crate::session::startup_prewarm::SessionStartupPrewarmHandle;
 use crate::shell;
 use crate::state::AcceptedUserInputResponse;
+use crate::state::AutoCompactContextKey;
 use crate::state::AutoCompactWindowIds;
 use crate::state::AutoCompactWindowSnapshot;
 use crate::state::PendingRequestPermissions;
@@ -1498,15 +1499,22 @@ impl Session {
         state.get_total_token_usage(state.server_reasoning_included())
     }
 
-    pub(crate) async fn failed_auto_compact_token_count(&self) -> Option<i64> {
-        self.state.lock().await.failed_auto_compact_token_count()
+    pub(crate) async fn auto_compact_context_key(&self) -> AutoCompactContextKey {
+        self.state.lock().await.auto_compact_context_key()
     }
 
-    pub(crate) async fn set_failed_auto_compact_token_count(&self, token_count: Option<i64>) {
+    pub(crate) async fn failed_auto_compact_context(&self) -> Option<AutoCompactContextKey> {
+        self.state.lock().await.failed_auto_compact_context()
+    }
+
+    pub(crate) async fn set_failed_auto_compact_context(
+        &self,
+        context: Option<AutoCompactContextKey>,
+    ) {
         self.state
             .lock()
             .await
-            .set_failed_auto_compact_token_count(token_count);
+            .set_failed_auto_compact_context(context);
     }
 
     pub(crate) async fn auto_compact_window_snapshot(&self) -> AutoCompactWindowSnapshot {
