@@ -525,14 +525,26 @@ impl ModelInfo {
     }
 
     pub fn auto_compact_token_limit(&self) -> Option<i64> {
-        match (
-            self.resolved_context_window(),
-            self.auto_compact_token_limit,
-        ) {
-            (Some(_), Some(config_limit)) => Some(config_limit.min(self.usable_context_window()?)),
-            (Some(context_window), None) => Some(context_window.saturating_mul(9) / 10),
-            (None, config_limit) => config_limit,
+        // LocalDex publishes a fixed headroom budget for this model. Other models
+        // retain upstream's 90% auto-compaction ceiling.
+        if self.slug == "QB/DSV4.1-Flash"
+            && let Some(config_limit) = self.auto_compact_token_limit
+        {
+            return Some(
+                self.usable_context_window()
+                    .map_or(config_limit, |limit| config_limit.min(limit)),
+            );
         }
+        let context_limit = self
+            .resolved_context_window()
+            .map(|context_window| (context_window * 9) / 10);
+        let config_limit = self.auto_compact_token_limit;
+        if let Some(context_limit) = context_limit {
+            return Some(
+                config_limit.map_or(context_limit, |limit| std::cmp::min(limit, context_limit)),
+            );
+        }
+        config_limit
     }
 }
 
@@ -1874,13 +1886,26 @@ mod tests {
                 model.usable_context_window(),
                 model.auto_compact_token_limit(),
             ),
-            (Some(272_000), Some(258_400), Some(250_000))
+            (Some(272_000), Some(258_400), Some(244_800))
         );
     }
 
     #[test]
-    fn explicit_auto_compact_limit_can_reserve_fixed_headroom() {
+    fn generic_explicit_auto_compact_limit_preserves_upstream_ninety_percent_ceiling() {
         let model = ModelInfo {
+            slug: "gpt-5.5".to_string(),
+            context_window: Some(100),
+            auto_compact_token_limit: Some(200),
+            effective_context_window_percent: 95,
+            ..test_model(/*spec*/ None)
+        };
+        assert_eq!(model.auto_compact_token_limit(), Some(90));
+    }
+
+    #[test]
+    fn localdex_explicit_auto_compact_limit_can_reserve_fixed_headroom() {
+        let model = ModelInfo {
+            slug: "QB/DSV4.1-Flash".to_string(),
             context_window: Some(393_216),
             auto_compact_token_limit: Some(389_020),
             effective_context_window_percent: 100,

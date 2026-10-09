@@ -194,6 +194,7 @@ fn model_provider_from_proto(
         requires_openai_auth: provider.requires_openai_auth,
         supports_websockets: provider.supports_websockets,
         supports_responses_continuation: provider.supports_responses_continuation,
+        localdex_compatibility: false,
         supports_standalone_web_search: provider.supports_standalone_web_search,
         capabilities: None,
         include_internal_metadata: false,
@@ -229,6 +230,7 @@ fn model_provider_to_proto(
         supports_responses_continuation,
         supports_standalone_web_search,
         include_internal_metadata: _,
+        localdex_compatibility: _,
         capabilities: _,
     } = provider;
 
@@ -585,6 +587,7 @@ mod tests {
             requires_openai_auth: false,
             supports_websockets: true,
             supports_responses_continuation: false,
+            localdex_compatibility: false,
             supports_standalone_web_search: true,
             gateway_oauth: None,
             aws: None,

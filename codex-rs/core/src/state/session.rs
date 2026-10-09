@@ -83,6 +83,9 @@ pub(crate) struct SessionState {
     /// model/realtime handling on subsequent regular turns (including full-context
     /// reinjection after resume or `/compact`).
     previous_turn_settings: Option<PreviousTurnSettings>,
+    /// Runtime provenance of the previous regular turn; never reconstructed by guessing
+    /// from a model name or serialized into upstream history metadata.
+    pub(crate) previous_turn_provider: Option<(String, codex_model_provider::SharedModelProvider)>,
     /// Latest task admitted in this runtime, retained across completion and history edits.
     /// Cleared by standalone settings changes to invalidate pending continuation.
     pub(crate) last_started_turn_id: Option<String>,
@@ -135,6 +138,7 @@ impl SessionState {
             mcp_dependency_prompted: HashSet::new(),
             additional_context: AdditionalContextStore::default(),
             previous_turn_settings: None,
+            previous_turn_provider: None,
             last_started_turn_id: None,
             turn_attribution: None,
             auto_compact_window: AutoCompactWindow::new_with_ids(auto_compact_window_ids),
@@ -158,6 +162,7 @@ impl SessionState {
         previous_turn_settings: Option<PreviousTurnSettings>,
     ) {
         self.previous_turn_settings = previous_turn_settings;
+        self.previous_turn_provider = None;
     }
 
     pub(crate) fn set_next_turn_is_first(&mut self, value: bool) {

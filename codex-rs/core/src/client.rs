@@ -182,6 +182,20 @@ const MEMORIES_SUMMARIZE_ENDPOINT: &str = "/memories/trace_summarize";
 pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration =
     Duration::from_millis(DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS);
 
+fn omit_reasoning_content_for_official_provider(
+    input: &mut [ResponseItem],
+    localdex_compatibility: bool,
+) {
+    if localdex_compatibility {
+        return;
+    }
+    for item in input {
+        if let ResponseItem::Reasoning { content, .. } = item {
+            *content = None;
+        }
+    }
+}
+
 fn session_telemetry_for_request(
     session_telemetry: &SessionTelemetry,
     request: &ResponsesApiRequest,
@@ -1152,6 +1166,13 @@ impl ModelClient {
     }
 
     fn prepare_response_items_for_request(&self, input: &mut [ResponseItem]) {
+        // A local provider can return plaintext reasoning for its own continuation.
+        // Official Responses models reject nonempty reasoning `content` in replayed
+        // input. Keep the session history intact and adapt only the outbound copy.
+        omit_reasoning_content_for_official_provider(
+            input,
+            self.state.provider.info().localdex_compatibility,
+        );
         for item in input {
             if item.id().is_some_and(|id| !id.is_prefixed()) {
                 item.set_id(/*new_id*/ None);
@@ -2022,7 +2043,7 @@ impl ModelClientSession {
             let request_session_telemetry =
                 session_telemetry_for_request(session_telemetry, &request);
             options.extra_headers.extend(responses_headers);
-            let interceptors = crate::model_request::prepare(
+            let mut interceptors = crate::model_request::prepare(
                 &self.client.request_contributors,
                 &self.client.state.thread_id.to_string(),
                 &model_info.slug,
@@ -2036,6 +2057,15 @@ impl ModelClientSession {
                     recorder.invalidate_wire_inventory_loss(&request.input, &input);
                 }
                 request.input = input;
+            }
+            if let Some((wire, interceptor)) = crate::localdex_tool_namespace::prepare(
+                self.client.provider_info().localdex_compatibility,
+                &full_request,
+                &request.input,
+            )? {
+                request.tools = wire.tools.map(Into::into);
+                request.input = wire.input;
+                interceptors.insert(0, interceptor);
             }
             inference_trace_attempt.record_started(&request);
             let client = ApiResponsesClient::new(
@@ -2391,7 +2421,7 @@ impl ModelClientSession {
                 client_setup.auth.as_ref(),
                 &responses_headers,
             );
-            let interceptors = crate::model_request::prepare(
+            let mut interceptors = crate::model_request::prepare(
                 &self.client.request_contributors,
                 &self.client.state.thread_id.to_string(),
                 &model_info.slug,
@@ -2412,6 +2442,20 @@ impl ModelClientSession {
                 }
                 let ResponsesWsRequest::ResponseCreate(payload) = &mut ws_request;
                 payload.input = input;
+            }
+            let ResponsesWsRequest::ResponseCreate(payload) = &mut ws_request;
+            let (namespace_wire, namespace_interceptor) = crate::localdex_tool_namespace::prepare(
+                self.client.provider_info().localdex_compatibility,
+                &request,
+                payload.input,
+            )?
+            .unzip();
+            if let Some(wire) = &namespace_wire {
+                payload.tools = wire.tools.as_deref();
+                payload.input = &wire.input;
+            }
+            if let Some(interceptor) = namespace_interceptor {
+                interceptors.insert(0, interceptor);
             }
             if !previous_response_id_from_untraced_warmup {
                 inference_trace_attempt.record_started(&ws_request);

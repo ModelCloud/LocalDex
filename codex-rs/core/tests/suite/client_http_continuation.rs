@@ -1,5 +1,11 @@
+use codex_core::TurnInputRequest;
+use codex_model_provider_info::LOCALDEX_PROVIDER_ID;
 use codex_model_provider_info::WireApi;
 use codex_model_provider_info::create_oss_provider_with_base_url;
+use codex_model_provider_info::merge_configured_model_providers;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::ThreadSettingsOverrides;
+use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -7,6 +13,7 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_response_sequence;
 use core_test_support::responses::sse;
 use core_test_support::test_codex::test_codex;
+use core_test_support::wait_for_event_match;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use wiremock::MockServer;
@@ -65,25 +72,50 @@ async fn responses_http_continuation_survives_user_turns(
         .collect(),
     )
     .await;
-    let mut provider =
-        create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), WireApi::Responses);
-    provider.supports_responses_continuation = true;
-    provider.request_max_retries = Some(0);
-    provider.stream_max_retries = Some(0);
+    let mut providers = merge_configured_model_providers(
+        Default::default(),
+        std::collections::HashMap::from([(
+            LOCALDEX_PROVIDER_ID.to_string(),
+            create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), WireApi::Responses),
+        )]),
+    )
+    .expect("LocalDex provider should normalize");
+    let provider = providers.remove(LOCALDEX_PROVIDER_ID).unwrap();
     let test = test_codex()
-        .with_model_info_override("gpt-5.5", move |model_info| {
+        .with_model_info_override("QB/DSV4.1-Flash", move |model_info| {
             model_info.use_responses_lite = responses_lite;
         })
         .with_config(move |config| {
-            config.model_provider_id = provider.name.clone();
+            config.model_provider_id = LOCALDEX_PROVIDER_ID.to_string();
+            config
+                .model_providers
+                .insert(LOCALDEX_PROVIDER_ID.to_string(), provider.clone());
             config.model_provider = provider;
             config.base_instructions = Some("Stable base instructions".to_string());
         })
         .build_with_auto_env(&server)
         .await?;
 
-    test.submit_turn("turn one").await?;
-    test.submit_turn("turn two").await?;
+    for text in ["turn one", "turn two"] {
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: text.to_string(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    model: Some("QB/DSV4.1-Flash".to_string()),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        let completed = wait_for_event_match(&test.codex, |event| match event {
+            EventMsg::TurnComplete(completed) => Some(completed.clone()),
+            _ => None,
+        })
+        .await;
+        assert_eq!(completed.error, None, "LocalDex turn {text} failed");
+    }
 
     let requests = response_mock.requests();
     assert_eq!(requests.len(), 4);

@@ -394,13 +394,19 @@ pub(crate) async fn run_turn(
 
     sess.merge_connector_selection(explicitly_enabled_connectors.clone())
         .await;
-    sess.set_previous_turn_settings(Some(PreviousTurnSettings {
-        model: turn_context.model_info().slug.clone(),
-        cyber_access_program: turn_context.cyber_access_program,
-        comp_hash: turn_context.model_info().comp_hash.clone(),
-        realtime_active: Some(turn_context.realtime_active),
-    }))
-    .await;
+    {
+        let mut state = sess.state.lock().await;
+        state.set_previous_turn_settings(Some(PreviousTurnSettings {
+            model: turn_context.model_info().slug.clone(),
+            cyber_access_program: turn_context.cyber_access_program,
+            comp_hash: turn_context.model_info().comp_hash.clone(),
+            realtime_active: Some(turn_context.realtime_active),
+        }));
+        state.previous_turn_provider = Some((
+            turn_context.config.model_provider_id.clone(),
+            turn_context.provider.clone(),
+        ));
+    }
     for response_item in injection_items {
         sess.record_conversation_items(
             &turn_context,
@@ -776,15 +782,17 @@ pub(crate) async fn run_turn(
                             )
                             .await;
                         }
-                        sess.send_event(
-                            &turn_context,
-                            EventMsg::Warning(WarningEvent {
-                                message: format!(
-                                    "Post-turn compaction failed; the completed turn was preserved. Automatic compaction will not be retried until the conversation changes. Error: {err}"
-                                ),
-                            }),
-                        )
-                        .await;
+                        if turn_context.provider.info().localdex_compatibility {
+                            sess.send_event(
+                                &turn_context,
+                                EventMsg::Warning(WarningEvent {
+                                    message: format!(
+                                        "Post-turn compaction failed; the completed turn was preserved. Automatic compaction will not be retried until the conversation changes. Error: {err}"
+                                    ),
+                                }),
+                            )
+                            .await;
+                        }
                         warn!(error = %err, "Post-turn compaction failed; preserving the completed turn");
                     }
                     break;
@@ -1429,16 +1437,6 @@ async fn maybe_run_previous_model_inline_compact(
     let mut previous_model_turn_context = turn_context
         .with_model(previous_model.clone(), &sess.services.models_manager)
         .await;
-    // `with_model` preserves the current turn's access program. Restore the previous
-    // turn's program so compaction uses the same model/cyber_access_program pair as that turn.
-    // Combining the previous model with the current turn's program can produce a pair
-    // that the server rejects.
-    previous_model_turn_context.cyber_access_program = cyber_access_program::for_provider(
-        &previous_model_turn_context.config.model_provider_id,
-        previous_turn_settings.cyber_access_program,
-    );
-    let previous_model_turn_context = Arc::new(previous_model_turn_context);
-
     let reason = if should_compact_for_comp_hash_change {
         CompactionReason::CompHashChanged
     } else {
@@ -1471,6 +1469,55 @@ async fn maybe_run_previous_model_inline_compact(
         }
         CompactionReason::ModelDownshift
     };
+
+    // Use actual runtime provenance for switched endpoints, including namespaced
+    // LocalDex and explicit custom providers. Generic cold-resume workflows keep
+    // upstream's same-provider model/program restoration.
+    let previous_provider = sess.state.lock().await.previous_turn_provider.clone();
+    if let Some((provider_id, provider)) = previous_provider {
+        let mut config = (*previous_model_turn_context.config).clone();
+        if let Some(required_provider) = config.config_layer_stack.required_model_provider()
+            && provider_id != required_provider
+        {
+            return Err(CodexErr::Fatal(format!(
+                "Previous-model compaction requires provider {provider_id}, but managed settings require {required_provider}"
+            )));
+        }
+        config.model_provider_id = provider_id;
+        config.model_provider = provider.info().clone();
+        previous_model_turn_context.provider = provider;
+        previous_model_turn_context.config = Arc::new(config);
+    } else if turn_context.provider.info().localdex_compatibility
+        || codex_model_provider_info::is_localdex_model(&previous_model)
+    {
+        // A LocalDex transition can cross providers. Without proven historical
+        // routing, preserve a hash boundary using the current model/provider.
+        // Downshifts can defer to the current-model budget path below.
+        if matches!(reason, CompactionReason::CompHashChanged) {
+            let step_context = sess
+                .capture_step_context(Arc::clone(turn_context), cancellation_token)
+                .await?;
+            return run_auto_compact(
+                sess,
+                Arc::clone(&step_context),
+                step_context,
+                client_session,
+                reason,
+                CompactionPhase::PreTurn,
+            )
+            .await;
+        }
+        return Ok(());
+    }
+    // `with_model` preserves the current turn's access program. Restore the previous
+    // turn's program so compaction uses the same model/cyber_access_program pair as that turn.
+    // Combining the previous model with the current turn's program can produce a pair
+    // that the server rejects.
+    previous_model_turn_context.cyber_access_program = cyber_access_program::for_provider(
+        &previous_model_turn_context.config.model_provider_id,
+        previous_turn_settings.cyber_access_program,
+    );
+    let previous_model_turn_context = Arc::new(previous_model_turn_context);
 
     let step_context = sess
         .capture_step_context(previous_model_turn_context, cancellation_token)
@@ -1524,8 +1571,9 @@ async fn run_auto_compact(
         conversation.id = %sess.thread_id,
         turn.id = %turn_context.sub_id,
     );
+    let localdex_compaction = turn_context.provider.info().localdex_compatibility;
     let tokens_before = sess.get_total_token_usage().await;
-    if sess.failed_auto_compact_token_count().await == Some(tokens_before) {
+    if localdex_compaction && sess.failed_auto_compact_token_count().await == Some(tokens_before) {
         let message = format!(
             "Automatic compaction for this unchanged context already failed or made no progress ({tokens_before} estimated tokens). It was not sent again. Add or edit conversation content before retrying."
         );
@@ -1539,15 +1587,19 @@ async fn run_auto_compact(
         return Err(CodexErr::Fatal(message));
     }
 
-    // Remote V2 compaction responses do not report the post-compaction token total. The next
-    // sampling response refreshes it, so comparing immediately would reject successful remote
-    // compaction as if it made no progress.
-    let can_measure_compaction_progress =
-        turn_context.config.features.enabled(Feature::TokenBudget)
-            || matches!(
-                turn_context.provider.capabilities().remote_compaction,
-                RemoteCompactionSupport::Unsupported
-            );
+    // Compare local history estimates on both sides; server usage and local estimates differ.
+    // Remote V2 and token-budget resets do not expose comparable rewritten history here.
+    let estimated_tokens_before = if localdex_compaction
+        && matches!(reason, CompactionReason::ContextLimit)
+        && !turn_context.config.features.enabled(Feature::TokenBudget)
+        && matches!(
+            turn_context.provider.capabilities().remote_compaction,
+            RemoteCompactionSupport::Unsupported
+        ) {
+        sess.get_estimated_token_count(turn_context.as_ref()).await
+    } else {
+        None
+    };
 
     let compact_result = async {
         if turn_context.config.features.enabled(Feature::TokenBudget) {
@@ -1602,22 +1654,27 @@ async fn run_auto_compact(
     .await;
 
     if let Err(err) = compact_result {
-        if !matches!(
-            err.details(),
-            CodexErrorDetails::Interrupted | CodexErrorDetails::TurnAborted
-        ) {
+        if localdex_compaction
+            && !matches!(
+                err.details(),
+                CodexErrorDetails::Interrupted | CodexErrorDetails::TurnAborted
+            )
+        {
             sess.set_failed_auto_compact_token_count(Some(sess.get_total_token_usage().await))
                 .await;
         }
         return Err(err);
     }
 
-    let tokens_after = sess.get_total_token_usage().await;
-    if can_measure_compaction_progress && tokens_before > 0 && tokens_after >= tokens_before {
-        sess.set_failed_auto_compact_token_count(Some(tokens_after))
+    if let Some(estimated_before) = estimated_tokens_before
+        && estimated_before > 0
+        && let Some(estimated_after) = sess.get_estimated_token_count(turn_context.as_ref()).await
+        && estimated_after >= estimated_before
+    {
+        sess.set_failed_auto_compact_token_count(Some(sess.get_total_token_usage().await))
             .await;
         let message = format!(
-            "Automatic compaction completed without reducing estimated context ({tokens_before} tokens before, {tokens_after} after). Stopping to prevent repeated compaction of the same context. Edit or shorten the conversation before retrying."
+            "Automatic compaction completed without reducing estimated context ({estimated_before} tokens before, {estimated_after} after). Stopping to prevent repeated compaction of the same context. Edit or shorten the conversation before retrying."
         );
         sess.send_event(
             turn_context.as_ref(),
@@ -1629,7 +1686,9 @@ async fn run_auto_compact(
         return Err(CodexErr::Fatal(message));
     }
 
-    sess.set_failed_auto_compact_token_count(None).await;
+    if localdex_compaction {
+        sess.set_failed_auto_compact_token_count(None).await;
+    }
     Ok(())
 }
 

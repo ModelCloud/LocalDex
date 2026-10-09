@@ -463,20 +463,6 @@ impl ModelProvider for ConfiguredModelProvider {
 
     fn auth(&self) -> ModelProviderFuture<'_, Option<CodexAuth>> {
         Box::pin(async move {
-            if !self.info.requires_openai_auth && self.info.auth.is_none() {
-                // A custom OpenAI-compatible provider must never inherit the
-                // user's ChatGPT session. Its configured environment/command
-                // credential is resolved by the request path instead.
-                return self
-                    .info
-                    .is_openai()
-                    .then(|| {
-                        self.auth_manager
-                            .as_ref()
-                            .and_then(|auth_manager| auth_manager.auth_cached())
-                    })
-                    .flatten();
-            }
             match self.auth_manager.as_ref() {
                 Some(auth_manager) => auth_manager.auth().await,
                 None => None,
@@ -671,6 +657,7 @@ mod tests {
             requires_openai_auth: false,
             supports_websockets: false,
             supports_responses_continuation: false,
+            localdex_compatibility: false,
             supports_standalone_web_search: false,
             capabilities: None,
             include_internal_metadata: false,
@@ -779,9 +766,19 @@ mod tests {
     }
 
     #[test]
-    fn custom_openai_compatible_provider_omits_openai_only_tools() {
+    fn localdex_provider_omits_openai_only_tools() {
+        let mut providers = codex_model_provider_info::merge_configured_model_providers(
+            Default::default(),
+            std::collections::HashMap::from([(
+                codex_model_provider_info::LOCALDEX_PROVIDER_ID.to_string(),
+                provider_for("https://example.test/v1".to_string()),
+            )]),
+        )
+        .expect("LocalDex provider should normalize");
         let provider = create_model_provider(
-            provider_for("https://example.test/v1".to_string()),
+            providers
+                .remove(codex_model_provider_info::LOCALDEX_PROVIDER_ID)
+                .unwrap(),
             /*auth_manager*/ None,
         );
 
@@ -1394,7 +1391,7 @@ printf '%s\n' '{"AccessKeyId":"exported","SecretAccessKey":"secret"}'
                         models: remote_models.clone(),
                     }),
             )
-            .expect(2)
+            .expect(6)
             .mount(&server)
             .await;
 
@@ -1405,38 +1402,46 @@ printf '%s\n' '{"AccessKeyId":"exported","SecretAccessKey":"secret"}'
             codex_login::default_client::RESIDENCY_HEADER_NAME.to_string(),
             "us".into(),
         )]));
-        for auth in [
-            None,
-            Some(CodexAuth::create_dummy_chatgpt_auth_for_testing()),
-        ] {
-            // Disabled discovery must ignore the catalog cached by the enabled run.
-            for enabled in [true, false] {
-                let provider = create_model_provider(
-                    provider_info.clone(),
-                    auth.clone().map(AuthManager::from_auth_for_testing),
-                );
-                let manager =
-                    provider.models_manager(test_codex_home(), /*config_model_catalog*/ None);
-                manager.set_api_key_model_discovery_enabled(enabled);
-                let refresh_strategy = if enabled {
-                    RefreshStrategy::Online
-                } else {
-                    RefreshStrategy::Offline
-                };
-                let catalog = manager
-                    .raw_model_catalog(
-                        refresh_strategy,
-                        HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
-                    )
-                    .await;
+        for provider_id in ["custom", "localdex", "omnigent-localdex-test"] {
+            let mut providers = codex_model_provider_info::merge_configured_model_providers(
+                Default::default(),
+                std::collections::HashMap::from([(provider_id.to_string(), provider_info.clone())]),
+            )
+            .expect("provider should normalize");
+            let provider_info = providers.remove(provider_id).unwrap();
+            for auth in [
+                None,
+                Some(CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+            ] {
+                // Disabled discovery must ignore the catalog cached by the enabled run.
+                for enabled in [true, false] {
+                    let provider = create_model_provider(
+                        provider_info.clone(),
+                        auth.clone().map(AuthManager::from_auth_for_testing),
+                    );
+                    let manager = provider
+                        .models_manager(test_codex_home(), /*config_model_catalog*/ None);
+                    manager.set_api_key_model_discovery_enabled(enabled);
+                    let refresh_strategy = if enabled {
+                        RefreshStrategy::Online
+                    } else {
+                        RefreshStrategy::Offline
+                    };
+                    let catalog = manager
+                        .raw_model_catalog(
+                            refresh_strategy,
+                            HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+                        )
+                        .await;
 
-                assert_eq!(
-                    catalog
-                        .models
-                        .iter()
-                        .any(|model| model.slug == "provider-model"),
-                    enabled
-                );
+                    assert_eq!(
+                        catalog
+                            .models
+                            .iter()
+                            .any(|model| model.slug == "provider-model"),
+                        enabled
+                    );
+                }
             }
         }
     }

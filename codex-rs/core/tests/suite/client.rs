@@ -1992,6 +1992,7 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
+        localdex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
         include_internal_metadata: false,
@@ -2243,6 +2244,7 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
         base_url: Some(format!("{}/v1", server.uri())),
         supports_websockets: false,
         supports_responses_continuation: false,
+        localdex_compatibility: false,
         ..built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone()
     };
 
@@ -3497,6 +3499,7 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
+        localdex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
         include_internal_metadata: false,
@@ -4134,6 +4137,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
+        localdex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
         include_internal_metadata: false,
@@ -4223,6 +4227,7 @@ async fn env_var_overrides_loaded_auth() {
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
+        localdex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
         include_internal_metadata: false,

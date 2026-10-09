@@ -984,6 +984,7 @@ impl TestCodexBuilder {
             // a test explicitly opts into websocket coverage.
             supports_websockets: false,
             supports_responses_continuation: false,
+            localdex_compatibility: false,
             ..built_in_model_providers(/*openai_base_url*/ None)["openai"].clone()
         };
         let cwd = Arc::new(TempDir::new()?);

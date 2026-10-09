@@ -8,6 +8,7 @@ use super::X_CODEX_PARENT_THREAD_ID_HEADER;
 use super::X_CODEX_TURN_METADATA_HEADER;
 use super::X_CODEX_WINDOW_ID_HEADER;
 use super::X_OPENAI_SUBAGENT_HEADER;
+use super::omit_reasoning_content_for_official_provider;
 use crate::AttestationContext;
 use crate::AttestationProvider;
 use crate::GenerateAttestationFuture;
@@ -51,6 +52,7 @@ use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ExecutedToolCall;
 use codex_protocol::models::FunctionCallOutputPayload;
+use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::ToolResultMetadata;
@@ -104,6 +106,39 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
+
+#[test]
+fn local_reasoning_at_compacted_handoff_is_not_sent_to_official_model() {
+    let instruction: ResponseItem = serde_json::from_value(serde_json::json!({
+        "type": "message",
+        "role": "developer",
+        "content": [{"type": "input_text", "text": "instruction"}]
+    }))
+    .expect("valid instruction");
+    let reasoning = ResponseItem::Reasoning {
+        id: None,
+        summary: vec![],
+        content: Some(vec![ReasoningItemContent::ReasoningText {
+            text: "local reasoning".into(),
+        }]),
+        encrypted_content: None,
+        internal_chat_message_metadata_passthrough: None,
+    };
+    // The failing session had 188 compacted items and two new instructions.
+    let mut history = vec![instruction; 190];
+    history.push(reasoning);
+    let original = history.clone();
+    let mut official_wire = history.clone();
+    omit_reasoning_content_for_official_provider(&mut official_wire, false);
+    let official = serde_json::to_value(&official_wire).expect("serialize official request");
+    assert!(official[190].get("content").is_none());
+    assert_eq!(history, original, "handoff must not mutate saved history");
+
+    let mut local_wire = history;
+    omit_reasoning_content_for_official_provider(&mut local_wire, true);
+    let local = serde_json::to_value(&local_wire).expect("serialize local request");
+    assert_eq!(local[190]["content"].as_array().map(Vec::len), Some(1));
+}
 
 #[path = "client_http_continuation_tests.rs"]
 mod http_continuation;

@@ -234,6 +234,12 @@ async fn run_remote_compact_task_inner_impl(
     sess.emit_turn_item_started(turn_context, &compaction_item)
         .await;
 
+    // A cross-provider compactor and its fallback must each open a session for
+    // their own endpoint/auth; the supplied sampling session belongs to the new turn.
+    if turn_context.provider.info() != replacement_step_context.turn.provider.info() {
+        client_session = None;
+    }
+
     let attempt = run_remote_compact_v2_attempt(
         sess,
         step_context,
