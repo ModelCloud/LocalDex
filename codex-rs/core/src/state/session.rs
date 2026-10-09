@@ -41,6 +41,15 @@ pub(crate) enum ReasoningEffortPin {
     },
 }
 
+/// Identity of the context that an automatic LocalDex compaction attempted.
+/// Usage alone stays unchanged when a new user message is admitted after failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct AutoCompactContextKey {
+    pub(crate) token_count: i64,
+    pub(crate) history_item_count: usize,
+    pub(crate) history_version: u64,
+}
+
 impl ReasoningEffortPin {
     pub(crate) fn get(&self, model: &str) -> Option<ReasoningEffort> {
         match self {
@@ -93,9 +102,9 @@ pub(crate) struct SessionState {
     pub(crate) turn_attribution: Option<TurnAttribution>,
     /// Runtime accounting state for the active auto-compaction window.
     auto_compact_window: AutoCompactWindow,
-    /// Token count for the last context whose automatic compaction failed or made no progress.
+    /// Identity of the last context whose automatic compaction failed or made no progress.
     /// This prevents the same unchanged context from repeatedly issuing an expensive request.
-    failed_auto_compact_token_count: Option<i64>,
+    failed_auto_compact_context: Option<AutoCompactContextKey>,
     /// Original request effort for the current model while configuration updates remain active.
     pub(crate) reasoning_effort_pin: ReasoningEffortPin,
     /// Set under the state lock before shutdown takes the last warmup handle.
@@ -142,7 +151,7 @@ impl SessionState {
             last_started_turn_id: None,
             turn_attribution: None,
             auto_compact_window: AutoCompactWindow::new_with_ids(auto_compact_window_ids),
-            failed_auto_compact_token_count: None,
+            failed_auto_compact_context: None,
             reasoning_effort_pin: ReasoningEffortPin::Unset,
             shutting_down: false,
             startup_prewarm: None,
@@ -308,12 +317,23 @@ impl SessionState {
         self.auto_compact_window.snapshot()
     }
 
-    pub(crate) fn failed_auto_compact_token_count(&self) -> Option<i64> {
-        self.failed_auto_compact_token_count
+    pub(crate) fn auto_compact_context_key(&self) -> AutoCompactContextKey {
+        AutoCompactContextKey {
+            token_count: self.get_total_token_usage(self.server_reasoning_included()),
+            history_item_count: self.history.raw_items().len(),
+            history_version: self.history.history_version(),
+        }
     }
 
-    pub(crate) fn set_failed_auto_compact_token_count(&mut self, token_count: Option<i64>) {
-        self.failed_auto_compact_token_count = token_count;
+    pub(crate) fn failed_auto_compact_context(&self) -> Option<AutoCompactContextKey> {
+        self.failed_auto_compact_context
+    }
+
+    pub(crate) fn set_failed_auto_compact_context(
+        &mut self,
+        context: Option<AutoCompactContextKey>,
+    ) {
+        self.failed_auto_compact_context = context;
     }
 
     pub(crate) fn claim_token_budget_reminder(&mut self) -> bool {

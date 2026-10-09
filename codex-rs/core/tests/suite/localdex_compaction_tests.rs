@@ -109,6 +109,101 @@ async fn localdex_post_turn_compaction_measures_history_progress(growing: bool) 
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_localdex_compaction_allows_new_user_context() -> Result<()> {
+    let server = MockServer::start().await;
+    let answer = "A long answer. ".repeat(4_000);
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_assistant_message("answer-1", &answer),
+                ev_completed_with_tokens("answer-1", 1_500),
+            ]),
+            sse_failed(
+                "failed-compact",
+                "server_error",
+                "malformed compaction output",
+            ),
+            sse(vec![
+                ev_assistant_message("answer-2", &answer),
+                ev_completed_with_tokens("answer-2", 1_500),
+            ]),
+            sse(vec![
+                ev_assistant_message("summary", "Concise summary."),
+                ev_completed_with_tokens("compact-2", 10),
+            ]),
+        ],
+    )
+    .await;
+    let mut providers = merge_configured_model_providers(
+        Default::default(),
+        std::collections::HashMap::from([(
+            LOCALDEX_PROVIDER_ID.to_string(),
+            create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), WireApi::Responses),
+        )]),
+    )
+    .expect("LocalDex provider should normalize");
+    let mut provider = providers.remove(LOCALDEX_PROVIDER_ID).unwrap();
+    provider.stream_max_retries = Some(0);
+    let test = test_codex()
+        .with_model_info_override("QB/DSV4.1-Flash", |info| {
+            info.context_window = Some(100_000);
+            info.max_context_window = None;
+        })
+        .with_config(move |config| {
+            config.model_provider_id = LOCALDEX_PROVIDER_ID.to_string();
+            config
+                .model_providers
+                .insert(LOCALDEX_PROVIDER_ID.to_string(), provider.clone());
+            config.model_provider = provider;
+            config.model_auto_compact_token_limit = Some(100_000);
+            config.model_post_turn_compact_threshold_percent = 1;
+            let _ = config.features.disable(Feature::TokenBudget);
+            set_test_compact_prompt(config);
+        })
+        .build_with_auto_env(&server)
+        .await?;
+
+    for message in ["First user turn", "New user turn after failed compaction"] {
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: message.to_string(),
+                    text_elements: vec![],
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    model: Some("QB/DSV4.1-Flash".to_string()),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        let completed = wait_for_event_match(&test.codex, |event| match event {
+            EventMsg::TurnComplete(completed) => Some(completed.clone()),
+            _ => None,
+        })
+        .await;
+        assert_eq!(completed.error, None, "user turn should keep its answer");
+    }
+
+    let requests = mock.requests();
+    assert_eq!(
+        requests.len(),
+        4,
+        "new history should allow one new compaction"
+    );
+    assert!(body_contains_text(
+        &requests[1].body_json().to_string(),
+        SUMMARIZATION_PROMPT
+    ));
+    assert!(body_contains_text(
+        &requests[3].body_json().to_string(),
+        SUMMARIZATION_PROMPT
+    ));
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
 #[test_case::test_case("openai", "localdex", "gpt-5.5", "QB/DSV4.1-Flash"; "openai_to_localdex")]
 #[test_case::test_case("localdex", "openai", "QB/DSV4.1-Flash", "gpt-5.5"; "localdex_to_openai")]
 #[test_case::test_case("omnigent-localdex-test", "openai", "QB/DSV4.1-Flash", "gpt-5.5"; "namespaced_localdex_to_openai")]
