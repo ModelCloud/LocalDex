@@ -8,7 +8,6 @@ use super::X_CODEX_PARENT_THREAD_ID_HEADER;
 use super::X_CODEX_TURN_METADATA_HEADER;
 use super::X_CODEX_WINDOW_ID_HEADER;
 use super::X_OPENAI_SUBAGENT_HEADER;
-use super::omit_reasoning_content_for_official_provider;
 use crate::AttestationContext;
 use crate::AttestationProvider;
 use crate::GenerateAttestationFuture;
@@ -108,13 +107,23 @@ use wiremock::matchers::path;
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
 
 #[test]
-fn local_reasoning_at_compacted_handoff_is_not_sent_to_official_model() {
+fn local_reasoning_at_compacted_handoff_is_not_sent_to_official_model() -> anyhow::Result<()> {
+    let original = test_model_client(SessionSource::Cli);
+    let mut local_provider = original.provider_info().clone();
+    local_provider.localdex_compatibility = true;
+    let local = original.with_provider(create_model_provider(
+        local_provider,
+        /*auth_manager*/ None,
+    ));
+    let official = local.with_provider(create_model_provider(
+        ModelProviderInfo::create_openai_provider(/*base_url*/ None),
+        /*auth_manager*/ None,
+    ));
     let instruction: ResponseItem = serde_json::from_value(serde_json::json!({
         "type": "message",
         "role": "developer",
         "content": [{"type": "input_text", "text": "instruction"}]
-    }))
-    .expect("valid instruction");
+    }))?;
     let reasoning = ResponseItem::Reasoning {
         id: None,
         summary: vec![],
@@ -124,20 +133,42 @@ fn local_reasoning_at_compacted_handoff_is_not_sent_to_official_model() {
         encrypted_content: None,
         internal_chat_message_metadata_passthrough: None,
     };
-    // The failing session had 188 compacted items and two new instructions.
-    let mut history = vec![instruction; 190];
-    history.push(reasoning);
-    let original = history.clone();
-    let mut official_wire = history.clone();
-    omit_reasoning_content_for_official_provider(&mut official_wire, false);
-    let official = serde_json::to_value(&official_wire).expect("serialize official request");
-    assert!(official[190].get("content").is_none());
-    assert_eq!(history, original, "handoff must not mutate saved history");
+    // The failing Astra request had plaintext reasoning at input[122].
+    let mut prompt = Prompt {
+        input: vec![instruction; 121],
+        ..Default::default()
+    };
+    prompt.input.push(reasoning);
+    let saved_history = prompt.input.clone();
+    let model = test_model_info();
+    let build = |client: &ModelClient| {
+        client.build_responses_request(
+            &prompt,
+            &model,
+            /*effort*/ None,
+            codex_protocol::config_types::ReasoningSummary::None,
+            /*service_tier*/ None,
+            &test_responses_metadata_for_client(
+                client,
+                /*turn_id*/ None,
+                format!("{}:0", client.state.thread_id),
+                /*parent_thread_id*/ None,
+                TestCodexResponsesRequestKind::Turn,
+            ),
+            /*include_internal*/ false,
+        )
+    };
+    let official_wire = serde_json::to_value(build(&official)?)?;
+    assert_eq!(official_wire["input"][122]["type"], "reasoning");
+    assert!(official_wire["input"][122].get("content").is_none());
+    assert_eq!(prompt.input, saved_history);
 
-    let mut local_wire = history;
-    omit_reasoning_content_for_official_provider(&mut local_wire, true);
-    let local = serde_json::to_value(&local_wire).expect("serialize local request");
-    assert_eq!(local[190]["content"].as_array().map(Vec::len), Some(1));
+    let local_wire = serde_json::to_value(build(&local)?)?;
+    assert_eq!(
+        local_wire["input"][122]["content"].as_array().map(Vec::len),
+        Some(1)
+    );
+    Ok(())
 }
 
 #[path = "client_http_continuation_tests.rs"]

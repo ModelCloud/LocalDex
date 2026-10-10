@@ -2852,6 +2852,11 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "supports_responses_continuation": {
+          "default": false,
+          "description": "Whether the provider stores Responses and supports `previous_response_id` continuation.\n\nThis is opt-in because enabling it changes data-retention semantics: every request in a potentially continued turn is sent with `store=true`.",
+          "type": "boolean"
+        },
         "supports_standalone_web_search": {
           "default": false,
           "description": "Whether this provider supports the standalone web-search endpoint.",

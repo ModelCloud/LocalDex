@@ -1053,6 +1053,13 @@ impl ModelClient {
             // Filter only the request copy; persisted history remains unchanged.
             input.retain(|item| !matches!(item, ResponseItem::ConfigurationUpdate { .. }));
         }
+        // Normalize the request before it is copied for HTTP or WebSocket continuation.
+        // Local providers may put plaintext reasoning in history, while official
+        // Responses models reject reasoning items with nonempty `content`.
+        omit_reasoning_content_for_official_provider(
+            &mut input,
+            self.state.provider.info().localdex_compatibility,
+        );
         let is_openai = self.state.provider.info().is_openai();
         // These prompt-only items are rebuilt on every request. Hash their visible payloads
         // within the thread so retries and resumed sessions preserve their identity.
@@ -1166,13 +1173,6 @@ impl ModelClient {
     }
 
     fn prepare_response_items_for_request(&self, input: &mut [ResponseItem]) {
-        // A local provider can return plaintext reasoning for its own continuation.
-        // Official Responses models reject nonempty reasoning `content` in replayed
-        // input. Keep the session history intact and adapt only the outbound copy.
-        omit_reasoning_content_for_official_provider(
-            input,
-            self.state.provider.info().localdex_compatibility,
-        );
         for item in input {
             if item.id().is_some_and(|id| !id.is_prefixed()) {
                 item.set_id(/*new_id*/ None);
