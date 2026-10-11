@@ -6,6 +6,7 @@ use codex_core::config::AgentRoleConfig;
 use codex_core::config::Config;
 use codex_features::Feature;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
+use codex_protocol::config_types::ServiceTier;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ThreadSettingsOverrides;
@@ -34,7 +35,7 @@ const FRESH_CHILD_PROMPT: &str = "finish the new service-tier worker";
 const SPAWN_CALL_ID: &str = "spawn-service-tier-worker";
 const FRESH_SPAWN_CALL_ID: &str = "spawn-fresh-service-tier-worker";
 const PAUSE_CALL_ID: &str = "pause-service-tier-worker";
-const PRIORITY_ROLE: &str = "priority-worker";
+const FLEX_ROLE: &str = "flex-worker";
 
 fn body_contains(request: &wiremock::Request, text: &str) -> bool {
     let body = match request
@@ -62,7 +63,31 @@ fn assert_request_service_tier(request: &ResponseMock, expected: Option<&str>) {
     );
 }
 
-fn configure_priority_role(config: &mut Config) {
+/// Mirrors the wire projection for service tiers: LocalDex force-disables Fast
+/// mode, so a configured fast tier is pinned to explicit standard routing and
+/// never forwarded as `priority`. The `default` sentinel records explicit
+/// standard routing in session state but is omitted from requests.
+fn expected_wire_tier(configured: Option<&str>) -> Option<&str> {
+    configured.filter(|service_tier| {
+        *service_tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE
+            && ServiceTier::from_request_value(service_tier) != Some(ServiceTier::Fast)
+    })
+}
+
+/// Mirrors `get_service_tier`: a force-disabled fast tier is pinned to the
+/// explicit `default` sentinel in session state.
+fn expected_snapshot_tier(configured: Option<&str>) -> Option<&str> {
+    match configured {
+        Some(service_tier)
+            if ServiceTier::from_request_value(service_tier) == Some(ServiceTier::Fast) =>
+        {
+            Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE)
+        }
+        other => other,
+    }
+}
+
+fn configure_flex_role(config: &mut Config) {
     for feature in [Feature::Collab, Feature::MultiAgentV2] {
         config
             .features
@@ -71,13 +96,12 @@ fn configure_priority_role(config: &mut Config) {
     }
     config.model_provider.request_max_retries = Some(0);
     config.model_provider.stream_max_retries = Some(0);
-    let role_path = config.codex_home.join("priority-worker.toml");
-    std::fs::write(&role_path, "service_tier = \"priority\"\n")
-        .expect("priority role should be written");
+    let role_path = config.codex_home.join("flex-worker.toml");
+    std::fs::write(&role_path, "service_tier = \"flex\"\n").expect("flex role should be written");
     config.agent_roles.insert(
-        PRIORITY_ROLE.to_string(),
+        FLEX_ROLE.to_string(),
         AgentRoleConfig {
-            description: Some("Role with a configured priority tier".to_string()),
+            description: Some("Role with a configured flex tier".to_string()),
             config_file: Some(role_path.to_path_buf()),
             nickname_candidates: None,
         },
@@ -147,9 +171,10 @@ async fn mount_completed_child(
     .await
 }
 
-#[test_case(Some("priority"), None; "disabling fast mode updates active and idle child work")]
-#[test_case(Some("priority"), Some("default"); "explicit default updates active and idle child work")]
-#[test_case(None, Some("priority"); "enabling fast mode updates active and idle child work")]
+#[test_case(Some("flex"), None; "clearing flex updates active and idle child work")]
+#[test_case(Some("flex"), Some("default"); "explicit default updates active and idle child work")]
+#[test_case(None, Some("flex"); "enabling flex updates active and idle child work")]
+#[test_case(Some("priority"), Some("default"); "force-disabled fast tier never reaches child requests")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn root_service_tier_change_updates_existing_subagent(
     initial_service_tier: Option<&str>,
@@ -157,13 +182,12 @@ async fn root_service_tier_change_updates_existing_subagent(
 ) -> Result<()> {
     let server = start_mock_server().await;
     let initial_service_tier_owned = initial_service_tier.map(str::to_string);
-    let updated_request_service_tier = updated_service_tier
-        .filter(|service_tier| *service_tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE);
+    let updated_request_service_tier = expected_wire_tier(updated_service_tier);
     let mut builder = test_codex()
         .with_model("gpt-5.6-sol")
         .with_config(move |config| {
             config.service_tier = initial_service_tier_owned;
-            configure_priority_role(config);
+            configure_flex_role(config);
         });
     let test = builder.build_with_auto_env(&server).await?;
     assert!(!test.config.features.enabled(Feature::StepModelSwitching));
@@ -176,7 +200,7 @@ async fn root_service_tier_change_updates_existing_subagent(
         json!({
             "message": CHILD_PROMPT,
             "task_name": "worker",
-            "agent_type": PRIORITY_ROLE,
+            "agent_type": FLEX_ROLE,
             "fork_turns": "none",
         }),
     )
@@ -217,7 +241,10 @@ async fn root_service_tier_change_updates_existing_subagent(
     let child_thread_id = created_threads.recv().await?;
     let child = test.thread_manager.get_thread(child_thread_id).await?;
     let original_child_service_tier = child.config_snapshot().await.service_tier;
-    assert_eq!(original_child_service_tier.as_deref(), initial_service_tier);
+    assert_eq!(
+        original_child_service_tier.as_deref(),
+        expected_snapshot_tier(initial_service_tier)
+    );
     wait_for_event_match(child.as_ref(), |event| match event {
         EventMsg::CollabWaitingBegin(request) if request.call_id == PAUSE_CALL_ID => Some(()),
         EventMsg::Error(error) => panic!("child failed before pausing: {}", error.message),
@@ -227,7 +254,10 @@ async fn root_service_tier_change_updates_existing_subagent(
         _ => None,
     })
     .await;
-    assert_request_service_tier(&initial_child_request, initial_service_tier);
+    assert_request_service_tier(
+        &initial_child_request,
+        expected_wire_tier(initial_service_tier),
+    );
 
     submit_thread_settings(
         &test.codex,
@@ -289,7 +319,7 @@ async fn root_service_tier_change_updates_existing_subagent(
         json!({
             "message": FRESH_CHILD_PROMPT,
             "task_name": "fresh",
-            "agent_type": PRIORITY_ROLE,
+            "agent_type": FLEX_ROLE,
             "fork_turns": "none",
         }),
     )
@@ -310,9 +340,9 @@ async fn evicted_role_subagent_uses_root_service_tier_after_reload() -> Result<(
     let mut builder = test_codex()
         .with_model("gpt-5.6-sol")
         .with_config(|config| {
-            config.service_tier = Some("priority".to_string());
+            config.service_tier = Some("flex".to_string());
             config.multi_agent_v2.max_concurrent_threads_per_session = 2;
-            configure_priority_role(config);
+            configure_flex_role(config);
         });
     let test = builder.build_with_auto_env(&server).await?;
     let mut created_threads = test.thread_manager.subscribe_thread_created();
@@ -324,7 +354,7 @@ async fn evicted_role_subagent_uses_root_service_tier_after_reload() -> Result<(
         json!({
             "message": CHILD_PROMPT,
             "task_name": "original",
-            "agent_type": PRIORITY_ROLE,
+            "agent_type": FLEX_ROLE,
             "fork_turns": "none",
         }),
     )
@@ -334,7 +364,7 @@ async fn evicted_role_subagent_uses_root_service_tier_after_reload() -> Result<(
     let original_thread_id = created_threads.recv().await?;
     let original_thread = test.thread_manager.get_thread(original_thread_id).await?;
     wait_for_turn_complete(&original_thread).await;
-    assert_request_service_tier(&original_request, Some("priority"));
+    assert_request_service_tier(&original_request, Some("flex"));
     drop(original_thread);
 
     mount_root_collaboration_call(

@@ -899,3 +899,39 @@ code_mode = true
         message
     );
 }
+
+#[test]
+fn fast_mode_is_force_disabled_for_every_source() {
+    // Built-in defaults enable the feature; the force-disable list must win.
+    let defaults = Features::with_defaults();
+    assert!(!defaults.enabled(Feature::FastMode));
+    assert!(
+        !defaults.enabled_features().contains(&Feature::FastMode),
+        "enabled_features must not report a force-disabled feature"
+    );
+
+    let mut features = Features::with_defaults();
+    features
+        .enable(Feature::FastMode)
+        .set_enabled(Feature::FastMode, true);
+    assert!(!features.enabled(Feature::FastMode));
+
+    // Config-style sources cannot turn it back on either.
+    let mut toggles = BTreeMap::new();
+    toggles.insert("fast_mode".to_string(), true);
+    features.apply_map(&toggles);
+    assert!(!features.enabled(Feature::FastMode));
+
+    let mut configured = Features::with_defaults();
+    configured.apply_map(&toggles);
+    assert!(!configured.enabled(Feature::FastMode));
+
+    // Disabling keeps it disabled and flex/default routing stay available.
+    let mut disabled = Features::with_defaults();
+    disabled.disable(Feature::FastMode);
+    assert!(!disabled.enabled(Feature::FastMode));
+    assert!(disabled.service_tier_enabled("flex"));
+    assert!(disabled.service_tier_enabled("default"));
+    assert!(!disabled.service_tier_enabled("fast"));
+    assert!(!disabled.service_tier_enabled("priority"));
+}

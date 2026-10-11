@@ -108,7 +108,10 @@ fn next_copy_selection(
 
 #[tokio::test]
 async fn service_tier_commands_and_saved_selection_respect_independent_speed_policy() {
-    for (fast_enabled, ultrafast_enabled) in [(false, true), (true, false)] {
+    // LocalDex force-disables Fast mode, so the paid `priority` tier is never
+    // exposed even when a config or caller asks for it. Ultra Fast keeps its
+    // independent gate.
+    for (fast_attempted, ultrafast_enabled) in [(false, true), (true, false)] {
         let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
         let mut preset = get_available_model(&chat, "gpt-5.5");
         preset.service_tiers = ["priority", "ultrafast"]
@@ -121,7 +124,7 @@ async fn service_tier_commands_and_saved_selection_respect_independent_speed_pol
             .collect();
         preset.default_service_tier = Some("ultrafast".to_string());
         chat.model_catalog = std::sync::Arc::new(ModelCatalog::new(vec![preset]));
-        chat.set_feature_enabled(Feature::FastMode, fast_enabled);
+        chat.set_feature_enabled(Feature::FastMode, fast_attempted);
         chat.set_feature_enabled(Feature::UltrafastMode, ultrafast_enabled);
         chat.set_service_tier(Some("ultrafast".to_string()));
         assert_eq!(
@@ -133,14 +136,11 @@ async fn service_tier_commands_and_saved_selection_respect_independent_speed_pol
                 .into_iter()
                 .map(|tier| tier.id)
                 .collect::<Vec<_>>(),
-            vec![
-                if ultrafast_enabled {
-                    "ultrafast"
-                } else {
-                    "priority"
-                }
-                .to_string()
-            ],
+            if ultrafast_enabled {
+                vec!["ultrafast".to_string()]
+            } else {
+                Vec::new()
+            },
         );
         chat.bottom_pane
             .set_composer_text("/ultra".to_string(), Vec::new(), Vec::new());
@@ -160,6 +160,27 @@ async fn service_tier_commands_and_saved_selection_respect_independent_speed_pol
 async fn service_tier_commands_lowercase_catalog_names() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
     let mut preset = get_available_model(&chat, "gpt-5.5");
+    preset.service_tiers = vec![codex_protocol::openai_models::ModelServiceTier {
+        id: "ultrafast".to_string(),
+        name: "Ultra".to_string(),
+        description: "ultrafast processing".to_string(),
+    }];
+    chat.model_catalog = std::sync::Arc::new(ModelCatalog::new(vec![preset]));
+
+    assert_eq!(
+        chat.current_model_service_tier_commands(),
+        vec![ServiceTierCommand {
+            id: "ultrafast".to_string(),
+            name: "ultra".to_string(),
+            description: "ultrafast processing".to_string(),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn service_tier_commands_omit_force_disabled_fast_tier() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
+    let mut preset = get_available_model(&chat, "gpt-5.5");
     let expected_description = preset
         .service_tiers
         .iter()
@@ -167,22 +188,18 @@ async fn service_tier_commands_lowercase_catalog_names() {
         .expect("fast tier")
         .description
         .clone();
-    preset
-        .service_tiers
-        .iter_mut()
-        .find(|tier| tier.id == ServiceTier::Fast.request_value())
-        .expect("fast tier")
-        .name = "Fast".to_string();
+    preset.service_tiers = vec![codex_protocol::openai_models::ModelServiceTier {
+        id: ServiceTier::Fast.request_value().to_string(),
+        name: "Fast".to_string(),
+        description: expected_description,
+    }];
     chat.model_catalog = std::sync::Arc::new(ModelCatalog::new(vec![preset]));
 
-    assert_eq!(
-        chat.current_model_service_tier_commands(),
-        vec![ServiceTierCommand {
-            id: ServiceTier::Fast.request_value().to_string(),
-            name: "fast".to_string(),
-            description: expected_description,
-        }]
-    );
+    // LocalDex force-disables Fast mode: no config, profile, or managed
+    // requirement can expose the paid tier as a selectable command.
+    chat.set_feature_enabled(Feature::FastMode, /*enabled*/ true);
+    assert!(chat.current_model_service_tier_commands().is_empty());
+    assert_eq!(chat.current_service_tier(), None);
 }
 
 #[tokio::test]
@@ -3425,7 +3442,7 @@ async fn slash_rollout_handles_missing_path() {
 }
 
 #[tokio::test]
-async fn fast_slash_command_updates_and_persists_local_service_tier() {
+async fn fast_slash_command_is_rejected_when_fast_mode_is_force_disabled() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     set_fast_mode_test_catalog(&mut chat);
     chat.set_feature_enabled(Feature::FastMode, /*enabled*/ true);
@@ -3435,79 +3452,62 @@ async fn fast_slash_command_updates_and_persists_local_service_tier() {
 
     let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
     assert!(
-        events.iter().any(|event| matches!(
+        !events.iter().any(|event| matches!(
             event,
             AppEvent::CodexOp(Op::OverrideTurnContext {
-                service_tier: Some(Some(service_tier)),
+                service_tier: Some(_),
                 ..
-            }) if service_tier == ServiceTier::Fast.request_value()
+            }) | AppEvent::PersistServiceTierSelection { .. }
         )),
-        "expected fast-mode override app event; events: {events:?}"
-    );
-    assert!(
-        events.iter().any(|event| matches!(
-            event,
-            AppEvent::PersistServiceTierSelection {
-                service_tier: Some(service_tier),
-            }
-            if service_tier == ServiceTier::Fast.request_value()
-        )),
-        "expected fast-mode persistence app event; events: {events:?}"
+        "force-disabled /fast must not touch the service tier; events: {events:?}"
     );
 
     assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
 }
 
 #[tokio::test]
-async fn fast_keybinding_toggle_uses_same_events_as_fast_slash_command() {
+async fn fast_keybinding_toggle_is_a_noop_when_fast_mode_is_force_disabled() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     set_fast_mode_test_catalog(&mut chat);
     chat.set_feature_enabled(Feature::FastMode, /*enabled*/ true);
+    let _ = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
 
     chat.toggle_fast_mode_from_ui();
 
     let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
     assert!(
-        events.iter().any(|event| matches!(
+        !events.iter().any(|event| matches!(
             event,
             AppEvent::CodexOp(Op::OverrideTurnContext {
-                service_tier: Some(Some(service_tier)),
+                service_tier: Some(_),
                 ..
-            }) if service_tier == ServiceTier::Fast.request_value()
+            }) | AppEvent::PersistServiceTierSelection { .. }
         )),
-        "expected fast-mode override app event; events: {events:?}"
-    );
-    assert!(
-        events.iter().any(|event| matches!(
-            event,
-            AppEvent::PersistServiceTierSelection {
-                service_tier: Some(service_tier),
-            }
-            if service_tier == ServiceTier::Fast.request_value()
-        )),
-        "expected fast-mode persistence app event; events: {events:?}"
+        "the fast keybinding must not touch the service tier; events: {events:?}"
     );
 
     assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
 }
 
 #[tokio::test]
-async fn fast_keybinding_toggle_requires_feature_and_idle_surface() {
+async fn fast_keybinding_toggle_is_never_available_when_fast_mode_is_force_disabled() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     set_fast_mode_test_catalog(&mut chat);
-    chat.set_feature_enabled(Feature::FastMode, /*enabled*/ false);
+    for enabled in [false, true] {
+        chat.set_feature_enabled(Feature::FastMode, enabled);
+        assert!(
+            !chat.can_toggle_fast_mode_from_keybinding(),
+            "fast mode must stay unavailable with FastMode={enabled}"
+        );
+    }
 
-    assert!(!chat.can_toggle_fast_mode_from_keybinding());
-
-    chat.set_feature_enabled(Feature::FastMode, /*enabled*/ true);
-    assert!(chat.can_toggle_fast_mode_from_keybinding());
-
+    // The idle-surface requirement still holds on top of the force-disable.
     chat.bottom_pane.set_task_running(/*running*/ true);
     assert!(!chat.can_toggle_fast_mode_from_keybinding());
 }
 
 #[tokio::test]
-async fn user_turn_carries_service_tier_after_fast_toggle() {
+async fn user_turn_never_carries_fast_service_tier_when_force_disabled() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     chat.thread_id = Some(ThreadId::new());
     set_chatgpt_auth(&mut chat);
@@ -3523,11 +3523,12 @@ async fn user_turn_carries_service_tier_after_fast_toggle() {
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
     match next_submit_op(&mut op_rx) {
-        Op::UserTurn {
-            service_tier: Some(Some(service_tier)),
-            ..
-        } if service_tier == ServiceTier::Fast.request_value() => {}
-        other => panic!("expected Op::UserTurn with fast service tier, got {other:?}"),
+        Op::UserTurn { service_tier, .. } => assert_ne!(
+            service_tier.flatten().as_deref(),
+            Some(ServiceTier::Fast.request_value()),
+            "a user turn must never carry the force-disabled fast tier"
+        ),
+        other => panic!("expected Op::UserTurn, got {other:?}"),
     }
 }
 
@@ -3603,7 +3604,7 @@ async fn model_switch_does_not_enable_catalog_default_fast_tier() {
 }
 
 #[tokio::test]
-async fn queued_fast_slash_applies_before_next_queued_message() {
+async fn queued_fast_slash_is_refused_before_next_queued_message() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     chat.thread_id = Some(ThreadId::new());
     set_chatgpt_auth(&mut chat);
@@ -3618,64 +3619,61 @@ async fn queued_fast_slash_applies_before_next_queued_message() {
 
     let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
     assert!(
-        events.iter().any(|event| matches!(
+        !events.iter().any(|event| matches!(
             event,
             AppEvent::CodexOp(Op::OverrideTurnContext {
-                service_tier: Some(Some(service_tier)),
+                service_tier: Some(_),
                 ..
-            }) if service_tier == ServiceTier::Fast.request_value()
+            }) | AppEvent::PersistServiceTierSelection { .. }
         )),
-        "expected queued /fast to update service tier before next turn; events: {events:?}"
+        "a queued force-disabled /fast must not update the service tier; events: {events:?}"
     );
 
     match next_submit_op(&mut op_rx) {
         Op::UserTurn {
             items,
-            service_tier: Some(Some(service_tier)),
+            service_tier,
             ..
-        } if service_tier == ServiceTier::Fast.request_value() => assert_eq!(
-            items,
-            vec![UserInput::Text {
-                text: "hello after fast".to_string(),
-                text_elements: Vec::new(),
-            }]
-        ),
-        other => panic!("expected queued message to submit with fast tier, got {other:?}"),
+        } => {
+            assert_eq!(
+                items,
+                vec![UserInput::Text {
+                    text: "hello after fast".to_string(),
+                    text_elements: Vec::new(),
+                }]
+            );
+            assert_ne!(
+                service_tier.flatten().as_deref(),
+                Some(ServiceTier::Fast.request_value())
+            );
+        }
+        other => panic!("expected queued message to submit, got {other:?}"),
     }
 }
 
 #[tokio::test]
-async fn user_turn_sends_standard_override_after_fast_is_turned_off() {
+async fn fast_tier_dispatch_never_enables_fast_and_turn_uses_standard_tier() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     chat.thread_id = Some(ThreadId::new());
     set_chatgpt_auth(&mut chat);
     set_fast_mode_test_catalog(&mut chat);
     chat.set_feature_enabled(Feature::FastMode, /*enabled*/ true);
 
-    chat.handle_service_tier_command_dispatch(fast_tier_command());
-    let _events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
-
-    chat.handle_service_tier_command_dispatch(fast_tier_command());
+    for _ in 0..2 {
+        chat.handle_service_tier_command_dispatch(fast_tier_command());
+    }
     let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
     assert!(
-        events.iter().any(|event| matches!(
+        !events.iter().any(|event| matches!(
             event,
             AppEvent::CodexOp(Op::OverrideTurnContext {
-                service_tier: Some(Some(service_tier)),
+                service_tier: Some(_),
                 ..
-            }) if service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
+            }) | AppEvent::PersistServiceTierSelection { .. }
         )),
-        "expected fast-mode off default service tier app event; events: {events:?}"
+        "force-disabled fast tier dispatches must not change the service tier; events: {events:?}"
     );
-    assert!(
-        events.iter().any(|event| matches!(
-            event,
-            AppEvent::PersistServiceTierSelection {
-                service_tier: Some(service_tier)
-            } if service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
-        )),
-        "expected default service tier persistence app event; events: {events:?}"
-    );
+    assert_eq!(chat.current_service_tier(), None);
 
     chat.bottom_pane
         .set_composer_text("hello".to_string(), Vec::new(), Vec::new());

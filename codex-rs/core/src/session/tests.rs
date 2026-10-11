@@ -4776,7 +4776,7 @@ async fn turn_context_with_model_updates_model_fields() {
         ),
         (
             ReasoningSummaryConfig::Detailed,
-            Some(ServiceTier::Fast.request_value())
+            Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE)
         ),
     );
     assert_eq!(
@@ -4786,7 +4786,7 @@ async fn turn_context_with_model_updates_model_fields() {
         ),
         (
             Some(ReasoningSummaryConfig::Detailed),
-            Some(ServiceTier::Fast.request_value())
+            Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE)
         ),
     );
     assert!(Arc::ptr_eq(&captured, &turn_context.initial_settings));
@@ -5023,7 +5023,7 @@ fn get_service_tier_does_not_use_model_default_when_fast_mode_disabled() {
 }
 
 #[test]
-fn get_service_tier_keeps_supported_explicit_tier() {
+fn get_service_tier_remaps_fast_tier_to_explicit_default_when_force_disabled() {
     let model_info = model_with_default_service_tier(Some(ServiceTier::Fast.request_value()));
 
     assert_eq!(
@@ -5032,7 +5032,7 @@ fn get_service_tier_keeps_supported_explicit_tier() {
             &codex_features::Features::with_defaults(),
             &model_info,
         ),
-        Some(ServiceTier::Fast.request_value().to_string())
+        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
     );
 }
 
@@ -5099,7 +5099,7 @@ fn get_service_tier_ignores_non_flex_tiers_when_fast_mode_disabled() {
             &codex_features::Features::default(),
             &model_info,
         ),
-        None
+        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
     );
     assert_eq!(
         get_service_tier(
@@ -5107,7 +5107,7 @@ fn get_service_tier_ignores_non_flex_tiers_when_fast_mode_disabled() {
             &codex_features::Features::default(),
             &model_info,
         ),
-        None
+        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
     );
     assert_eq!(
         get_service_tier(

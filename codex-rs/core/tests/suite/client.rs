@@ -108,17 +108,19 @@ const INSTALLATION_ID_FILENAME: &str = "installation_id";
 const TEST_WINDOW_ID: &str = "test-thread:0";
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
 
-#[test_case::test_case(false, false)]
-#[test_case::test_case(false, true)]
-#[test_case::test_case(true, false)]
-#[test_case::test_case(true, true)]
+#[test_case::test_case(false)]
+#[test_case::test_case(true)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_request_enforces_independent_speed_requirements(
-    fast_enabled: bool,
     ultrafast_enabled: bool,
 ) -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
-    for (tier, enabled) in [("priority", fast_enabled), ("ultrafast", ultrafast_enabled)] {
+    // LocalDex force-disables Fast mode, so a configured fast tier never
+    // reaches the wire. Ultra Fast stays gated by its own feature flag.
+    for (tier, expected) in [
+        ("priority", None),
+        ("ultrafast", ultrafast_enabled.then_some("ultrafast")),
+    ] {
         for configure_at_start in [false, true] {
             let server = start_mock_server().await;
             let response_mock = mount_sse_once(&server, sse(vec![ev_completed("done")])).await;
@@ -132,10 +134,6 @@ async fn responses_request_enforces_independent_speed_requirements(
                     }];
                 })
                 .with_config(move |config| {
-                    config
-                        .features
-                        .set_enabled(Feature::FastMode, fast_enabled)
-                        .expect("configure Fast mode");
                     config
                         .features
                         .set_enabled(Feature::UltrafastMode, ultrafast_enabled)
@@ -157,7 +155,7 @@ async fn responses_request_enforces_independent_speed_requirements(
             test.submit_turn("hello").await?;
             assert_eq!(
                 response_mock.single_request().body_json()["service_tier"].as_str(),
-                enabled.then_some(tier),
+                expected,
                 "tier={tier}, configure_at_start={configure_at_start}",
             );
         }

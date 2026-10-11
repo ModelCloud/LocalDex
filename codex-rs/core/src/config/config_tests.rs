@@ -10191,7 +10191,8 @@ async fn default_service_tier_override_uses_default_request_value() -> std::io::
 }
 
 #[tokio::test]
-async fn legacy_fast_service_tier_override_uses_priority_request_value() -> std::io::Result<()> {
+async fn legacy_fast_service_tier_override_remaps_to_default_when_fast_mode_disabled()
+-> std::io::Result<()> {
     let fixture = create_test_fixture()?;
 
     let config = Config::load_from_base_config_with_overrides(
@@ -10207,13 +10208,14 @@ async fn legacy_fast_service_tier_override_uses_priority_request_value() -> std:
 
     assert_eq!(
         config.service_tier,
-        Some(ServiceTier::Fast.request_value().to_string())
+        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
     );
     Ok(())
 }
 
 #[tokio::test]
-async fn config_toml_priority_service_tier_uses_priority_request_value() -> std::io::Result<()> {
+async fn config_toml_priority_service_tier_remaps_to_default_when_fast_mode_disabled()
+-> std::io::Result<()> {
     let mut fixture = create_test_fixture()?;
     fixture.cfg.service_tier = Some(ServiceTier::Fast.request_value().to_string());
     let cwd = fixture.cwd_path();
@@ -10231,7 +10233,7 @@ async fn config_toml_priority_service_tier_uses_priority_request_value() -> std:
 
     assert_eq!(
         config.service_tier,
-        Some(ServiceTier::Fast.request_value().to_string())
+        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
     );
     Ok(())
 }
@@ -10261,7 +10263,8 @@ async fn config_toml_service_tier_accepts_arbitrary_string() -> std::io::Result<
 }
 
 #[tokio::test]
-async fn config_toml_legacy_fast_service_tier_uses_priority_request_value() -> std::io::Result<()> {
+async fn config_toml_legacy_fast_service_tier_remaps_to_default_when_fast_mode_disabled()
+-> std::io::Result<()> {
     let mut fixture = create_test_fixture()?;
     fixture.cfg.service_tier = Some("fast".to_string());
     let cwd = fixture.cwd_path();
@@ -10279,7 +10282,7 @@ async fn config_toml_legacy_fast_service_tier_uses_priority_request_value() -> s
 
     assert_eq!(
         config.service_tier,
-        Some(ServiceTier::Fast.request_value().to_string())
+        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
     );
     Ok(())
 }

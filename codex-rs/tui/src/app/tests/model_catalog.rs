@@ -3,6 +3,7 @@ use assert_matches::assert_matches;
 use codex_config::types::ModelAvailabilityNuxConfig;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::openai_models::ModelAvailabilityNux;
 use pretty_assertions::assert_eq;
@@ -95,19 +96,24 @@ async fn model_picker_refresh_updates_app_catalog_from_app_server() -> Result<()
     app.chat_widget.open_model_popup();
     assert!(!app.chat_widget.no_modal_or_popup_active());
 
+    // The server-side session still advertises the fast tier, but LocalDex
+    // force-disables Fast mode: every cached copy of the session must be
+    // sanitized so resume cannot carry the tier back into the TUI.
     session.service_tier = fast.map(str::to_string);
+    let mut expected_session = session.clone();
+    expected_session.service_tier = None;
     let channel = &app.thread_event_channels[&thread_id];
     let cached = channel.store.lock().await.session.clone();
     assert_eq!(
         (&app.primary_session_configured, &cached),
-        (&Some(session.clone()), &Some(session.clone()))
+        (&Some(expected_session.clone()), &Some(expected_session))
     );
     app.chat_widget.handle_thread_session(test_thread_session(
         ThreadId::new(),
         test_path_buf("/tmp/other"),
     ));
     app.chat_widget.handle_thread_session(cached.unwrap());
-    assert_eq!(app.chat_widget.current_service_tier(), fast);
+    assert_eq!(app.chat_widget.current_service_tier(), None);
     let stale = AppEvent::ModelsLoaded {
         request_id: uuid::Uuid::new_v4(),
         result: Ok(all_model_presets()),
@@ -123,7 +129,13 @@ async fn model_picker_refresh_updates_app_catalog_from_app_server() -> Result<()
     let mut config = app.config.clone();
     config.service_tier = None;
     config.features.enable(Feature::FastMode)?;
-    for (model, expected_tier) in [(None, fast), (Some("gpt-5.6-terra"), Some("default"))] {
+    for (model, expected_tier) in [
+        (None, Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE)),
+        (
+            Some("gpt-5.6-terra"),
+            Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE),
+        ),
+    ] {
         config.model = model.map(str::to_string);
         let started = app_server.start_thread(&config).await?;
         assert_eq!(started.session.service_tier.as_deref(), expected_tier);

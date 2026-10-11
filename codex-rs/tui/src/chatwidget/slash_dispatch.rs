@@ -16,6 +16,7 @@ use crate::bottom_pane::slash_commands::SlashCommandItem;
 use crate::bottom_pane::slash_commands::find_slash_command;
 use crate::goal_display::GOAL_USAGE;
 use crate::goal_files::GoalDraft;
+use codex_protocol::config_types::ServiceTier;
 use codex_protocol::openai_models::SPEED_TIER_FAST;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,7 +67,13 @@ impl ChatWidget {
             self.bottom_pane.record_pending_slash_command_history();
             return;
         }
-        if !self.fast_mode_enabled() && command.id == SPEED_TIER_FAST {
+        // Model catalogs expose the fast tier under its wire id (`priority`)
+        // with the display name `fast`, so match both spellings. Otherwise a
+        // catalog-resolved `/fast` would slip past this gate and re-enable the
+        // tier that LocalDex force-disables.
+        let requests_fast_tier = command.id == SPEED_TIER_FAST
+            || ServiceTier::from_request_value(&command.id) == Some(ServiceTier::Fast);
+        if !self.fast_mode_enabled() && requests_fast_tier {
             self.add_error_message(
                 "'/fast' is unavailable because Fast Mode is disabled.".to_string(),
             );

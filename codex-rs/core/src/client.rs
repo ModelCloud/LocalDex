@@ -644,6 +644,7 @@ impl ModelClient {
             include_timing_metrics: state.include_timing_metrics,
             beta_features_header: state.beta_features_header.clone(),
             concurrent_reasoning_summaries_enabled: state.concurrent_reasoning_summaries_enabled,
+            output_token_replay_enabled: state.output_token_replay_enabled,
             include_attestation,
             attestation_provider: state.attestation_provider.clone(),
             disable_websockets: AtomicBool::new(false),

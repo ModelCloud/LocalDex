@@ -27,7 +27,7 @@ use std::time::Duration;
 
 const WS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
 
-#[test_case::test_case("priority", true, false; "fast mode enabled")]
+#[test_case::test_case("priority", true, false; "fast mode requested but force-disabled")]
 #[test_case::test_case("priority", false, true; "fast mode disabled")]
 #[test_case::test_case("ultrafast", false, true; "ultrafast mode enabled")]
 #[test_case::test_case("ultrafast", true, false; "ultrafast mode disabled")]
@@ -67,11 +67,6 @@ async fn spawned_agent_prewarm_handshake_inherits_effective_root_service_tier(
         ],
     ])
     .await;
-    let tier_enabled = if tier == "ultrafast" {
-        ultrafast_mode_enabled
-    } else {
-        fast_mode_enabled
-    };
     let test = test_codex()
         .with_model("gpt-5.4")
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
@@ -105,6 +100,17 @@ async fn spawned_agent_prewarm_handshake_inherits_effective_root_service_tier(
         })
         .build_with_websocket_server(&server)
         .await?;
+    assert!(
+        !test.config.features.enabled(Feature::FastMode),
+        "LocalDex force-disables Fast mode for every session"
+    );
+    // Fast mode is force-disabled, so a requested `priority` tier is inert even
+    // when the test asks for the feature to be enabled.
+    let tier_enabled = if tier == "ultrafast" {
+        ultrafast_mode_enabled
+    } else {
+        test.config.features.enabled(Feature::FastMode)
+    };
     let mut created_threads = test.thread_manager.subscribe_thread_created();
     tokio::time::timeout(
         Duration::from_secs(5),
@@ -553,7 +559,7 @@ async fn websocket_v2_test_codex_shell_chain() -> Result<()> {
 
 #[test_case::test_case(None, Some("ultrafast"); "standard to ultrafast")]
 #[test_case::test_case(Some("ultrafast"), None; "ultrafast to standard")]
-#[test_case::test_case(Some("priority"), Some("ultrafast"); "priority to ultrafast")]
+#[test_case::test_case(Some("flex"), Some("ultrafast"); "flex to ultrafast")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn websocket_v2_first_turn_sends_full_create_when_tier_changes_after_startup_prewarm(
     startup_tier: Option<&'static str>,
@@ -583,7 +589,7 @@ async fn websocket_v2_first_turn_sends_full_create_when_tier_changes_after_start
     let mut builder = test_codex()
         .with_model_info_override(model, |model_info| {
             // Exercise tier transitions independently of the bundled model catalog.
-            model_info.service_tiers = ["priority", "ultrafast"]
+            model_info.service_tiers = ["flex", "ultrafast"]
                 .into_iter()
                 .map(|tier| ModelServiceTier {
                     id: tier.to_string(),
@@ -660,7 +666,7 @@ async fn websocket_v2_next_turn_uses_updated_service_tier() -> Result<()> {
         vec![ev_response_created("warm-1"), ev_completed("warm-1")],
         vec![
             ev_response_created("resp-1"),
-            ev_assistant_message("msg_1", "fast"),
+            ev_assistant_message("msg_1", "flex"),
             ev_completed("resp-1"),
         ],
         vec![
@@ -687,7 +693,7 @@ async fn websocket_v2_next_turn_uses_updated_service_tier() -> Result<()> {
     assert_eq!(warmup["generate"].as_bool(), Some(false));
     assert_eq!(warmup.get("service_tier"), None);
 
-    test.submit_turn_with_service_tier("first", Some(ServiceTier::Fast.request_value()))
+    test.submit_turn_with_service_tier("first", Some(ServiceTier::Flex.request_value()))
         .await?;
     test.submit_turn_with_service_tier("second", /*service_tier*/ None)
         .await?;
@@ -706,7 +712,7 @@ async fn websocket_v2_next_turn_uses_updated_service_tier() -> Result<()> {
         .body_json();
 
     assert_eq!(first_turn["type"].as_str(), Some("response.create"));
-    assert_eq!(first_turn["service_tier"].as_str(), Some("priority"));
+    assert_eq!(first_turn["service_tier"].as_str(), Some("flex"));
     assert_eq!(first_turn.get("previous_response_id"), None);
     assert!(
         first_turn

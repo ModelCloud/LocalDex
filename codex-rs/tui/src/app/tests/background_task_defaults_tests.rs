@@ -401,7 +401,9 @@ async fn command_center_new_reads_server_defaults_for_actual_destination() -> Re
                 &serde_json::json!(if mode == "local" && explicit_cwd {
                     "flex"
                 } else {
-                    "priority"
+                    // LocalDex force-disables Fast mode, so a configured fast
+                    // tier starts threads on explicit standard routing.
+                    "default"
                 }),
             ),
             "{mode} {expected_cwd}"

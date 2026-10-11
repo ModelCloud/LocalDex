@@ -3,6 +3,7 @@
 //! This crate defines the feature registry plus the logic used to resolve an
 //! effective feature set from config-like inputs.
 
+use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
@@ -560,7 +561,18 @@ impl Features {
         }
     }
 
+    /// LocalDex force-disables these features for every session and surface.
+    ///
+    /// The feature code stays compiled in, but no config value, profile, or
+    /// managed requirement can turn it back on. Fast mode is disabled so a
+    /// stored `/fast` session can never be toggled, resumed, or sent to a
+    /// model that supports the paid fast tier.
+    pub const FORCE_DISABLED_FEATURES: &'static [Feature] = &[Feature::FastMode];
+
     pub fn enabled(&self, f: Feature) -> bool {
+        if Self::FORCE_DISABLED_FEATURES.contains(&f) {
+            return false;
+        }
         self.enabled.contains(&f)
     }
 
@@ -568,6 +580,9 @@ impl Features {
     pub fn service_tier_enabled(&self, service_tier: &str) -> bool {
         match service_tier {
             "flex" => true,
+            // Explicit standard routing is not a speed tier: keep it enabled so
+            // requests and session state can pin it while Fast mode is disabled.
+            SERVICE_TIER_DEFAULT_REQUEST_VALUE => true,
             "ultrafast" => self.enabled(Feature::UltrafastMode),
             _ => self.enabled(Feature::FastMode),
         }
@@ -593,6 +608,9 @@ impl Features {
     }
 
     pub fn enable(&mut self, f: Feature) -> &mut Self {
+        if Self::FORCE_DISABLED_FEATURES.contains(&f) {
+            return self;
+        }
         self.enabled.insert(f);
         self
     }
@@ -760,7 +778,11 @@ impl Features {
     }
 
     pub fn enabled_features(&self) -> Vec<Feature> {
-        self.enabled.iter().copied().collect()
+        self.enabled
+            .iter()
+            .copied()
+            .filter(|feature| !Self::FORCE_DISABLED_FEATURES.contains(feature))
+            .collect()
     }
 
     pub fn normalize_dependencies(&mut self) {
