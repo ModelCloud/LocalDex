@@ -141,6 +141,13 @@ fn local_reasoning_at_compacted_handoff_is_not_sent_to_official_model() -> anyho
         ..Default::default()
     };
     prompt.input.push(reasoning);
+    prompt.input.push(ResponseItem::Reasoning {
+        id: None,
+        summary: vec![],
+        content: None,
+        encrypted_content: Some("verified reasoning".into()),
+        internal_chat_message_metadata_passthrough: None,
+    });
     let saved_history = prompt.input.clone();
     let model = test_model_info();
     let build = |client: &ModelClient| {
@@ -162,7 +169,12 @@ fn local_reasoning_at_compacted_handoff_is_not_sent_to_official_model() -> anyho
     };
     let official_wire = serde_json::to_value(build(&official)?)?;
     assert_eq!(official_wire["input"][122]["type"], "reasoning");
+    assert_eq!(
+        official_wire["input"][122]["encrypted_content"],
+        "verified reasoning"
+    );
     assert!(official_wire["input"][122].get("content").is_none());
+    assert_eq!(official_wire["input"].as_array().map(Vec::len), Some(123));
     assert_eq!(prompt.input, saved_history);
 
     let local_wire = serde_json::to_value(build(&local)?)?;

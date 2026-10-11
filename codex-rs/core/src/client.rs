@@ -182,13 +182,24 @@ const MEMORIES_SUMMARIZE_ENDPOINT: &str = "/memories/trace_summarize";
 pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration =
     Duration::from_millis(DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS);
 
-fn omit_reasoning_content_for_official_provider(
-    input: &mut [ResponseItem],
+fn sanitize_reasoning_for_official_provider(
+    input: &mut Vec<ResponseItem>,
     localdex_compatibility: bool,
 ) {
     if localdex_compatibility {
         return;
     }
+    // Plaintext reasoning from a local endpoint has no encrypted payload that
+    // the official service can verify or replay from a stored response.
+    input.retain(|item| {
+        !matches!(
+            item,
+            ResponseItem::Reasoning {
+                encrypted_content: None,
+                ..
+            }
+        )
+    });
     for item in input {
         if let ResponseItem::Reasoning { content, .. } = item {
             *content = None;
@@ -344,6 +355,7 @@ struct WebsocketContinuation {
 #[derive(Debug, Default)]
 struct HttpSession {
     auth_owner_generation: Option<u64>,
+    continuation_disabled: bool,
     last_request: Option<ResponsesApiRequest>,
     last_response_rx: Option<oneshot::Receiver<LastResponse>>,
     last_response: Option<LastResponse>,
@@ -398,6 +410,24 @@ fn is_stale_continuation(status: StatusCode, body: Option<&str>) -> bool {
     )
 }
 
+pub(crate) fn is_unsupported_persisted_item_context(
+    status: StatusCode,
+    body: Option<&str>,
+) -> bool {
+    if status != StatusCode::BAD_REQUEST {
+        return false;
+    }
+    let Some(error) = body
+        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+        .and_then(|body| body.get("error").cloned())
+    else {
+        return false;
+    };
+    error.get("code").and_then(serde_json::Value::as_str)
+        == Some("unsupported_persisted_item_context")
+        && error.get("param").and_then(serde_json::Value::as_str) == Some("previous_response_id")
+}
+
 struct HttpContinuation {
     response_id: String,
     items: Vec<ResponseItem>,
@@ -415,6 +445,7 @@ struct WebsocketSession {
     last_response_from_untraced_warmup: bool,
     connection_reused: StdMutex<bool>,
     continuation_reset_reason: Option<&'static str>,
+    continuation_disabled: bool,
 }
 
 // Continuation diagnostics use bounded labels, never request contents or identifiers.
@@ -423,6 +454,7 @@ enum NonIncrementalReason {
     NoPreviousRequest,
     NoPreviousResponse,
     NoPreviousResponseId,
+    ContinuationDisabled,
     RequestPropertyChanged {
         reason: &'static str,
     },
@@ -441,6 +473,7 @@ impl NonIncrementalReason {
             Self::NoPreviousRequest => "no_previous_request",
             Self::NoPreviousResponse => "no_previous_response",
             Self::NoPreviousResponseId => "no_previous_response_id",
+            Self::ContinuationDisabled => "continuation_disabled",
             Self::RequestPropertyChanged { reason } => reason,
             Self::InputShortened { .. } => "input_shortened",
             Self::InputMismatch { .. } => "input_mismatch",
@@ -454,6 +487,7 @@ impl NonIncrementalReason {
             Self::NoPreviousRequest
             | Self::NoPreviousResponse
             | Self::NoPreviousResponseId
+            | Self::ContinuationDisabled
             | Self::RequestPropertyChanged { .. } => ("none", "none"),
         }
     }
@@ -564,6 +598,7 @@ impl WebsocketSession {
         *self = Self {
             auth_owner_generation: self.auth_owner_generation,
             continuation_reset_reason,
+            continuation_disabled: self.continuation_disabled,
             ..Default::default()
         };
     }
@@ -809,6 +844,7 @@ impl ModelClient {
             // Drop the old owner's cache before this turn can establish fresh routing state.
             websocket_session.reset(Some("other"));
             websocket_session.auth_owner_generation = auth_owner_generation;
+            websocket_session.continuation_disabled = false;
         }
         let mut http_session = std::mem::take(
             &mut *self
@@ -1117,7 +1153,7 @@ impl ModelClient {
         // Normalize the request before it is copied for HTTP or WebSocket continuation.
         // Local providers may put plaintext reasoning in history, while official
         // Responses models reject reasoning items with nonempty `content`.
-        omit_reasoning_content_for_official_provider(
+        sanitize_reasoning_for_official_provider(
             &mut input,
             self.state.provider.info().localdex_compatibility,
         );
@@ -1682,6 +1718,9 @@ impl ModelClientSession {
         &mut self,
         request: &ResponsesApiRequest,
     ) -> std::result::Result<WebsocketContinuation, NonIncrementalReason> {
+        if self.websocket_session.continuation_disabled {
+            return Err(NonIncrementalReason::ContinuationDisabled);
+        }
         let last_response = self
             .get_last_response()
             .ok_or(NonIncrementalReason::NoPreviousResponse)?;
@@ -1739,12 +1778,8 @@ impl ModelClientSession {
     /// The model's reasoning and function calls stay in their original `ResponseItem` form. If
     /// the request is no longer a strict append, callers intentionally fall back to full history.
     fn prepare_http_request(&mut self, request: &ResponsesApiRequest) -> Option<HttpContinuation> {
-        if !self
-            .client
-            .state
-            .provider
-            .info()
-            .supports_responses_continuation
+        if self.http_session.continuation_disabled
+            || !self.client.provider_info().supports_responses_continuation
         {
             return None;
         }
@@ -1935,6 +1970,9 @@ impl ModelClientSession {
             } else {
                 reset_reason
             });
+            if owner_changed {
+                self.websocket_session.continuation_disabled = false;
+            }
             let new_conn = self
                 .client
                 .connect_websocket(
@@ -2210,6 +2248,15 @@ impl ModelClientSession {
                 }
                 Err(err) => {
                     if let Some(continuation_id) = continuation_id.as_deref() {
+                        if let ApiError::Transport(TransportError::Http { status, body, .. }) = &err
+                            && is_unsupported_persisted_item_context(*status, body.as_deref())
+                        {
+                            self.disable_response_continuation();
+                            warn!(
+                                "Responses provider cannot replay stored context; retrying with full history"
+                            );
+                            continue;
+                        }
                         let transport_failure = matches!(
                             &err,
                             ApiError::Transport(
@@ -2777,6 +2824,23 @@ impl ModelClientSession {
     /// Drops the cached WebSocket connection and its continuation state.
     pub(crate) fn drop_connection(&mut self) {
         self.websocket_session.reset(Some("other"));
+    }
+
+    /// Stop sending stored response IDs after the provider rejects replay of
+    /// this conversation's context. The next sampling attempt sends full history.
+    pub(crate) fn disable_response_continuation(&mut self) -> bool {
+        if self.websocket_session.continuation_disabled && self.http_session.continuation_disabled {
+            return false;
+        }
+        self.websocket_session
+            .reset(Some("unsupported_persisted_item_context"));
+        self.websocket_session.continuation_disabled = true;
+        self.http_session.continuation_disabled = true;
+        self.http_session.last_request = None;
+        self.http_session.last_response_rx = None;
+        self.http_session.last_response = None;
+        self.http_session.resume_point = None;
+        true
     }
 
     /// Restore the HTTP continuation to the last stored response after a
