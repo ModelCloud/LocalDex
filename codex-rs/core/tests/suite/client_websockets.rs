@@ -2510,6 +2510,87 @@ async fn responses_websocket_v2_after_error_uses_full_create_without_previous_re
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_websocket_retries_unreplayable_context_with_full_history() {
+    skip_if_no_network!();
+
+    let unreplayable_error = json!({
+        "type": "error",
+        "status": 400,
+        "error": {
+            "type": "invalid_request_error",
+            "param": "previous_response_id",
+            "code": "unsupported_persisted_item_context",
+            "message": "Stored context cannot be replayed"
+        }
+    });
+    let server = start_websocket_server(vec![
+        vec![
+            vec![ev_response_created("resp-1"), ev_completed("resp-1")],
+            vec![unreplayable_error.clone()],
+        ],
+        vec![
+            vec![ev_response_created("resp-2"), ev_completed("resp-2")],
+            vec![unreplayable_error],
+        ],
+    ])
+    .await;
+    let mut extensions = ExtensionRegistryBuilder::new();
+    extensions.thread_lifecycle_contributor(Arc::new(ThreadIdle));
+    let test = test_codex()
+        .with_extensions(Arc::new(extensions.build()))
+        .with_config(|config| {
+            config.model_provider.stream_max_retries = Some(0);
+        })
+        .build_with_websocket_server(&server)
+        .await
+        .expect("build websocket codex");
+
+    test.submit_text_turn("hello").await.expect("first turn");
+    ThreadIdle::wait(&test.codex).await;
+    test.codex.prewarm_with_history().await;
+    test.submit_text_turn("continue")
+        .await
+        .expect("unreplayable context should retry with full history");
+
+    let connections = server.connections();
+    assert_eq!(connections.len(), 2);
+    assert_eq!(connections[0].len(), 2);
+    assert_eq!(
+        connections[0][1].body_json()["previous_response_id"],
+        "resp-1"
+    );
+    let retry = connections[1][0].body_json();
+    assert!(retry.get("previous_response_id").is_none());
+    assert!(
+        retry["input"].as_array().expect("full retry input").len()
+            > connections[0][1].body_json()["input"]
+                .as_array()
+                .expect("delta input")
+                .len()
+    );
+    ThreadIdle::wait(&test.codex).await;
+    test.codex.prewarm_with_history().await;
+    test.codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "still continue".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await
+        .expect("submit third turn");
+    wait_for_event(&test.codex, |event| matches!(event, EventMsg::Error(_))).await;
+    let connections = server.connections();
+    assert_eq!(connections.len(), 2);
+    assert_eq!(connections[1].len(), 2);
+    assert!(
+        connections[1][1]
+            .body_json()
+            .get("previous_response_id")
+            .is_none()
+    );
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_websocket_v2_surfaces_terminal_error_without_close_handshake() {
     skip_if_no_network!();
 

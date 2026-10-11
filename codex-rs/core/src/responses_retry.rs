@@ -5,6 +5,7 @@
 use std::time::Duration;
 
 use crate::client::ModelClientSession;
+use crate::client::is_unsupported_persisted_item_context;
 use crate::context::ContentFilterGuidance;
 use crate::context::ContextualUserFragment;
 use crate::session::session::Session;
@@ -17,6 +18,7 @@ use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::WarningEvent;
+use http::StatusCode;
 use tokio::time::Instant;
 use tracing::warn;
 
@@ -79,6 +81,22 @@ pub(crate) async fn handle_response_stream_error(
             &[ContextualUserFragment::into(guidance)],
         )
         .await;
+    }
+    let unsupported_persisted_context = match err.details() {
+        CodexErrorDetails::InvalidRequest(body) => {
+            is_unsupported_persisted_item_context(StatusCode::BAD_REQUEST, Some(body))
+        }
+        CodexErrorDetails::UnexpectedStatus(response) => {
+            is_unsupported_persisted_item_context(response.status, Some(&response.body))
+        }
+        _ => false,
+    };
+    if matches!(request, ResponsesStreamRequest::Sampling)
+        && unsupported_persisted_context
+        && client_session.disable_response_continuation()
+    {
+        warn!("Responses provider cannot replay stored context; retrying with full history");
+        return Ok(());
     }
     let operation = match request {
         ResponsesStreamRequest::Sampling => RetryOperation::Sampling,
