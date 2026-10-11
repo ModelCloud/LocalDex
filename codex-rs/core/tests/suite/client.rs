@@ -3787,17 +3787,18 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
     let input = body["input"].as_array().expect("request input");
     assert_eq!(input[0]["role"], "developer");
     let input = &input[1..];
-    assert_eq!(input.len(), 10);
-    assert_eq!(input[0]["id"].as_str(), Some("rs_reasoning-id"));
-    assert_eq!(input[1]["id"].as_str(), Some("msg_message-id"));
-    assert_eq!(input[2]["id"].as_str(), Some("ws_web-search-id"));
-    assert_eq!(input[3]["id"].as_str(), Some("fc_function-id"));
-    assert_eq!(input[4]["call_id"].as_str(), Some("function-call-id"));
-    assert_eq!(input[5]["id"].as_str(), Some("lsh_local-shell-id"));
-    assert_eq!(input[6]["id"].as_str(), Some("ctc_custom-tool-id"));
-    assert_eq!(input[7]["call_id"].as_str(), Some("custom-tool-call-id"));
+    // LocalDex drops plaintext reasoning items for official providers because the
+    // service cannot verify or replay them from a stored response.
+    assert_eq!(input.len(), 9);
+    assert_eq!(input[0]["id"].as_str(), Some("msg_message-id"));
+    assert_eq!(input[1]["id"].as_str(), Some("ws_web-search-id"));
+    assert_eq!(input[2]["id"].as_str(), Some("fc_function-id"));
+    assert_eq!(input[3]["call_id"].as_str(), Some("function-call-id"));
+    assert_eq!(input[4]["id"].as_str(), Some("lsh_local-shell-id"));
+    assert_eq!(input[5]["id"].as_str(), Some("ctc_custom-tool-id"));
+    assert_eq!(input[6]["call_id"].as_str(), Some("custom-tool-call-id"));
+    assert_eq!(input[7].get("id"), None);
     assert_eq!(input[8].get("id"), None);
-    assert_eq!(input[9].get("id"), None);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
