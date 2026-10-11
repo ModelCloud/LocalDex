@@ -148,6 +148,17 @@ async fn output_token_replay_respects_provider_and_preserves_history(
                 }
             }
         }
+        // LocalDex omits a null `content` on reasoning items when it serializes
+        // them, so normalize the expectation to the wire form.
+        for item in expected.as_array_mut().expect("expected items") {
+            if item["type"] == "reasoning"
+                && item.get("content").is_some_and(serde_json::Value::is_null)
+            {
+                item.as_object_mut()
+                    .expect("expected item")
+                    .remove("content");
+            }
+        }
         assert_eq!(
             strip_metadata_from_json(strip_response_item_ids_from_json(json!(replayed))),
             strip_response_item_ids_from_json(expected),
