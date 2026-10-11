@@ -53,6 +53,23 @@ impl App {
                 &event,
                 AppEvent::OpenDaemonMenu
                     | AppEvent::OpenWarnings
+                    | AppEvent::StatusLineSetup { .. }
+                    | AppEvent::StatusLineSetupCancelled
+                    | AppEvent::TerminalTitleSetup { .. }
+                    | AppEvent::TerminalTitleSetupPreview { .. }
+                    | AppEvent::TerminalTitleSetupCancelled
+                    | AppEvent::OpenConfigEditor(_)
+                    | AppEvent::SyntaxThemeSelected { .. }
+                    | AppEvent::SyntaxThemePreviewed
+                    | AppEvent::OpenKeymapActionMenu { .. }
+                    | AppEvent::OpenKeymapReplaceBindingMenu { .. }
+                    | AppEvent::OpenKeymapCapture { .. }
+                    | AppEvent::OpenKeymapDebug
+                    | AppEvent::KeymapCaptured { .. }
+                    | AppEvent::KeymapCleared { .. }
+                    | AppEvent::TestConfigNotification
+                    | AppEvent::SendConfigTestNotification { .. }
+                    | AppEvent::SaveConfigPreference(_)
                     | AppEvent::CopyWarning(_)
                     | AppEvent::UpdateWarnings { .. }
                     | AppEvent::CopySelection { .. }
@@ -1126,6 +1143,17 @@ impl App {
                     self.active_thread_id = visible_thread;
                 }
                 if let Err(err) = result {
+                    if is_realtime_stop {
+                        let chat_widget = match self.background_voice.as_deref_mut() {
+                            Some(owner) if parked_voice => owner,
+                            _ => &mut self.chat_widget,
+                        };
+                        if chat_widget.thread_id() == realtime_stop_thread_id {
+                            chat_widget.record_realtime_failure(
+                                crate::chatwidget::RealtimeFailureCause::AppServerRequest,
+                            );
+                        }
+                    }
                     if self.recover_transport_error(&err) {
                         return Ok(AppRunControl::Continue);
                     }
@@ -1152,12 +1180,14 @@ impl App {
                         let message = format!("Voice conversation failed: {err:#}");
                         if is_realtime_stop {
                             if chat_widget.thread_id() == realtime_stop_thread_id {
-                                chat_widget.record_realtime_failure();
                                 chat_widget.reset_realtime_conversation();
                                 chat_widget.add_realtime_error(message);
                             }
                         } else {
-                            chat_widget.on_realtime_error(message);
+                            chat_widget.on_realtime_error(
+                                message,
+                                crate::chatwidget::RealtimeFailureCause::AppServerRequest,
+                            );
                         }
                         tracing::error!(error = ?err, "realtime conversation request failed");
                     } else if handled {
@@ -1321,8 +1351,12 @@ impl App {
                     .handle_pet_selection_loaded(tui, request_id, pet_id, result)
                     .await;
             }
-            AppEvent::ConfiguredPetLoaded { pet_id, result } => {
-                self.handle_configured_pet_loaded(tui, pet_id, result);
+            AppEvent::ConfiguredPetLoaded {
+                generation,
+                pet_id,
+                result,
+            } => {
+                self.handle_configured_pet_loaded(tui, generation, pet_id, result);
             }
             AppEvent::RefreshConnectors { force_refetch } => {
                 self.chat_widget.refresh_connectors(force_refetch);
@@ -2976,7 +3010,7 @@ impl App {
                 );
             }
             AppEvent::SelectAgentThread(thread_id) => {
-                self.select_agent_thread_and_discard_side(tui, app_server, thread_id)
+                self.select_agent_thread(tui, app_server, thread_id)
                     .await?;
             }
             AppEvent::StartSide {
@@ -3213,14 +3247,14 @@ impl App {
                         self.local_settings.tui.status_line = Some(ids.clone());
                         self.local_settings.tui.status_line_use_colors = use_theme_colors;
                         self.chat_widget.setup_status_line(items, use_theme_colors);
+                        self.chat_widget.refresh_config_panel(Some("Saved".into()));
                     }
                     Err(err) => {
                         let error = format_config_error(&err);
                         tracing::error!(error = %error, "failed to persist status line settings; keeping previous selection");
                         self.app_event_tx.send(AppEvent::FollowTranscript);
-                        self.chat_widget.add_error_message(format!(
-                            "Failed to save status line settings: {error}"
-                        ));
+                        let message = format!("Failed to save status line settings: {error}");
+                        self.chat_widget.report_config_save_error(message);
                     }
                 }
             }
@@ -3242,6 +3276,7 @@ impl App {
             }
             AppEvent::StatusLineSetupCancelled => {
                 self.chat_widget.cancel_status_line_setup();
+                self.chat_widget.refresh_config_panel(/*notice*/ None);
             }
             AppEvent::TerminalTitleSetup { items } => {
                 let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
@@ -3254,14 +3289,14 @@ impl App {
                     Ok(()) => {
                         self.local_settings.tui.terminal_title = Some(ids.clone());
                         self.chat_widget.setup_terminal_title(items);
+                        self.chat_widget.refresh_config_panel(Some("Saved".into()));
                     }
                     Err(err) => {
                         tracing::error!(error = %err, "failed to persist terminal title items; keeping previous selection");
                         self.app_event_tx.send(AppEvent::FollowTranscript);
                         self.chat_widget.revert_terminal_title_setup_preview();
-                        self.chat_widget.add_error_message(format!(
-                            "Failed to save terminal title items: {err}"
-                        ));
+                        let message = format!("Failed to save terminal title items: {err}");
+                        self.chat_widget.report_config_save_error(message);
                     }
                 }
             }
@@ -3270,6 +3305,36 @@ impl App {
             }
             AppEvent::TerminalTitleSetupCancelled => {
                 self.chat_widget.cancel_terminal_title_setup();
+                self.chat_widget.refresh_config_panel(/*notice*/ None);
+            }
+            AppEvent::OpenConfigEditor(handoff) => {
+                self.cancel_pending_key_chord();
+                if let Err(err) = tui.discard_pending_input_before_interactive_screen() {
+                    tracing::warn!(%err, "failed to discard input before opening config editor");
+                    self.chat_widget.config_editor_open_failed(format!(
+                        "Failed to open setting because terminal input could not be cleared: {err}"
+                    ));
+                } else {
+                    let resume_current_availability =
+                        super::resume_config::resume_current_directory_availability(
+                            &self.app_server_target,
+                            self.environment_manager.as_ref(),
+                            self.runtime_working_directory_override
+                                .as_deref()
+                                .or(self.harness_overrides.cwd.as_deref())
+                                .or_else(|| app_server.remote_cwd_override()),
+                        );
+                    self.chat_widget
+                        .open_config_editor(handoff, resume_current_availability);
+                    self.chat_widget.refresh_config_panel(/*notice*/ None);
+                }
+            }
+            AppEvent::TestConfigNotification => self.schedule_config_notification_test(),
+            AppEvent::SendConfigTestNotification { generation } => {
+                self.send_config_notification_test(tui, generation)
+            }
+            AppEvent::SaveConfigPreference(preference) => {
+                self.save_config_preference(tui, preference).await;
             }
             AppEvent::PersistAgentsOverviewGrouping(grouping) => {
                 self.persist_agents_overview_grouping(grouping).await;
@@ -3293,6 +3358,7 @@ impl App {
                             crate::render::highlight::set_syntax_theme(theme);
                         }
                         self.sync_tui_theme_selection(name);
+                        self.chat_widget.refresh_config_panel(Some("Saved".into()));
                         self.refresh_status_line();
                         tui.frame_requester().schedule_frame();
                     }
@@ -3301,8 +3367,8 @@ impl App {
                         self.refresh_status_line();
                         tracing::error!(error = %err, "failed to persist theme selection");
                         self.app_event_tx.send(AppEvent::FollowTranscript);
-                        self.chat_widget
-                            .add_error_message(format!("Failed to save theme: {err}"));
+                        let message = format!("Failed to save theme: {err}");
+                        self.chat_widget.report_config_save_error(message);
                     }
                 }
             }
@@ -3498,7 +3564,7 @@ impl App {
                 tracing::error!(error = %err, "failed to persist keymap binding");
                 self.app_event_tx.send(AppEvent::FollowTranscript);
                 self.chat_widget
-                    .add_error_message(format!("Failed to save shortcut: {err}"));
+                    .report_config_save_error(format!("Failed to save shortcut: {err}"));
             }
         }
     }
@@ -3559,7 +3625,7 @@ impl App {
                 tracing::error!(error = %err, "failed to clear keymap binding");
                 self.app_event_tx.send(AppEvent::FollowTranscript);
                 self.chat_widget
-                    .add_error_message(format!("Failed to remove shortcut: {err}"));
+                    .report_config_save_error(format!("Failed to remove shortcut: {err}"));
             }
         }
     }
@@ -3594,6 +3660,16 @@ impl App {
                 // its shutdown completion does not trigger agent failover.
                 self.pending_shutdown_exit_thread_id =
                     self.active_thread_id.or(self.chat_widget.thread_id());
+                if !self.side_threads.is_empty()
+                    && tokio::time::timeout(
+                        SHUTDOWN_FIRST_EXIT_TIMEOUT,
+                        self.shutdown_side_threads(app_server),
+                    )
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("timed out waiting for side-conversation shutdown");
+                }
                 if self.pending_shutdown_exit_thread_id.is_some()
                     || self.voice_owner_thread_id().is_some()
                 {
