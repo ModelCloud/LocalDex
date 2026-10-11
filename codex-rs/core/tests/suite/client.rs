@@ -743,6 +743,86 @@ async fn responses_continuation_stale_pointer_recovers_and_rearms_continuation()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_continuation_unreplayable_context_uses_full_history() {
+    let server = MockServer::start().await;
+    let response_mock = mount_response_sequence(
+        &server,
+        vec![
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse(vec![
+                    ev_response_created("resp1"),
+                    ev_function_call("call-1", "unsupported_tool", "{}"),
+                    ev_completed("resp1"),
+                ])),
+            ResponseTemplate::new(400).set_body_json(json!({
+                "error": {
+                    "type": "invalid_request_error",
+                    "param": "previous_response_id",
+                    "code": "unsupported_persisted_item_context",
+                    "message": "Stored context cannot be replayed"
+                }
+            })),
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse(vec![
+                    ev_response_created("resp2"),
+                    ev_function_call("call-2", "unsupported_tool", "{}"),
+                    ev_completed("resp2"),
+                ])),
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse(vec![
+                    ev_response_created("resp3"),
+                    ev_completed("resp3"),
+                ])),
+        ],
+    )
+    .await;
+    let mut provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
+    provider.name = "Unreplayable continuation test provider".to_string();
+    provider.base_url = Some(format!("{}/v1", server.uri()));
+    provider.supports_websockets = false;
+    provider.supports_responses_continuation = true;
+    let codex = test_codex()
+        .with_config(move |config| {
+            config.model_provider_id = provider.name.clone();
+            config.model_provider = provider;
+        })
+        .build_with_auto_env(&server)
+        .await
+        .unwrap()
+        .codex;
+
+    codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "hello".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await
+        .unwrap();
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[1].body_json()["previous_response_id"], "resp1");
+    for request in &requests[2..] {
+        assert!(request.body_json().get("previous_response_id").is_none());
+        assert_eq!(request.body_json()["store"], true);
+        assert!(
+            request.body_json()["input"]
+                .as_array()
+                .expect("full history")
+                .len()
+                > requests[1].body_json()["input"]
+                    .as_array()
+                    .expect("delta")
+                    .len()
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_continuation_probe_failure_does_not_replay_history() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
