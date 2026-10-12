@@ -202,7 +202,7 @@ class LocalDexInstallerTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("version is invalid", result.stderr)
 
-    def test_latest_install_selects_a_localdex_tag_not_an_upstream_codex_release(
+    def test_latest_install_skips_upstream_prerelease_and_other_targets(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -211,30 +211,69 @@ class LocalDexInstallerTest(unittest.TestCase):
             fake_bin = root / "fake-bin"
             fake_bin.mkdir()
             urls = root / "requested-urls"
+
+            def release(tag: str, prerelease: bool, assets: list) -> dict:
+                return {
+                    "tag_name": tag,
+                    "prerelease": prerelease,
+                    "assets": [
+                        {
+                            "name": name,
+                            "browser_download_url": (
+                                "https://github.com/ModelCloud/LocalDex/"
+                                f"releases/download/{tag}/{name}"
+                            ),
+                        }
+                        for name in assets
+                    ],
+                }
+
+            releases = json.dumps(
+                [
+                    release(
+                        "rust-v9.9.9",
+                        False,
+                        ["codex-package-x86_64-unknown-linux-gnu.tar.gz"],
+                    ),
+                    release(
+                        "localdex-build-0.155.6-darwin-only",
+                        False,
+                        ["localdex-package-aarch64-apple-darwin.tar.gz"],
+                    ),
+                    release(
+                        "localdex-build-0.155.5-beta",
+                        True,
+                        ["localdex-package-x86_64-unknown-linux-gnu.tar.gz"],
+                    ),
+                    release(
+                        "localdex-build-0.154.9",
+                        False,
+                        ["localdex-package-x86_64-unknown-linux-gnu.tar.gz"],
+                    ),
+                ],
+                indent=2,
+            )
+
             mock_curl = fake_bin / "curl"
             mock_curl.write_text(
                 "#!/bin/sh\n"
                 'url="$2"\noutput="$4"\n'
                 f"printf '%s\\n' \"$url\" >> '{urls}'\n"
                 'case "$url" in\n'
-                "  *'/tags?per_page=100') printf '%s\\n' '",
+                "  *'/releases?per_page=50') cat > \"$output\" <<'RELEASES'\n"
+                f"{releases}\n"
+                "RELEASES\n"
+                "    ;;\n"
+                "  *'localdex-build-0.154.9/localdex-package-x86_64-"
+                "unknown-linux-gnu.tar.gz.sha256') cp "
+                f"'{archive}.sha256' \"$output\" ;;\n"
+                "  *'localdex-build-0.154.9/localdex-package-x86_64-"
+                "unknown-linux-gnu.tar.gz') cp "
+                f"'{archive}' \"$output\" ;;\n"
+                "  *) exit 9 ;;\n"
+                "esac\n",
                 encoding="utf-8",
             )
-            with mock_curl.open("a", encoding="utf-8") as output:
-                output.write(
-                    '[{"name":"rust-v9.9.9"},{"name":"localdex-v9.9.9-beta"},{"name":"localdex-v0.155.4"}]'
-                    + '\' > "$output" ;;\n'
-                )
-                output.write(
-                    "  *'localdex-v0.155.4/localdex-package-x86_64-unknown-linux-gnu.tar.gz.sha256') "
-                    f"cp '{archive}.sha256' \"$output\" ;;\n"
-                )
-                output.write(
-                    "  *'localdex-v0.155.4/localdex-package-x86_64-unknown-linux-gnu.tar.gz') "
-                    f"cp '{archive}' \"$output\" ;;\n"
-                    "  *) exit 9 ;;\n"
-                    "esac\n"
-                )
             mock_curl.chmod(0o755)
 
             result = subprocess.run(
@@ -253,9 +292,61 @@ class LocalDexInstallerTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             requested = urls.read_text(encoding="utf-8")
-            self.assertIn("/tags?per_page=100", requested)
-            self.assertIn("/releases/download/localdex-v0.155.4/", requested)
+            self.assertIn("/releases?per_page=50", requested)
+            self.assertIn("/releases/download/localdex-build-0.154.9/", requested)
             self.assertNotIn("rust-v9.9.9", requested)
+            self.assertNotIn("localdex-build-0.155.6-darwin-only", requested)
+            self.assertNotIn("localdex-build-0.155.5-beta", requested)
+
+    def test_release_argument_accepts_version_and_release_tag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = make_archive(root, "0.155.4")
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            urls = root / "requested-urls"
+            mock_curl = fake_bin / "curl"
+            mock_curl.write_text(
+                "#!/bin/sh\n"
+                'url="$2"\noutput="$4"\n'
+                f"printf '%s\\n' \"$url\" >> '{urls}'\n"
+                'case "$url" in\n'
+                "  *'.tar.gz.sha256') cp "
+                f"'{archive}.sha256' \"$output\" ;;\n"
+                "  *'.tar.gz') cp "
+                f"'{archive}' \"$output\" ;;\n"
+                "  *) exit 9 ;;\n"
+                "esac\n",
+                encoding="utf-8",
+            )
+            mock_curl.chmod(0o755)
+
+            def install(release: str, home: str) -> subprocess.CompletedProcess:
+                return subprocess.run(
+                    [str(INSTALLER), "--release", release],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env={
+                        **os.environ,
+                        "HOME": str(root / home),
+                        "CODEX_HOME": str(root / home / "codex-home"),
+                        "LOCALDEX_INSTALL_DIR": str(root / home / "bin"),
+                        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                    },
+                )
+
+            tagged = install("localdex-build-0.157.1-18dbfada9", "tagged")
+            self.assertEqual(tagged.returncode, 0, tagged.stderr)
+            versioned = install("0.155.4", "versioned")
+            self.assertEqual(versioned.returncode, 0, versioned.stderr)
+
+            requested = urls.read_text(encoding="utf-8")
+            self.assertIn(
+                "/releases/download/localdex-build-0.157.1-18dbfada9/", requested
+            )
+            self.assertIn("/releases/download/localdex-v0.155.4/", requested)
+            self.assertNotIn("?per_page=50", requested)
 
     def test_install_accepts_local_archive_without_endpoint_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
