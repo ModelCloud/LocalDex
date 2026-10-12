@@ -30,13 +30,16 @@ trap cleanup EXIT HUP INT TERM
 
 usage() {
   cat <<'EOF'
-Usage: install-localdex.sh [--release VERSION]
+Usage: install-localdex.sh [--release VERSION|TAG]
 
 Installs the ModelCloud LocalDex Linux x86_64 or ARM64 distribution as the
 `codex` command. Existing CODEX_HOME configuration, auth, and session data are kept.
 
 Environment:
-  LOCALDEX_RELEASE      Release version, or latest (default).
+  LOCALDEX_RELEASE      Release version or release tag, or latest (default).
+                        `latest` selects the newest published release that
+                        provides a package for this architecture, including
+                        commit-specific `localdex-build-<version>-<sha>` tags.
   CODEX_HOME            Codex data home (default: ~/.codex).
   LOCALDEX_INSTALL_DIR  Directory for codex, localdex, and helper links.
   LOCALDEX_ARCHIVE      Local package archive, for offline installs/tests.
@@ -97,29 +100,44 @@ if [ -n "$LOCAL_ARCHIVE" ]; then
     cp "$LOCAL_ARCHIVE.sha256" "$CHECKSUM"
   fi
 else
+  asset="localdex-package-$TARGET.tar.gz"
   case "$RELEASE" in
     latest)
-      download "https://api.github.com/repos/$REPOSITORY/tags?per_page=100" "$TMP_DIR/tags.json"
-      latest_version="$(sed -n 's/.*"name":[[:space:]]*"localdex-v\([^"]*\)".*/\1/p' "$TMP_DIR/tags.json" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
-      [ -n "$latest_version" ] || {
-        echo "No LocalDex release tags were found" >&2
+      # Published packages are commit-specific tags such as
+      # localdex-build-<version>-<sha>, so the version tags cannot identify the
+      # newest usable package. Walk the published releases instead, newest
+      # first, and take the first one that ships this target. GitHub returns
+      # the releases as indented JSON with "tag_name" and "prerelease" ahead of
+      # the asset list for each entry.
+      download "https://api.github.com/repos/$REPOSITORY/releases?per_page=50" "$TMP_DIR/releases.json"
+      RELEASE="$(awk -v asset="\"$asset\"" '
+        /"tag_name"[[:space:]]*:/ {
+          line = $0
+          sub(/.*"tag_name"[[:space:]]*:[[:space:]]*"/, "", line)
+          sub(/".*/, "", line)
+          tag = line
+          prerelease = ""
+        }
+        /"prerelease"[[:space:]]*:/ && index($0, "true") > 0 { prerelease = "true" }
+        tag ~ /^localdex-/ && prerelease != "true" && index($0, asset) > 0 { print tag; exit }
+      ' "$TMP_DIR/releases.json")"
+      [ -n "$RELEASE" ] || {
+        echo "No published LocalDex release provides $asset" >&2
         exit 1
       }
-      RELEASE="localdex-v$latest_version"
-      release_url="https://github.com/$REPOSITORY/releases/download/$RELEASE"
       ;;
     *)
       case "$RELEASE" in
-        localdex-v*) RELEASE="${RELEASE#localdex-v}" ;;
+        localdex-*) ;;
+        *) RELEASE="localdex-v$RELEASE" ;;
       esac
-      printf '%s\n' "$RELEASE" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$' || {
+      printf '%s\n' "$RELEASE" | grep -Eq '^localdex-[0-9A-Za-z][0-9A-Za-z.-]*$' || {
         echo "Requested LocalDex release version is invalid" >&2
         exit 1
       }
-      release_url="https://github.com/$REPOSITORY/releases/download/localdex-v$RELEASE"
       ;;
   esac
-  asset="localdex-package-$TARGET.tar.gz"
+  release_url="https://github.com/$REPOSITORY/releases/download/$RELEASE"
   download "$release_url/$asset" "$ARCHIVE"
   download "$release_url/$asset.sha256" "$CHECKSUM"
 fi
