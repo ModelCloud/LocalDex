@@ -108,17 +108,19 @@ const INSTALLATION_ID_FILENAME: &str = "installation_id";
 const TEST_WINDOW_ID: &str = "test-thread:0";
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
 
-#[test_case::test_case(false, false)]
-#[test_case::test_case(false, true)]
-#[test_case::test_case(true, false)]
-#[test_case::test_case(true, true)]
+#[test_case::test_case(false)]
+#[test_case::test_case(true)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_request_enforces_independent_speed_requirements(
-    fast_enabled: bool,
     ultrafast_enabled: bool,
 ) -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
-    for (tier, enabled) in [("priority", fast_enabled), ("ultrafast", ultrafast_enabled)] {
+    // LocalDex force-disables Fast mode, so a configured fast tier never
+    // reaches the wire. Ultra Fast stays gated by its own feature flag.
+    for (tier, expected) in [
+        ("priority", None),
+        ("ultrafast", ultrafast_enabled.then_some("ultrafast")),
+    ] {
         for configure_at_start in [false, true] {
             let server = start_mock_server().await;
             let response_mock = mount_sse_once(&server, sse(vec![ev_completed("done")])).await;
@@ -132,10 +134,6 @@ async fn responses_request_enforces_independent_speed_requirements(
                     }];
                 })
                 .with_config(move |config| {
-                    config
-                        .features
-                        .set_enabled(Feature::FastMode, fast_enabled)
-                        .expect("configure Fast mode");
                     config
                         .features
                         .set_enabled(Feature::UltrafastMode, ultrafast_enabled)
@@ -157,7 +155,7 @@ async fn responses_request_enforces_independent_speed_requirements(
             test.submit_turn("hello").await?;
             assert_eq!(
                 response_mock.single_request().body_json()["service_tier"].as_str(),
-                enabled.then_some(tier),
+                expected,
                 "tier={tier}, configure_at_start={configure_at_start}",
             );
         }
@@ -1065,6 +1063,8 @@ async fn synthetic_call_output_id_is_stable_across_resumes() -> anyhow::Result<(
             timestamp: "2024-01-01T00:00:01.000Z".to_string(),
             ordinal: None,
             item: rollout_response_item(ResponseItem::FunctionCall {
+                status: None,
+                encrypted_content: None,
                 id: Some(ResponseItemId::with_suffix("fc", "existing")),
                 name: "do_it".to_string(),
                 namespace: None,
@@ -1361,6 +1361,8 @@ async fn resume_sends_prior_items() {
 
     // Prior item: user message (should be delivered)
     let prior_user = codex_protocol::models::ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![codex_protocol::models::ContentItem::InputText {
@@ -1383,9 +1385,13 @@ async fn resume_sends_prior_items() {
 
     // Prior item: system message (excluded from API history)
     let prior_system = codex_protocol::models::ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "system".to_string(),
         content: vec![codex_protocol::models::ContentItem::OutputText {
+            annotations: None,
+            logprobs: None,
             text: "resumed system instruction".to_string(),
         }],
         phase: None,
@@ -1405,9 +1411,13 @@ async fn resume_sends_prior_items() {
 
     // Prior item: assistant message
     let prior_item = codex_protocol::models::ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "assistant".to_string(),
         content: vec![codex_protocol::models::ContentItem::OutputText {
+            annotations: None,
+            logprobs: None,
             text: "resumed assistant message".to_string(),
         }],
         phase: Some(MessagePhase::Commentary),
@@ -1533,6 +1543,7 @@ async fn resume_replays_legacy_js_repl_image_rollout_shapes() {
     // Current image tests cover today's shapes; this keeps resume compatibility for that
     // legacy rollout representation.
     let legacy_custom_tool_call = ResponseItem::CustomToolCall {
+        encrypted_content: None,
         id: None,
         status: None,
         call_id: "legacy-js-call".to_string(),
@@ -1582,6 +1593,8 @@ async fn resume_replays_legacy_js_repl_image_rollout_shapes() {
             timestamp: "2024-01-01T00:00:03.000Z".to_string(),
             ordinal: None,
             item: rollout_response_item(ResponseItem::Message {
+                status: None,
+                encrypted_content: None,
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputImage {
@@ -1708,6 +1721,8 @@ async fn resume_replays_image_tool_outputs_with_detail() {
             timestamp: "2024-01-01T00:00:01.000Z".to_string(),
             ordinal: None,
             item: rollout_response_item(ResponseItem::FunctionCall {
+                status: None,
+                encrypted_content: None,
                 id: None,
                 name: "view_image".to_string(),
                 namespace: None,
@@ -1740,6 +1755,7 @@ async fn resume_replays_image_tool_outputs_with_detail() {
             timestamp: "2024-01-01T00:00:02.000Z".to_string(),
             ordinal: None,
             item: rollout_response_item(ResponseItem::CustomToolCall {
+                encrypted_content: None,
                 id: None,
                 status: Some("completed".to_string()),
                 call_id: custom_call_id.to_string(),
@@ -2127,6 +2143,7 @@ async fn send_request_with_provider(provider: ModelProviderInfo) {
         config
             .features
             .enabled(Feature::ConcurrentReasoningSummaries),
+        /*output_token_replay_enabled*/ false,
         /*attestation_provider*/ None,
         config.http_client_factory(),
         config.workspace_routing_context(),
@@ -2147,6 +2164,8 @@ async fn send_request_with_provider(provider: ModelProviderInfo) {
     }
     let mut prompt = Prompt::default();
     prompt.input.push(ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -3626,6 +3645,7 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         /*include_timing_metrics*/ false,
         /*beta_features_header*/ None,
         /*concurrent_reasoning_summaries_enabled*/ false,
+        /*output_token_replay_enabled*/ false,
         /*attestation_provider*/ None,
         config.http_client_factory(),
         config.workspace_routing_context(),
@@ -3647,15 +3667,20 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         internal_chat_message_metadata_passthrough: None,
     });
     prompt.input.push(ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("msg", "message-id")),
         role: "assistant".into(),
         content: vec![ContentItem::OutputText {
+            annotations: None,
+            logprobs: None,
             text: "message".into(),
         }],
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     });
     prompt.input.push(ResponseItem::WebSearchCall {
+        encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("ws", "web-search-id")),
         status: Some("completed".into()),
         action: Some(WebSearchAction::Search {
@@ -3665,6 +3690,8 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         internal_chat_message_metadata_passthrough: None,
     });
     prompt.input.push(ResponseItem::FunctionCall {
+        status: None,
+        encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("fc", "function-id")),
         name: "do_thing".into(),
         namespace: None,
@@ -3682,6 +3709,7 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         internal_chat_message_metadata_passthrough: None,
     });
     prompt.input.push(ResponseItem::LocalShellCall {
+        encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("lsh", "local-shell-id")),
         call_id: Some("local-shell-call-id".into()),
         status: LocalShellStatus::Completed,
@@ -3695,6 +3723,7 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         internal_chat_message_metadata_passthrough: None,
     });
     prompt.input.push(ResponseItem::CustomToolCall {
+        encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("ctc", "custom-tool-id")),
         status: Some("completed".into()),
         call_id: "custom-tool-call-id".into(),
@@ -3758,17 +3787,18 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
     let input = body["input"].as_array().expect("request input");
     assert_eq!(input[0]["role"], "developer");
     let input = &input[1..];
-    assert_eq!(input.len(), 10);
-    assert_eq!(input[0]["id"].as_str(), Some("rs_reasoning-id"));
-    assert_eq!(input[1]["id"].as_str(), Some("msg_message-id"));
-    assert_eq!(input[2]["id"].as_str(), Some("ws_web-search-id"));
-    assert_eq!(input[3]["id"].as_str(), Some("fc_function-id"));
-    assert_eq!(input[4]["call_id"].as_str(), Some("function-call-id"));
-    assert_eq!(input[5]["id"].as_str(), Some("lsh_local-shell-id"));
-    assert_eq!(input[6]["id"].as_str(), Some("ctc_custom-tool-id"));
-    assert_eq!(input[7]["call_id"].as_str(), Some("custom-tool-call-id"));
+    // LocalDex drops plaintext reasoning items for official providers because the
+    // service cannot verify or replay them from a stored response.
+    assert_eq!(input.len(), 9);
+    assert_eq!(input[0]["id"].as_str(), Some("msg_message-id"));
+    assert_eq!(input[1]["id"].as_str(), Some("ws_web-search-id"));
+    assert_eq!(input[2]["id"].as_str(), Some("fc_function-id"));
+    assert_eq!(input[3]["call_id"].as_str(), Some("function-call-id"));
+    assert_eq!(input[4]["id"].as_str(), Some("lsh_local-shell-id"));
+    assert_eq!(input[5]["id"].as_str(), Some("ctc_custom-tool-id"));
+    assert_eq!(input[6]["call_id"].as_str(), Some("custom-tool-call-id"));
+    assert_eq!(input[7].get("id"), None);
     assert_eq!(input[8].get("id"), None);
-    assert_eq!(input[9].get("id"), None);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -4147,13 +4177,20 @@ async fn incomplete_response_emits_content_filter_error_message() -> anyhow::Res
     Ok(())
 }
 
-#[test_case::test_case(false, false; "sse")]
-#[test_case::test_case(true, false; "websocket")]
-#[test_case::test_case(false, true; "localdex_sse")]
+#[test_case::test_case(false, false, json!({"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}); "sse_usage")]
+#[test_case::test_case(true, false, json!({"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}); "websocket_usage")]
+#[test_case::test_case(false, true, json!({"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}); "localdex_sse_usage")]
+#[test_case::test_case(false, false, serde_json::Value::Null; "sse_missing_usage")]
+#[test_case::test_case(true, false, serde_json::Value::Null; "websocket_missing_usage")]
+#[test_case::test_case(false, true, serde_json::Value::Null; "localdex_sse_missing_usage")]
+#[test_case::test_case(false, false, json!({"malformed": true}); "sse_malformed_usage")]
+#[test_case::test_case(true, false, json!({"malformed": true}); "websocket_malformed_usage")]
+#[test_case::test_case(false, true, json!({"malformed": true}); "localdex_sse_malformed_usage")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn incomplete_response_is_terminal(
     use_websocket: bool,
     localdex: bool,
+    reported_usage: serde_json::Value,
 ) -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let incomplete = vec![
@@ -4163,7 +4200,8 @@ async fn incomplete_response_is_terminal(
             "type": "response.incomplete",
             "response": {
                 "id": "resp-incomplete",
-                "incomplete_details": {"reason": "max_output_tokens"}
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "usage": reported_usage
             }
         }),
     ];
@@ -4201,6 +4239,9 @@ async fn incomplete_response_is_terminal(
                 .insert("localdex".to_string(), config.model_provider.clone());
         }
     });
+    if !localdex {
+        builder = builder.with_model_info_override(model, |_| {});
+    }
     let test = if let Some(server) = &websocket_server {
         builder.build_with_websocket_server(server).await?
     } else {
@@ -4216,7 +4257,7 @@ async fn incomplete_response_is_terminal(
     wait_for_event(&test.codex, |event| {
         match event {
             EventMsg::Error(error) => errors.push(error.message.clone()),
-            EventMsg::StreamError(_) | EventMsg::RawResponseCompleted(_) => {
+            EventMsg::StreamError(_) | EventMsg::Warning(_) | EventMsg::RawResponseCompleted(_) => {
                 panic!("unexpected incomplete-response event: {event:?}")
             }
             _ => {}
@@ -4224,9 +4265,43 @@ async fn incomplete_response_is_terminal(
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+    insta::allow_duplicates! {
+        insta::assert_snapshot!(errors.join("\n"), @"Incomplete response returned, reason: max_output_tokens");
+    }
+    let expected_usage = if reported_usage.get("input_tokens").is_some() {
+        codex_protocol::protocol::TokenUsage {
+            input_tokens: 120,
+            output_tokens: 30,
+            total_tokens: 150,
+            ..Default::default()
+        }
+    } else {
+        codex_protocol::protocol::TokenUsage::default()
+    };
     assert_eq!(
-        errors,
-        vec!["Incomplete response returned, reason: max_output_tokens"]
+        test.codex
+            .token_usage_info()
+            .await
+            .map(|info| info.total_token_usage)
+            .unwrap_or_default(),
+        expected_usage
+    );
+    test.codex.flush_rollout().await?;
+    let records = std::fs::read_to_string(test.codex.rollout_path().expect("rollout path"))?
+        .lines()
+        .filter_map(|line| codex_rollout::parse_rollout_line(line).ok())
+        .filter_map(|line| match line.item {
+            RolloutItem::TokenUsageRecord(record) => Some(record.usage),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        records,
+        if reported_usage.get("input_tokens").is_some() {
+            vec![expected_usage]
+        } else {
+            vec![]
+        }
     );
     if let Some(server) = websocket_server {
         assert_eq!(
@@ -4241,6 +4316,86 @@ async fn incomplete_response_is_terminal(
     } else {
         response_mock.expect("SSE response mock").single_request();
     }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn incomplete_response_without_output_does_not_compact_the_next_turn() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let test = test_codex()
+        .with_config(|config| {
+            config.model_auto_compact_token_limit = Some(128_000);
+            config.model_post_turn_compact_threshold_percent = 0;
+        })
+        .build_with_auto_env(&server)
+        .await?;
+
+    let initial = mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("initial", "Initial reply."),
+            ev_completed_with_tokens("initial", /*total_tokens*/ 40_000),
+        ]),
+    )
+    .await;
+    test.submit_turn("hello").await?;
+    initial.single_request();
+
+    // An unfinished parallel call can report usage without emitting an output item.
+    // This input fits the window, but counting it again on top of reported usage does not.
+    let incomplete = mount_sse_once(
+        &server,
+        sse(vec![json!({
+            "type": "response.incomplete",
+            "response": {
+                "id": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "usage": {"input_tokens": 100_000, "output_tokens": 16, "total_tokens": 100_016}
+            }
+        })]),
+    )
+    .await;
+    test.submit_turn(&"x".repeat(240_000)).await?;
+    incomplete.single_request();
+    assert_eq!(
+        test.codex
+            .token_usage_info()
+            .await
+            .unwrap()
+            .total_token_usage
+            .total_tokens,
+        140_016,
+    );
+
+    let continuation = mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("continued", "Continued."),
+            ev_completed("continued"),
+        ]),
+    )
+    .await;
+    test.codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "continue".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&test.codex, |event| {
+        assert!(
+            !matches!(event, EventMsg::Error(_) | EventMsg::StreamError(_)),
+            "continuation failed: {event:?}"
+        );
+        assert!(
+            !matches!(event, EventMsg::ItemStarted(event)
+            if matches!(&event.item, codex_protocol::items::TurnItem::ContextCompaction(_))),
+            "the incomplete request's input must only count once toward compaction"
+        );
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    continuation.single_request();
     Ok(())
 }
 

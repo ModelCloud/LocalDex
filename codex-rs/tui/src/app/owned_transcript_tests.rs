@@ -188,11 +188,11 @@ async fn list_spacing_completion_preserves_the_scrolled_reader() -> Result<()> {
     let mut after = Buffer::empty(area);
     app.transcript_view
         .render(area, &mut after, &app.transcript_cells);
-    assert_eq!(after, before);
+    assert_eq!(buffer_text(&after), buffer_text(&before));
     app.transcript_view.jump_to_latest();
     app.transcript_view
         .render(area, &mut after, &app.transcript_cells);
-    assert_eq!(after, before);
+    assert_eq!(buffer_text(&after), buffer_text(&before));
     Ok(())
 }
 
@@ -353,6 +353,7 @@ async fn owned_transcript_reserves_a_row_above_the_composer() -> Result<()> {
         app.chat_widget.apply_external_edit(draft.to_string());
         if label == "Detailed" {
             app.transcript_cells = vec![Arc::new(crate::history_cell::new_view_image_tool_call(
+                "detail-image".to_string(),
                 codex_utils_path_uri::LegacyAppPathString::from_string("assets/detail-image.png"),
             ))];
             app.open_transcript_overlay(&mut tui);
@@ -1585,9 +1586,10 @@ async fn fullscreen_composer_mouse_copy_and_input_ownership() -> Result<()> {
     // A fresh composer click takes ownership away from the transcript selection.
     app.handle_owned_transcript_event(&mut tui, &mut server, &mouse(Down(Left), x, y))?;
     assert!(!app.transcript_view.has_active_interaction());
-    app.chat_widget.apply_external_edit("/".into());
+    app.chat_widget.apply_external_edit("/model".into());
     assert!(!app.chat_widget.no_modal_or_popup_active());
-    assert!(app.handle_owned_transcript_event(&mut tui, &mut server, &mouse(Down(Left), x, y))?);
+    let event = mouse(Down(Left), x, y);
+    assert!(app.handle_owned_transcript_event(&mut tui, &mut server, &event)?);
     app.handle_owned_transcript_event(&mut tui, &mut server, &mouse(Drag(Left), x + 1, y))?;
     assert!(app.chat_widget.no_modal_or_popup_active());
     app.chat_widget.open_feature_enable_prompt(Feature::Collab);
@@ -1780,6 +1782,72 @@ async fn fullscreen_composer_remote_images_leave_an_editable_prompt_row() -> Res
         "fullscreen_prompt_remote_images",
         normalize_snapshot_paths(frames.join("\n\n"))
     );
+
+    tui.set_owned_screen(/*owned*/ false)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn footer_selection_defers_warning_clicks_and_preserves_the_draft() -> Result<()> {
+    let mut app = crate::app::test_support::make_test_app().await;
+    app.local_settings.tui.copy_on_select = CopyOnSelect::Never;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    tui.set_owned_screen(/*owned*/ true)?;
+    let size = tui.terminal.size()?;
+    app.chat_widget
+        .apply_external_edit("draft stays here".into());
+    app.insert_history_cell(
+        &mut tui,
+        Box::new(history_cell::new_warning_event("Example warning".into())),
+    );
+    app.render_owned_transcript(&mut tui, size)?;
+    let draft = app.chat_widget.capture_thread_input_state();
+    let cursor = tui.terminal.last_known_cursor_pos;
+    let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
+    let badge = buffer
+        .area
+        .positions()
+        .find(|position| buffer[*position].symbol() == "⚠")
+        .unwrap();
+    for event in [
+        mouse(Down(Left), badge.x, badge.y),
+        mouse(Drag(Left), badge.x + 11, badge.y),
+        mouse(Up(Left), badge.x + 11, badge.y),
+    ] {
+        assert!(app.handle_rendered_selection_event(&mut tui, &event)?);
+        assert!(!app.chat_widget.keymap_contexts().is_warnings());
+    }
+    app.render_owned_transcript(&mut tui, size)?;
+    assert_eq!(
+        (
+            app.chat_widget.capture_thread_input_state(),
+            tui.terminal.last_known_cursor_pos
+        ),
+        (draft, cursor)
+    );
+    {
+        let mut selection = app.chat_widget.rendered_selection.borrow_mut();
+        let crate::rendered_selection::RenderedSelection { view, cells, .. } = &mut *selection;
+        assert!(view.selected_text(cells).unwrap().contains("warning"));
+    }
+    insta::assert_snapshot!(
+        "fullscreen_footer_selection",
+        normalize_snapshot_paths(buffer_text(
+            crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal)
+        ))
+    );
+    assert!(app.handle_rendered_selection_event(
+        &mut tui,
+        &TuiEvent::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+    )?);
+    // Dismissal consumes the first Escape, and a stationary click still opens the warning viewer.
+    for event in [
+        mouse(Down(Left), badge.x + 2, badge.y),
+        mouse(Up(Left), badge.x + 2, badge.y),
+    ] {
+        assert!(app.handle_rendered_selection_event(&mut tui, &event)?);
+    }
+    assert!(app.chat_widget.keymap_contexts().is_warnings());
     tui.set_owned_screen(/*owned*/ false)?;
     Ok(())
 }

@@ -106,12 +106,9 @@ impl McpRequestProcessor {
         Ok(McpServerRefreshResponse {})
     }
 
-    async fn load_latest_config(
-        &self,
-        fallback_cwd: Option<PathBuf>,
-    ) -> Result<Config, JSONRPCErrorError> {
+    async fn load_global_config(&self) -> Result<Config, JSONRPCErrorError> {
         self.config_manager
-            .load_latest_config(fallback_cwd)
+            .load_non_project_config()
             .await
             .map_err(|err| internal_error(format!("failed to reload config: {err}")))
     }
@@ -152,7 +149,7 @@ impl McpRequestProcessor {
                 ((*config).clone(), runtime_context)
             }
             None => {
-                let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
+                let config = self.load_global_config().await?;
                 let mcp_config = self
                     .thread_manager
                     .mcp_manager()
@@ -421,7 +418,7 @@ impl McpRequestProcessor {
                         .await
                         .map_err(|err| internal_error(format!("failed to reload config: {err}")))?
                 }
-                None => self.load_latest_config(/*fallback_cwd*/ None).await?,
+                None => self.load_global_config().await?,
             };
             let mcp_manager = self.thread_manager.mcp_manager();
             let auth = self.auth_manager.auth().await;
@@ -455,6 +452,7 @@ impl McpRequestProcessor {
         let McpServerStatusSnapshot {
             mut server_infos,
             mut server_capabilities,
+            mut tool_list_meta,
             mut tools_by_server,
             mut tools_errors,
             mut resources,
@@ -528,6 +526,7 @@ impl McpRequestProcessor {
                     }),
                 server_info: server_infos.remove(name),
                 server_capabilities: server_capabilities.remove(name),
+                tool_list_meta: tool_list_meta.remove(name).map(Arc::unwrap_or_clone),
                 tools: tools_by_server.remove(name).unwrap_or_default(),
                 tools_error: tools_errors.remove(name),
                 resources: resources.remove(name).unwrap_or_default(),
@@ -622,7 +621,7 @@ impl McpRequestProcessor {
             return Err(invalid_request("originCallId requires threadId"));
         }
 
-        let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
+        let config = self.load_global_config().await?;
         let mcp_manager = self.thread_manager.mcp_manager();
         let mcp_config = mcp_manager.runtime_config(&config).await;
         let codex_apps_tools_cache = mcp_manager.codex_apps_tools_cache();

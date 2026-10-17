@@ -15,7 +15,7 @@ fn remote_target() -> AppServerTarget {
     }
 }
 
-async fn run_startup_for_test(
+pub(super) async fn run_startup_for_test(
     tui: &mut crate::tui::Tui,
     server: AppServerSession,
     config: Config,
@@ -45,6 +45,7 @@ async fn run_startup_for_test(
         Some(bootstrap),
         /*startup_hooks_browser*/ None,
         /*daemon_startup_warning*/ None,
+        /*managed_daemon*/ false,
         crate::startup_draft::tests::quiet_startup_test_pump(),
         /*managed_worktree*/ None,
         /*daemon_cli_executable*/ None,
@@ -138,6 +139,7 @@ async fn cli_fork_omits_implicit_model_and_effort() -> Result<()> {
         .expect("create source rollout"),
     )?;
     let (mut server, requests, proxy) = start_recording_remote_app_server(&config).await?;
+    let backend_id = server.backend_id();
     let mut bootstrap = server.bootstrap(&config).await?;
     let mut target_preset = bootstrap
         .available_models
@@ -181,6 +183,7 @@ async fn cli_fork_omits_implicit_model_and_effort() -> Result<()> {
         config,
         bootstrap,
         SessionSelection::Fork(crate::resume_picker::SessionTarget {
+            backend_id,
             path: None,
             thread_id: source,
             cwd: None,
@@ -207,7 +210,9 @@ async fn cli_fork_omits_implicit_model_and_effort() -> Result<()> {
     assert_eq!(fork.len(), 1);
     assert_eq!(fork[0]["model"], serde_json::Value::Null);
     assert!(fork[0]["config"].get("model_reasoning_effort").is_none());
-    assert_eq!(fork[0]["serviceTier"], serde_json::Value::Null);
+    // LocalDex force-disables Fast mode, so forks pin explicit standard routing
+    // instead of letting a stored fast tier carry into the forked thread.
+    assert_eq!(fork[0]["serviceTier"], serde_json::json!("default"));
     assert!(recorded_params(&requests, "config/read").is_empty());
     drop(run);
     proxy.abort();

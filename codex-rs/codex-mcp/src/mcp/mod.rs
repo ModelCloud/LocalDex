@@ -156,6 +156,7 @@ pub struct McpConfig {
     pub permission_profile: PermissionProfile,
     /// Configuration layers used to evaluate Apps tool policy and reviewer selection.
     pub config_layer_stack: ConfigLayerStack,
+    pub plugins: codex_config::types::PluginsConfigToml,
     /// Default reviewer used when an Apps tool has no reviewer override.
     pub approvals_reviewer: ApprovalsReviewer,
     /// Working directories for the exact environment handles used by this runtime.
@@ -164,6 +165,9 @@ pub struct McpConfig {
     pub environment_use_mxc: HashMap<String, bool>,
     /// Explicit server permissions; unresolved or unavailable servers have no entry.
     pub server_permission_profiles: HashMap<String, PermissionProfile>,
+    /// Host-supplied re-exec binary. Probe its sandbox capability before advertising it.
+    /// Never infer this from PATH or an MCP server's configuration.
+    pub codex_self_exe: Option<PathBuf>,
     /// Optional path to `codex-linux-sandbox` for sandboxed MCP tool execution.
     pub codex_linux_sandbox_exe: Option<PathBuf>,
     /// Whether to use legacy Landlock behavior in the MCP sandbox state.
@@ -182,6 +186,8 @@ pub struct McpConfig {
     pub non_prefixed_mcp_tool_servers: Vec<String>,
     /// Protocol mode for servers other than the host-owned Codex Apps registration.
     pub protocol_mode: McpProtocolMode,
+    /// Refresh ordinary server catalogs after tools/list_changed notifications.
+    pub mcp_tool_list_changed: bool,
     /// Independent protocol mode for the trusted, HTTP Codex Apps registration.
     pub host_owned_apps_protocol_mode: McpProtocolMode,
     /// Client-side elicitation capabilities advertised during MCP initialization.
@@ -370,9 +376,10 @@ fn is_trusted_chatgpt_mcp_server(
         return false;
     }
 
-    if url::Url::parse(CHATGPT_CODEX_BASE_URL)
-        .ok()
-        .is_some_and(|chatgpt_url| server_url.origin() == chatgpt_url.origin())
+    if [CHATGPT_CODEX_BASE_URL, "https://gov.chatgpt.com"]
+        .into_iter()
+        .filter_map(|base_url| url::Url::parse(base_url).ok())
+        .any(|trusted_url| server_url.origin() == trusted_url.origin())
     {
         return true;
     }
@@ -488,6 +495,7 @@ pub async fn read_mcp_resource(
 pub struct McpServerStatusSnapshot {
     pub server_infos: HashMap<String, McpServerInfo>,
     pub server_capabilities: HashMap<String, serde_json::Value>,
+    pub tool_list_meta: HashMap<String, Arc<serde_json::Value>>,
     pub tools_by_server: HashMap<String, HashMap<String, Tool>>,
     pub tools_errors: HashMap<String, String>,
     pub resources: HashMap<String, Vec<Resource>>,
@@ -511,6 +519,7 @@ pub async fn collect_mcp_server_status_snapshot_with_detail(
         return McpServerStatusSnapshot {
             server_infos: HashMap::new(),
             server_capabilities: HashMap::new(),
+            tool_list_meta: HashMap::new(),
             tools_by_server: HashMap::new(),
             tools_errors: HashMap::new(),
             resources: HashMap::new(),
@@ -799,13 +808,13 @@ pub(crate) async fn collect_mcp_server_status_snapshot_from_manager(
 ) -> McpServerStatusSnapshot {
     let selected_servers: HashSet<&str> = server_names.iter().map(String::as_str).collect();
     let include_server = |name: &str| selected_servers.contains(name);
-    let ((server_infos, (tools, tools_errors)), resources, resource_templates) = tokio::join!(
+    let ((server_infos, (tools, tools_errors, tool_list_meta)), resources, resource_templates) = tokio::join!(
         async {
             let server_infos = mcp_connection_manager
                 .list_available_server_infos(include_server)
                 .await;
             let tools = mcp_connection_manager
-                .list_tools_with_errors(include_server)
+                .list_catalogs_with_errors(include_server)
                 .await;
             (server_infos, tools)
         },
@@ -829,6 +838,8 @@ pub(crate) async fn collect_mcp_server_status_snapshot_from_manager(
         },
     );
 
+    let server_capabilities =
+        mcp_connection_manager.list_available_server_capabilities(include_server);
     let mut tools_by_server = HashMap::<String, HashMap<String, Tool>>::new();
     for tool_info in tools {
         let raw_tool_name = tool_info.tool.name.to_string();
@@ -852,7 +863,8 @@ pub(crate) async fn collect_mcp_server_status_snapshot_from_manager(
     }
 
     McpServerStatusSnapshot {
-        server_capabilities: mcp_connection_manager.list_available_server_capabilities(),
+        server_capabilities,
+        tool_list_meta,
         server_infos,
         tools_by_server,
         tools_errors,

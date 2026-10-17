@@ -145,7 +145,7 @@ impl App {
                         thread_id: thread_id.clone(),
                         collaboration_mode,
                         input: vec![UserInput::Text {
-                            text: AdditionalContextUserFragment::new("prompt_suggestion".to_string(), format!("{}\n\nReturn only JSON matching this schema: {{\"type\":\"object\",\"properties\":{{\"suggestion\":{{\"type\":[\"string\",\"null\"]}}}},\"required\":[\"suggestion\"],\"additionalProperties\":false}}.", crate::prompt_suggestions::PROMPT)).render(),
+                            text: AdditionalContextUserFragment::new("prompt_suggestion".to_string(), format!("{}\n\nReturn only JSON matching this schema: {{\"type\":\"object\",\"properties\":{{\"suggestion\":{{\"type\":[\"string\",\"null\"]}}}},\"required\":[\"suggestion\"],\"additionalProperties\":false}}.", crate::prompt_suggestions::PROMPT)).render().into_text().unwrap_or_default(),
                             text_elements: Vec::new(),
                         }],
                         ..Default::default()

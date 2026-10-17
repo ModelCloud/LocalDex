@@ -13,6 +13,7 @@ use crate::model_catalog::LUNA_RESERVE_MODEL;
 use crate::status::format_credit_micros;
 use crate::status::format_estimated_usd_micros;
 use crate::status::format_tokens_compact;
+use crate::terminal_program_status::ProgramStatus;
 use codex_app_server_protocol::AskForApproval;
 use codex_config::ConfigLayerSource;
 use codex_config::os_host_name;
@@ -319,6 +320,42 @@ impl ChatWidget {
 
     fn terminal_title_requires_action(&self) -> bool {
         self.bottom_pane.terminal_title_requires_action()
+    }
+
+    /// Reports the displayed thread's actual state independently of terminal
+    /// title/notification settings. Replays never produce an unseen result.
+    pub(crate) fn desired_program_status(&self) -> ProgramStatus {
+        if let Some(kind) = self.bottom_pane.program_status_blocked_kind() {
+            ProgramStatus::Blocked(kind)
+        } else if self.bottom_pane.is_task_running()
+            || self.is_user_turn_pending_or_running()
+            || !self.unified_exec_processes.is_empty()
+            || (self.status_state.program_status_after_turn == ProgramStatus::Done
+                && self
+                    .current_goal_status
+                    .as_ref()
+                    .is_some_and(GoalStatusState::is_active))
+        {
+            ProgramStatus::Working
+        } else {
+            self.status_state.program_status_after_turn
+        }
+    }
+
+    pub(crate) fn acknowledge_program_status(&mut self) {
+        if matches!(
+            self.desired_program_status(),
+            ProgramStatus::Done | ProgramStatus::Error
+        ) {
+            self.status_state.program_status_after_turn = ProgramStatus::Idle;
+            self.request_redraw();
+        }
+    }
+
+    pub(super) fn iterm_session_detail(&self, status: ProgramStatus) -> Option<&str> {
+        (status == ProgramStatus::Working && self.bottom_pane.is_task_running())
+            .then_some(self.status_state.current_status.header.as_str())
+            .filter(|detail| *detail != "Working")
     }
 
     pub(super) fn terminal_title_shows_action_required(&self) -> bool {
@@ -798,6 +835,9 @@ impl ChatWidget {
                 .and_then(|usage| usage.estimated_usage_usd_micros)
                 .and_then(format_estimated_usd_micros),
             StatusLineItem::SessionId => self.thread_id.map(|id| id.to_string()),
+            // LocalDex force-disables Fast mode: hide the indicator entirely so
+            // the status line never advertises a tier that cannot be enabled.
+            StatusLineItem::FastMode if !self.config.features.enabled(Feature::FastMode) => None,
             StatusLineItem::FastMode => self
                 .model_catalog
                 .try_list_models()

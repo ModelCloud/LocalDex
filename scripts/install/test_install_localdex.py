@@ -8,9 +8,40 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 INSTALLER = Path(__file__).with_name("install-localdex.sh")
+INSTALLER_MACHINE = subprocess.check_output(["uname", "-m"], text=True).strip()
+INSTALLER_ARCH = {"amd64": "x86_64", "arm64": "aarch64"}.get(
+    INSTALLER_MACHINE, INSTALLER_MACHINE
+)
+INSTALLER_TARGET = f"{INSTALLER_ARCH}-unknown-linux-gnu"
+
+
+class InstallerTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        if os.uname().sysname != "Darwin":
+            return
+        tools_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(tools_directory.cleanup)
+        tools_path = Path(tools_directory.name)
+        mock_mv = tools_path / "mv"
+        mock_mv.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-Tf" ]; then\n'
+            "  shift\n"
+            '  exec /bin/mv -fh "$@"\n'
+            "fi\n"
+            'exec /bin/mv "$@"\n',
+            encoding="utf-8",
+        )
+        mock_mv.chmod(0o755)
+        environment = patch.dict(
+            os.environ, {"PATH": f"{tools_path}:{os.environ['PATH']}"}
+        )
+        environment.start()
+        self.addCleanup(environment.stop)
 
 
 def make_archive(root: Path, version: str) -> Path:
@@ -21,7 +52,7 @@ def make_archive(root: Path, version: str) -> Path:
     manifest = {
         "layoutVersion": 1,
         "version": version,
-        "target": "x86_64-unknown-linux-gnu",
+        "target": INSTALLER_TARGET,
         "variant": "localdex",
         "entrypoint": "bin/localdex",
         "resourcesDir": "codex-resources",
@@ -50,7 +81,7 @@ def make_archive(root: Path, version: str) -> Path:
     return archive
 
 
-class LocalDexInstallerTest(unittest.TestCase):
+class LocalDexInstallerTest(InstallerTestCase):
     def test_install_uses_localdex_codex_and_preserves_codex_home(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -74,7 +105,7 @@ class LocalDexInstallerTest(unittest.TestCase):
                 / "packages"
                 / "standalone"
                 / "releases"
-                / "0.154.0-codex-x86_64-unknown-linux-gnu"
+                / f"0.154.0-codex-{INSTALLER_TARGET}"
             )
             official_codex = official_release / "bin" / "codex"
             official_codex.parent.mkdir(parents=True)
@@ -169,7 +200,7 @@ class LocalDexInstallerTest(unittest.TestCase):
                     / "packages"
                     / "standalone"
                     / "releases"
-                    / "0.155.3-localdex-x86_64-unknown-linux-gnu"
+                    / f"0.155.3-localdex-{INSTALLER_TARGET}"
                 ),
             )
             self.assertTrue(
@@ -178,7 +209,7 @@ class LocalDexInstallerTest(unittest.TestCase):
                     / "packages"
                     / "standalone"
                     / "releases"
-                    / "0.155.1-localdex-x86_64-unknown-linux-gnu"
+                    / f"0.155.1-localdex-{INSTALLER_TARGET}"
                 ).is_dir()
             )
 
@@ -211,6 +242,7 @@ class LocalDexInstallerTest(unittest.TestCase):
             fake_bin = root / "fake-bin"
             fake_bin.mkdir()
             urls = root / "requested-urls"
+            asset = f"localdex-package-{INSTALLER_TARGET}.tar.gz"
 
             def release(tag: str, prerelease: bool, assets: list) -> dict:
                 return {
@@ -233,7 +265,7 @@ class LocalDexInstallerTest(unittest.TestCase):
                     release(
                         "rust-v9.9.9",
                         False,
-                        ["codex-package-x86_64-unknown-linux-gnu.tar.gz"],
+                        [f"codex-package-{INSTALLER_TARGET}.tar.gz"],
                     ),
                     release(
                         "localdex-build-0.155.6-darwin-only",
@@ -243,12 +275,12 @@ class LocalDexInstallerTest(unittest.TestCase):
                     release(
                         "localdex-build-0.155.5-beta",
                         True,
-                        ["localdex-package-x86_64-unknown-linux-gnu.tar.gz"],
+                        [asset],
                     ),
                     release(
                         "localdex-build-0.154.9",
                         False,
-                        ["localdex-package-x86_64-unknown-linux-gnu.tar.gz"],
+                        [asset],
                     ),
                 ],
                 indent=2,
@@ -264,11 +296,9 @@ class LocalDexInstallerTest(unittest.TestCase):
                 f"{releases}\n"
                 "RELEASES\n"
                 "    ;;\n"
-                "  *'localdex-build-0.154.9/localdex-package-x86_64-"
-                "unknown-linux-gnu.tar.gz.sha256') cp "
+                f"  *'localdex-build-0.154.9/{asset}.sha256') cp "
                 f"'{archive}.sha256' \"$output\" ;;\n"
-                "  *'localdex-build-0.154.9/localdex-package-x86_64-"
-                "unknown-linux-gnu.tar.gz') cp "
+                f"  *'localdex-build-0.154.9/{asset}') cp "
                 f"'{archive}' \"$output\" ;;\n"
                 "  *) exit 9 ;;\n"
                 "esac\n",

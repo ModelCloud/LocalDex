@@ -59,6 +59,7 @@ fn mcp_contribution_context_identifies_the_running_thread() {
         "codex_work_cca",
         &[],
         /*executor_capability_discovery*/ None,
+        /*executor_capability_discovery_v2*/ None,
     )
     .with_session_source(&session_source);
 
@@ -77,15 +78,15 @@ fn mcp_context_preserves_selected_executor_order_and_unavailability() {
             environment_id: "starting-primary".to_owned(),
             cwd: PathUri::parse("file:///workspace").expect("workspace URI"),
             workspace_roots: Vec::new(),
-            config: EnvironmentConfigState::Pending,
             selected_capability_roots: Default::default(),
+            config: EnvironmentConfigState::Pending,
         },
         TurnEnvironmentSelection {
             environment_id: "ready-secondary".to_owned(),
             cwd: PathUri::parse("file:///other").expect("workspace URI"),
             workspace_roots: Vec::new(),
-            config: EnvironmentConfigState::FromThread,
             selected_capability_roots: Default::default(),
+            config: EnvironmentConfigState::FromThread,
         },
     ];
     let context = McpServerContributionContext::global(&config);

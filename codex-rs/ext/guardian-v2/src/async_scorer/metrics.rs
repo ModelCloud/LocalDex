@@ -1,4 +1,4 @@
-//! Low-cardinality metrics for Guardian V2 classification, connections, and approval decisions.
+//! Structured failure diagnostics and low-cardinality metrics for Guardian V2 scoring and decisions.
 
 use std::time::Duration;
 
@@ -70,6 +70,14 @@ pub(super) fn record_classification(
     outcome: &str,
     failure_reason: Option<&str>,
 ) {
+    if outcome == "failure" {
+        tracing::warn!(
+            failure_reason,
+            context_mode = context_mode.as_str(),
+            duration_ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
+            "Guardian V2 background scoring failed"
+        );
+    }
     let Some(metrics) = metrics else {
         return;
     };
@@ -176,9 +184,11 @@ pub(super) fn record_decisions_comparison_outcome(
 // Keep all backend diagnostics bounded and free of raw transport data.
 pub(super) fn decisions_failure_reason(error: DecisionsError) -> &'static str {
     match error {
-        DecisionsError::Credentials => "provider_error",
+        DecisionsError::Credentials => "credentials_unavailable",
         DecisionsError::ClientSetup => "request_build_error",
         DecisionsError::UnsupportedEvidence => "decisions_unsupported_evidence",
+        DecisionsError::UnsupportedImage => "image",
+        DecisionsError::UnsupportedAudio => "audio",
         DecisionsError::InputTooLarge => "input_too_large",
         DecisionsError::Timeout => "transport_timeout",
         // The adapter erases transport details; do not claim a specific network failure.
@@ -206,9 +216,12 @@ pub(super) fn record_decisions_comparison(
         Ok((result, duration)) => {
             let outcome = match &result {
                 Ok(_) => "success",
-                Err(DecisionsError::UnsupportedEvidence | DecisionsError::InputTooLarge) => {
-                    "skipped"
-                }
+                Err(
+                    DecisionsError::UnsupportedEvidence
+                    | DecisionsError::UnsupportedImage
+                    | DecisionsError::UnsupportedAudio
+                    | DecisionsError::InputTooLarge,
+                ) => "skipped",
                 Err(_) => "failure",
             };
             record_decisions_comparison_outcome(

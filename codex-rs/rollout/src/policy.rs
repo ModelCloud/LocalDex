@@ -196,6 +196,7 @@ fn persisted_event_msg(
         | EventMsg::RequestPermissions(_)
         | EventMsg::RequestUserInput(_)
         | EventMsg::ElicitationRequest(_)
+        | EventMsg::ElicitationAbandoned(_)
         | EventMsg::ApplyPatchApprovalRequest(_)
         | EventMsg::StreamError(_)
         | EventMsg::PatchApplyBegin(_)
@@ -281,3 +282,7 @@ fn persisted_item_completed_event<'a>(
         },
     }
 }
+
+#[cfg(test)]
+#[path = "policy_tests.rs"]
+mod tests;

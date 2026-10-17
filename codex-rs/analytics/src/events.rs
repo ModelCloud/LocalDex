@@ -538,6 +538,9 @@ pub struct GuardianReviewAnalyticsResult {
     pub terminal_status: GuardianReviewTerminalStatus,
     pub failure_reason: Option<GuardianReviewFailureReason>,
     pub attempt_count: i64,
+    /// An allow was validated against changed parent/root authorization or review context.
+    /// Retained across attempts; this does not identify the cause of a later cancellation.
+    pub context_changed: bool,
     pub risk_level: Option<GuardianRiskLevel>,
     pub user_authorization: Option<GuardianUserAuthorization>,
     pub outcome: Option<GuardianAssessmentOutcome>,
@@ -564,6 +567,7 @@ impl GuardianReviewAnalyticsResult {
             terminal_status: GuardianReviewTerminalStatus::FailedClosed,
             failure_reason: None,
             attempt_count: 1,
+            context_changed: false,
             risk_level: None,
             user_authorization: None,
             outcome: None,
@@ -1027,6 +1031,7 @@ pub(crate) struct CodexCompactionEventParams {
     pub(crate) phase: CompactionPhase,
     pub(crate) strategy: CompactionStrategy,
     pub(crate) status: CompactionStatus,
+    pub(crate) voice_session_id: Option<String>,
     pub(crate) codex_error_kind: Option<CodexErrKind>,
     pub(crate) codex_error_http_status_code: Option<u16>,
     pub(crate) usage_limit_window_minutes: Option<u16>,
@@ -1396,6 +1401,7 @@ pub(crate) fn codex_compaction_event_params(
         phase: input.phase,
         strategy: input.strategy,
         status: input.status,
+        voice_session_id: None,
         codex_error_kind: input.codex_error_kind,
         codex_error_http_status_code: input.codex_error_http_status_code,
         usage_limit_window_minutes: input.usage_limit_window_minutes,

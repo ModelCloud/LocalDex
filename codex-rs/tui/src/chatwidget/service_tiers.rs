@@ -98,6 +98,11 @@ impl ChatWidget {
     }
 
     fn set_service_tier_selection(&mut self, service_tier: Option<String>) {
+        // LocalDex force-disables some tiers. Drop any selection the current
+        // feature set reports as disabled so no UI path can persist or forward
+        // a force-disabled tier (for example a stale `/fast` command).
+        let service_tier = service_tier
+            .filter(|service_tier| self.config.features.service_tier_enabled(service_tier));
         self.set_service_tier(service_tier.clone());
         self.app_event_tx
             .send(AppEvent::CodexOp(AppCommand::override_turn_context(
