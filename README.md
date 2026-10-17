@@ -106,6 +106,12 @@ routable; selecting one routes to its named provider. Official Codex models
 continue to use the normal ChatGPT login and OpenAI endpoints. Installation and
 upgrade never contact or validate a model endpoint.
 
+If an endpoint returns `response.incomplete` with reason `max_output_tokens`,
+it has reached its output budget. LocalDex reports that reason immediately and
+stops the request without retrying or switching compaction models. Increase the
+inference server's output-token limit or request a shorter response before
+trying again; increasing connection retries will not raise the output budget.
+
 <details>
 <summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
 
