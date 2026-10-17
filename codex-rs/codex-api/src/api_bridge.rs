@@ -59,8 +59,8 @@ fn map_api_error_details(err: ApiError) -> CodexErr {
         }
         ApiError::Stream(msg) => CodexErr::Stream(msg),
         ApiError::ContentFilter => CodexErr::new(CodexErrorDetails::ContentFilter),
-        ApiError::ResponseIncomplete(reason) => {
-            CodexErr::new(CodexErrorDetails::ResponseIncomplete(reason))
+        ApiError::ResponseIncomplete(incomplete) => {
+            CodexErr::new(CodexErrorDetails::ResponseIncomplete(incomplete))
         }
         ApiError::ServerOverloaded { .. } => CodexErr::ServerOverloaded,
         ApiError::FlexUnavailable => CodexErr::new(CodexErrorDetails::FlexUnavailable),

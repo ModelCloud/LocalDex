@@ -306,6 +306,8 @@ pub(crate) enum AppEvent {
         notice: crate::security_setup::Notice,
     },
     OpenDaemonMenu,
+    ConfirmDaemonRestart,
+    RunDaemonRestart,
     ConfirmDaemonUpdate(crate::update_action::DaemonUpdateSource),
     RunDaemonUpdate(crate::update_action::DaemonUpdateSource),
     ReviewMisalignment(Arc<crate::chatwidget::MisalignmentReview>),
@@ -1241,7 +1243,7 @@ pub(crate) enum AppEvent {
     /// Update the current model slug in the running app and widget.
     UpdateModel(String),
 
-    /// Apply a final Astra picker action and offer the flourish only if it changed the model on
+    /// Apply an explicit Astra selection and offer the flourish only if it changed the model on
     /// its original task. Automatic model updates do not use this event.
     AstraSelectedFromModelPicker {
         thread_id: ThreadId,
@@ -1279,10 +1281,29 @@ pub(crate) enum AppEvent {
         effort: Option<ReasoningEffort>,
     },
 
-    /// Apply a model and effort only to the active session, preserving saved defaults.
+    /// Apply a model, effort, and optional speed only to the active session, preserving saved defaults.
     SelectSessionModel {
         model: String,
         effort: Option<ReasoningEffort>,
+        service_tier: Option<String>,
+    },
+
+    OpenQuickDialEditor {
+        target: crate::chatwidget::quick_dials::QuickDialEditorTarget,
+        dial: Option<codex_config::types::QuickDial>,
+    },
+    OpenQuickDialSavePicker(codex_config::types::QuickDial),
+    ConfirmQuickDial {
+        slot: u8,
+        dial: Option<codex_config::types::QuickDial>,
+    },
+    SaveQuickDial {
+        slot: u8,
+        dial: Option<codex_config::types::QuickDial>,
+    },
+    RecallQuickDial {
+        slot: u8,
+        thread_id: Option<ThreadId>,
     },
 
     /// Show the cyber auto-review notice after the model selection confirmation.
@@ -1332,6 +1353,11 @@ pub(crate) enum AppEvent {
         request_id: uuid::Uuid,
     },
     ModelsLoaded {
+        request_id: uuid::Uuid,
+        result: Result<Vec<ModelPreset>, String>,
+    },
+    /// Finished the API-key compatibility check; do not check the same catalog again.
+    ApiKeyCompatModelsLoaded {
         request_id: uuid::Uuid,
         result: Result<Vec<ModelPreset>, String>,
     },
@@ -1545,6 +1571,11 @@ pub(crate) enum AppEvent {
 
     /// Re-open the permissions presets popup.
     OpenPermissionsPopup,
+
+    /// Resolve an inline permission profile after any app-owned platform preflight.
+    ResolvePermissionProfile {
+        profile_id: String,
+    },
 
     /// Open the branch picker option from the review popup.
     OpenReviewBranchPicker(PathBuf),

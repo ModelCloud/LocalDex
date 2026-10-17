@@ -4177,13 +4177,20 @@ async fn incomplete_response_emits_content_filter_error_message() -> anyhow::Res
     Ok(())
 }
 
-#[test_case::test_case(false, false; "sse")]
-#[test_case::test_case(true, false; "websocket")]
-#[test_case::test_case(false, true; "localdex_sse")]
+#[test_case::test_case(false, false, json!({"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}); "sse_usage")]
+#[test_case::test_case(true, false, json!({"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}); "websocket_usage")]
+#[test_case::test_case(false, true, json!({"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}); "localdex_sse_usage")]
+#[test_case::test_case(false, false, serde_json::Value::Null; "sse_missing_usage")]
+#[test_case::test_case(true, false, serde_json::Value::Null; "websocket_missing_usage")]
+#[test_case::test_case(false, true, serde_json::Value::Null; "localdex_sse_missing_usage")]
+#[test_case::test_case(false, false, json!({"malformed": true}); "sse_malformed_usage")]
+#[test_case::test_case(true, false, json!({"malformed": true}); "websocket_malformed_usage")]
+#[test_case::test_case(false, true, json!({"malformed": true}); "localdex_sse_malformed_usage")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn incomplete_response_is_terminal(
     use_websocket: bool,
     localdex: bool,
+    reported_usage: serde_json::Value,
 ) -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let incomplete = vec![
@@ -4193,7 +4200,8 @@ async fn incomplete_response_is_terminal(
             "type": "response.incomplete",
             "response": {
                 "id": "resp-incomplete",
-                "incomplete_details": {"reason": "max_output_tokens"}
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "usage": reported_usage
             }
         }),
     ];
@@ -4231,6 +4239,9 @@ async fn incomplete_response_is_terminal(
                 .insert("localdex".to_string(), config.model_provider.clone());
         }
     });
+    if !localdex {
+        builder = builder.with_model_info_override(model, |_| {});
+    }
     let test = if let Some(server) = &websocket_server {
         builder.build_with_websocket_server(server).await?
     } else {
@@ -4246,7 +4257,7 @@ async fn incomplete_response_is_terminal(
     wait_for_event(&test.codex, |event| {
         match event {
             EventMsg::Error(error) => errors.push(error.message.clone()),
-            EventMsg::StreamError(_) | EventMsg::RawResponseCompleted(_) => {
+            EventMsg::StreamError(_) | EventMsg::Warning(_) | EventMsg::RawResponseCompleted(_) => {
                 panic!("unexpected incomplete-response event: {event:?}")
             }
             _ => {}
@@ -4254,9 +4265,43 @@ async fn incomplete_response_is_terminal(
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+    insta::allow_duplicates! {
+        insta::assert_snapshot!(errors.join("\n"), @"Incomplete response returned, reason: max_output_tokens");
+    }
+    let expected_usage = if reported_usage.get("input_tokens").is_some() {
+        codex_protocol::protocol::TokenUsage {
+            input_tokens: 120,
+            output_tokens: 30,
+            total_tokens: 150,
+            ..Default::default()
+        }
+    } else {
+        codex_protocol::protocol::TokenUsage::default()
+    };
     assert_eq!(
-        errors,
-        vec!["Incomplete response returned, reason: max_output_tokens"]
+        test.codex
+            .token_usage_info()
+            .await
+            .map(|info| info.total_token_usage)
+            .unwrap_or_default(),
+        expected_usage
+    );
+    test.codex.flush_rollout().await?;
+    let records = std::fs::read_to_string(test.codex.rollout_path().expect("rollout path"))?
+        .lines()
+        .filter_map(|line| codex_rollout::parse_rollout_line(line).ok())
+        .filter_map(|line| match line.item {
+            RolloutItem::TokenUsageRecord(record) => Some(record.usage),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        records,
+        if reported_usage.get("input_tokens").is_some() {
+            vec![expected_usage]
+        } else {
+            vec![]
+        }
     );
     if let Some(server) = websocket_server {
         assert_eq!(
@@ -4271,6 +4316,86 @@ async fn incomplete_response_is_terminal(
     } else {
         response_mock.expect("SSE response mock").single_request();
     }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn incomplete_response_without_output_does_not_compact_the_next_turn() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let test = test_codex()
+        .with_config(|config| {
+            config.model_auto_compact_token_limit = Some(128_000);
+            config.model_post_turn_compact_threshold_percent = 0;
+        })
+        .build_with_auto_env(&server)
+        .await?;
+
+    let initial = mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("initial", "Initial reply."),
+            ev_completed_with_tokens("initial", /*total_tokens*/ 40_000),
+        ]),
+    )
+    .await;
+    test.submit_turn("hello").await?;
+    initial.single_request();
+
+    // An unfinished parallel call can report usage without emitting an output item.
+    // This input fits the window, but counting it again on top of reported usage does not.
+    let incomplete = mount_sse_once(
+        &server,
+        sse(vec![json!({
+            "type": "response.incomplete",
+            "response": {
+                "id": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "usage": {"input_tokens": 100_000, "output_tokens": 16, "total_tokens": 100_016}
+            }
+        })]),
+    )
+    .await;
+    test.submit_turn(&"x".repeat(240_000)).await?;
+    incomplete.single_request();
+    assert_eq!(
+        test.codex
+            .token_usage_info()
+            .await
+            .unwrap()
+            .total_token_usage
+            .total_tokens,
+        140_016,
+    );
+
+    let continuation = mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("continued", "Continued."),
+            ev_completed("continued"),
+        ]),
+    )
+    .await;
+    test.codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "continue".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&test.codex, |event| {
+        assert!(
+            !matches!(event, EventMsg::Error(_) | EventMsg::StreamError(_)),
+            "continuation failed: {event:?}"
+        );
+        assert!(
+            !matches!(event, EventMsg::ItemStarted(event)
+            if matches!(&event.item, codex_protocol::items::TurnItem::ContextCompaction(_))),
+            "the incomplete request's input must only count once toward compaction"
+        );
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    continuation.single_request();
     Ok(())
 }
 

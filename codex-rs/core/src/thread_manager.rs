@@ -108,6 +108,7 @@ use codex_thread_store::StoredThread;
 use codex_thread_store::ThreadMetadataPatch;
 use codex_thread_store::ThreadStore;
 use codex_thread_store::ThreadStoreError;
+use codex_thread_store::ThreadStoreResumePreparation;
 use codex_thread_store::UpdateThreadMetadataParams;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_git_discovery::GitRootDiscovery;
@@ -283,6 +284,8 @@ pub struct StartThreadOptions {
     pub thread_instructions_provider: Option<Arc<dyn ThreadInstructionsProvider>>,
     pub allow_provider_model_fallback: bool,
     pub initial_history: InitialHistory,
+    /// Store-owned state prepared while loading the resumed history.
+    pub resume_preparation: Option<ThreadStoreResumePreparation>,
     /// Parent captured for `start_thread`, including a parent not in the live registry.
     pub internal_parent: Option<InternalSessionParent>,
     pub history_mode: Option<ThreadHistoryMode>,
@@ -313,6 +316,7 @@ impl StartThreadOptions {
             thread_instructions_provider: None,
             allow_provider_model_fallback: false,
             initial_history: InitialHistory::New,
+            resume_preparation: None,
             internal_parent: None,
             history_mode: None,
             session_source: None,
@@ -960,6 +964,27 @@ impl ThreadManager {
 
     pub async fn get_thread(&self, thread_id: ThreadId) -> CodexResult<Arc<CodexThread>> {
         self.state.get_thread(thread_id).await
+    }
+
+    /// Board hosts may reach internal runtimes only through a matching explicit connection.
+    pub(crate) async fn get_thread_for_board(
+        &self,
+        thread_id: ThreadId,
+        connection: &codex_agent_message_board_extension::LocalBoardConnection,
+    ) -> CodexResult<Arc<CodexThread>> {
+        self.state
+            .threads
+            .read()
+            .await
+            .get(&thread_id)
+            .filter(|thread| {
+                thread
+                    .thread_extension_data()
+                    .get::<codex_agent_message_board_extension::LocalBoardConnection>()
+                    .is_some_and(|other| connection.same_board(&other))
+            })
+            .cloned()
+            .ok_or(CodexErr::ThreadNotFound(thread_id))
     }
 
     /// Updates metadata for loaded and cold threads through one entrypoint.
@@ -2098,6 +2123,7 @@ impl ThreadManagerState {
             thread_instructions_provider,
             allow_provider_model_fallback,
             initial_history,
+            resume_preparation,
             internal_parent: _,
             history_mode,
             session_source,
@@ -2114,6 +2140,13 @@ impl ThreadManagerState {
             mut reserved_thread_id,
             disabled_plugin_ids,
         } = options;
+        if resume_preparation.is_some()
+            && (config.ephemeral || !matches!(&initial_history, InitialHistory::Resumed(_)))
+        {
+            return Err(CodexErr::InvalidRequest(
+                "thread store resume preparation requires a persisted resumed thread".to_string(),
+            ));
+        }
         let inherited_environments = captured_environments.or(inherited_environments);
         let session_source = session_source.unwrap_or_else(|| self.session_source.clone());
         // Older callers and saved reviewers identify isolation through their source.
@@ -2331,6 +2364,7 @@ impl ThreadManagerState {
             code_mode_session_provider: Arc::clone(&self.code_mode_session_provider),
             extensions,
             conversation_history: initial_history,
+            resume_preparation,
             history_initialization,
             disabled_plugin_ids,
             requested_history_mode: history_mode,

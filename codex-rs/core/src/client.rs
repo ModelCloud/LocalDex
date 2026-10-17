@@ -338,6 +338,11 @@ pub struct ModelClientSession {
     turn_state: Arc<OnceLock<String>>,
 }
 
+/// Executes HTTP Responses requests without owning a turn's WebSocket state.
+pub(crate) struct ResponsesHttpExecutor<'a> {
+    client: &'a ModelClient,
+}
+
 #[derive(Debug, Clone)]
 struct LastResponse {
     response_id: String,
@@ -871,7 +876,7 @@ impl ModelClient {
         self.state.provider.auth_manager()
     }
 
-    fn auth_owner_generation(&self) -> Option<u64> {
+    pub(crate) fn auth_owner_generation(&self) -> Option<u64> {
         self.auth_manager().map(|manager| {
             manager
                 .auth_change_state_receiver()
@@ -1192,6 +1197,12 @@ impl ModelClient {
             prefix.push(instructions);
         }
         input.splice(0..0, prefix);
+        if !model_info.use_responses_lite {
+            // Only RLite accepts per-content attribution until the Responses API schema expands.
+            for item in &mut input {
+                item.clear_content_item_metadata();
+            }
+        }
         if !is_openai {
             for item in &mut input {
                 item.clear_internal_chat_message_metadata_passthrough();
@@ -1633,6 +1644,12 @@ impl ModelClientSession {
             .replace(Arc::clone(tools));
         previous.is_some_and(|previous| previous != *tools)
     }
+}
+
+impl<'a> ResponsesHttpExecutor<'a> {
+    pub(crate) fn new(client: &'a ModelClient) -> Self {
+        Self { client }
+    }
 
     #[allow(clippy::too_many_arguments)]
     /// Builds shared Responses API transport options and request-body options.
@@ -1641,6 +1658,7 @@ impl ModelClientSession {
     /// regardless of transport choice.
     async fn build_responses_options(
         &self,
+        turn_state: &Arc<OnceLock<String>>,
         responses_metadata: &CodexResponsesMetadata,
         compression: Compression,
         use_responses_lite: bool,
@@ -1652,7 +1670,7 @@ impl ModelClientSession {
             extra_headers: {
                 let mut headers = build_responses_headers(
                     self.client.state.beta_features_header.as_deref(),
-                    Some(&self.turn_state),
+                    Some(turn_state),
                 );
                 add_originator_header(&mut headers, self.client.state.originator.as_str());
                 headers.extend(
@@ -1666,44 +1684,55 @@ impl ModelClientSession {
                 headers
             },
             compression,
-            turn_state: Some(Arc::clone(&self.turn_state)),
+            turn_state: Some(Arc::clone(turn_state)),
         }
     }
+}
 
-    /// Checks whether the current request is an incremental extension of the previous request.
-    /// We only reuse an incremental input delta when non-input request fields are unchanged and
-    /// `input` extends or equals the previous known input. Server-returned output items
-    /// are treated as part of the baseline so we do not resend them.
-    fn get_incremental_items(
-        &self,
-        request: &ResponsesApiRequest,
-        previous_request: &ResponsesApiRequest,
-        last_response: &LastResponse,
-        items_equal: fn(&ResponseItem, &ResponseItem) -> bool,
-    ) -> std::result::Result<Vec<ResponseItem>, NonIncrementalReason> {
-        if let Some(reason) = responses_request_properties_mismatch(previous_request, request) {
-            return Err(NonIncrementalReason::RequestPropertyChanged { reason });
-        }
+impl ModelClientSession {
+    pub(crate) fn turn_state_with_auth_owner(&self) -> (Option<String>, Option<u64>) {
+        let owner = self.client.auth_owner_generation();
+        let turn_state = (self.websocket_session.auth_owner_generation == owner)
+            .then(|| self.turn_state.get().cloned())
+            .flatten();
+        (turn_state, owner)
+    }
+}
 
-        let response_items = &last_response.items_added;
-        let previous_items = previous_request.input.iter().chain(response_items);
-        let mut current_items = request.input.iter();
-        for previous in previous_items {
-            let Some(current) = current_items.next() else {
-                return Err(NonIncrementalReason::InputShortened {
-                    previous: previous.item_type(),
-                });
-            };
-            if !items_equal(previous, current) {
-                return Err(NonIncrementalReason::InputMismatch {
-                    previous: previous.item_type(),
-                    current: current.item_type(),
-                });
-            }
-        }
-        Ok(current_items.cloned().collect())
+/// Checks whether the current request is an incremental extension of the previous request.
+/// We only reuse an incremental input delta when non-input request fields are unchanged and
+/// `input` extends or equals the previous known input. Server-returned output items
+/// are treated as part of the baseline so we do not resend them.
+fn get_incremental_items(
+    request: &ResponsesApiRequest,
+    previous_request: &ResponsesApiRequest,
+    last_response: &LastResponse,
+    items_equal: fn(&ResponseItem, &ResponseItem) -> bool,
+) -> std::result::Result<Vec<ResponseItem>, NonIncrementalReason> {
+    if let Some(reason) = responses_request_properties_mismatch(previous_request, request) {
+        return Err(NonIncrementalReason::RequestPropertyChanged { reason });
     }
 
+    let response_items = &last_response.items_added;
+    let previous_items = previous_request.input.iter().chain(response_items);
+    let mut current_items = request.input.iter();
+    for previous in previous_items {
+        let Some(current) = current_items.next() else {
+            return Err(NonIncrementalReason::InputShortened {
+                previous: previous.item_type(),
+            });
+        };
+        if !items_equal(previous, current) {
+            return Err(NonIncrementalReason::InputMismatch {
+                previous: previous.item_type(),
+                current: current.item_type(),
+            });
+        }
+    }
+    Ok(current_items.cloned().collect())
+}
+
+impl ModelClientSession {
     fn get_last_response(&mut self) -> Option<LastResponse> {
         self.websocket_session
             .last_response_rx
@@ -1729,7 +1758,7 @@ impl ModelClientSession {
             .last_request
             .as_ref()
             .ok_or(NonIncrementalReason::NoPreviousRequest)?;
-        let items = self.get_incremental_items(
+        let items = get_incremental_items(
             request,
             previous_request,
             &last_response,
@@ -1747,27 +1776,41 @@ impl ModelClientSession {
         })
     }
 
+    #[cfg(test)]
     fn get_last_http_response(&mut self) -> Option<LastResponse> {
-        if let Some(last_response) = &self.http_session.last_response {
+        self.http_session.get_last_http_response()
+    }
+
+    #[cfg(test)]
+    fn prepare_http_request(&mut self, request: &ResponsesApiRequest) -> Option<HttpContinuation> {
+        self.http_session.prepare_http_request(
+            request,
+            self.client.provider_info().supports_responses_continuation,
+        )
+    }
+}
+
+impl HttpSession {
+    fn get_last_http_response(&mut self) -> Option<LastResponse> {
+        if let Some(last_response) = &self.last_response {
             return Some(last_response.clone());
         }
 
         let result = self
-            .http_session
             .last_response_rx
             .as_mut()
             .map(tokio::sync::oneshot::Receiver::try_recv)?;
         match result {
             Ok(last_response) => {
-                self.http_session.last_response_rx = None;
-                self.http_session.last_response = Some(last_response.clone());
+                self.last_response_rx = None;
+                self.last_response = Some(last_response.clone());
                 Some(last_response)
             }
             // The next request cannot safely elide history until the completed response is
             // available, but a merely pending receiver must remain available for a later round.
             Err(TryRecvError::Empty) => None,
             Err(TryRecvError::Closed) => {
-                self.http_session.last_response_rx = None;
+                self.last_response_rx = None;
                 None
             }
         }
@@ -1777,15 +1820,17 @@ impl ModelClientSession {
     ///
     /// The model's reasoning and function calls stay in their original `ResponseItem` form. If
     /// the request is no longer a strict append, callers intentionally fall back to full history.
-    fn prepare_http_request(&mut self, request: &ResponsesApiRequest) -> Option<HttpContinuation> {
-        if self.http_session.continuation_disabled
-            || !self.client.provider_info().supports_responses_continuation
-        {
+    fn prepare_http_request(
+        &mut self,
+        request: &ResponsesApiRequest,
+        supports_responses_continuation: bool,
+    ) -> Option<HttpContinuation> {
+        if self.continuation_disabled || !supports_responses_continuation {
             return None;
         }
         let last_response = self.get_last_http_response()?;
-        let previous_request = self.http_session.last_request.as_ref()?;
-        let items = match self.get_incremental_items(
+        let previous_request = self.last_request.as_ref()?;
+        let items = match get_incremental_items(
             request,
             previous_request,
             &last_response,
@@ -1832,6 +1877,16 @@ impl ModelClientSession {
         })
     }
 
+    fn disable_response_continuation(&mut self) {
+        self.continuation_disabled = true;
+        self.last_request = None;
+        self.last_response_rx = None;
+        self.last_response = None;
+        self.resume_point = None;
+    }
+}
+
+impl ModelClientSession {
     /// Opportunistically preconnects a websocket for this turn-scoped client session.
     ///
     /// This performs only connection setup; it never sends prompt payloads.
@@ -2003,7 +2058,9 @@ impl ModelClientSession {
                 "websocket connection is unavailable".to_string(),
             ))
     }
+}
 
+impl ResponsesHttpExecutor<'_> {
     fn responses_request_compression(&self, auth: Option<&CodexAuth>) -> Compression {
         if self.client.state.enable_request_compression
             && auth.is_some_and(CodexAuth::uses_codex_backend)
@@ -2015,7 +2072,44 @@ impl ModelClientSession {
         }
     }
 
-    /// Streams a turn via the OpenAI Responses API.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn stream_responses_http(
+        &self,
+        turn_state: &Arc<OnceLock<String>>,
+        expected_auth_owner: Option<u64>,
+        event_sender: Option<&Sender<ProtocolEvent>>,
+        prompt: &Prompt,
+        model_info: &ModelInfo,
+        session_telemetry: &SessionTelemetry,
+        effort: Option<ReasoningEffortConfig>,
+        summary: ReasoningSummaryConfig,
+        service_tier: Option<String>,
+        responses_metadata: &CodexResponsesMetadata,
+        inference_trace: &InferenceTraceContext,
+    ) -> Result<ResponseStream> {
+        let mut http_session = HttpSession {
+            auth_owner_generation: self.client.auth_owner_generation(),
+            ..Default::default()
+        };
+        let mut turn_state = Arc::clone(turn_state);
+        self.stream_responses_http_with_continuation(
+            &mut turn_state,
+            &mut http_session,
+            expected_auth_owner,
+            event_sender,
+            prompt,
+            model_info,
+            session_telemetry,
+            effort,
+            summary,
+            service_tier,
+            responses_metadata,
+            inference_trace,
+        )
+        .await
+    }
+
+    /// Streams a turn via the OpenAI Responses API over HTTP.
     ///
     /// Handles reasoning summaries, verbosity, and the `text` controls used for output schemas.
     #[allow(clippy::too_many_arguments)]
@@ -2032,8 +2126,12 @@ impl ModelClientSession {
             turn.has_metadata_header = responses_metadata.has_turn_metadata()
         )
     )]
-    async fn stream_responses_api(
-        &mut self,
+    async fn stream_responses_http_with_continuation(
+        &self,
+        turn_state: &mut Arc<OnceLock<String>>,
+        http_session: &mut HttpSession,
+        expected_auth_owner: Option<u64>,
+        event_sender: Option<&Sender<ProtocolEvent>>,
         prompt: &Prompt,
         model_info: &ModelInfo,
         session_telemetry: &SessionTelemetry,
@@ -2055,14 +2153,20 @@ impl ModelClientSession {
                 .client
                 .current_client_setup(ClientRouting::Workspace)
                 .await?;
-            if self.http_session.auth_owner_generation != client_setup.auth_owner_generation
+            if expected_auth_owner.is_some_and(|owner| {
+                Some(owner) != client_setup.auth_owner_generation
+                    || Some(owner) != self.client.auth_owner_generation()
+            }) {
+                return Err(CodexErr::TurnAborted);
+            }
+            if http_session.auth_owner_generation != client_setup.auth_owner_generation
                 || self.client.auth_owner_generation() != client_setup.auth_owner_generation
             {
-                self.http_session = HttpSession {
+                *http_session = HttpSession {
                     auth_owner_generation: client_setup.auth_owner_generation,
                     ..Default::default()
                 };
-                self.turn_state = Arc::new(OnceLock::new());
+                *turn_state = Arc::new(OnceLock::new());
             }
             let include_internal = self
                 .client
@@ -2084,7 +2188,7 @@ impl ModelClientSession {
                 client_setup.agent_identity_telemetry.clone(),
                 pending_retry,
             );
-            let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(
+            let (request_telemetry, sse_telemetry) = ModelClientSession::build_streaming_telemetry(
                 session_telemetry,
                 request_auth_context,
                 RequestRouteTelemetry::for_endpoint("/responses"),
@@ -2093,6 +2197,7 @@ impl ModelClientSession {
             let compression = self.responses_request_compression(client_setup.auth.as_ref());
             let mut options = self
                 .build_responses_options(
+                    turn_state,
                     responses_metadata,
                     compression,
                     model_info.use_responses_lite,
@@ -2135,14 +2240,14 @@ impl ModelClientSession {
             // Keep a full request as the client-side compatibility baseline. The wire request can
             // then be reduced to just new items when the previous response is stored remotely.
             let full_request = request.clone();
-            let resume_point = if let Some(continuation) = self.prepare_http_request(&request) {
+            let resume_point = if let Some(continuation) = http_session.prepare_http_request(
+                &request,
+                self.client.provider_info().supports_responses_continuation,
+            ) {
                 // `prepare_http_request` resolved the stored response this request is extending
                 // into `http_session.last_response`. Remember that pair so a steer can resume
                 // from it if this request is torn down before its own response is stored.
-                let resume_point = match (
-                    &self.http_session.last_request,
-                    &self.http_session.last_response,
-                ) {
+                let resume_point = match (&http_session.last_request, &http_session.last_response) {
                     (Some(last_request), Some(last_response)) => Some(HttpResumePoint {
                         request: last_request.clone(),
                         response: last_response.clone(),
@@ -2203,7 +2308,7 @@ impl ModelClientSession {
                 Ok(stream) => {
                     if is_continuation_request {
                         // The provider accepted the continuation, so the chain is healthy again.
-                        self.http_session.continuation_resets = 0;
+                        http_session.continuation_resets = 0;
                     }
                     let (stream, last_response_rx) = map_response_stream(
                         stream,
@@ -2212,10 +2317,10 @@ impl ModelClientSession {
                         Arc::clone(&self.client.state.provider),
                         interceptors,
                     );
-                    self.http_session.last_request = Some(full_request);
-                    self.http_session.last_response_rx = Some(last_response_rx);
-                    self.http_session.last_response = None;
-                    self.http_session.resume_point = resume_point;
+                    http_session.last_request = Some(full_request);
+                    http_session.last_response_rx = Some(last_response_rx);
+                    http_session.last_response = None;
+                    http_session.resume_point = resume_point;
                     return Ok(stream);
                 }
                 Err(ApiError::Transport(unauthorized_transport))
@@ -2239,7 +2344,7 @@ impl ModelClientSession {
                             &mut provider_auth_recovery_attempted,
                             session_telemetry,
                             &self.client.state.provider,
-                            self.client.event_sender.as_ref(),
+                            event_sender,
                             responses_metadata.turn_id.as_deref(),
                         )
                         .await?,
@@ -2251,7 +2356,7 @@ impl ModelClientSession {
                         if let ApiError::Transport(TransportError::Http { status, body, .. }) = &err
                             && is_unsupported_persisted_item_context(*status, body.as_deref())
                         {
-                            self.disable_response_continuation();
+                            http_session.disable_response_continuation();
                             warn!(
                                 "Responses provider cannot replay stored context; retrying with full history"
                             );
@@ -2305,16 +2410,16 @@ impl ModelClientSession {
                                     body,
                                     ..
                                 }))) if is_stale_continuation(status, body.as_deref())
-                                    && self.http_session.continuation_resets
+                                    && http_session.continuation_resets
                                         < MAX_CONTINUATION_RESETS =>
                                 {
-                                    self.http_session.continuation_resets += 1;
-                                    self.http_session.last_request = None;
-                                    self.http_session.last_response_rx = None;
-                                    self.http_session.last_response = None;
+                                    http_session.continuation_resets += 1;
+                                    http_session.last_request = None;
+                                    http_session.last_response_rx = None;
+                                    http_session.last_response = None;
                                     warn!(
                                         status = %status,
-                                        resets = self.http_session.continuation_resets,
+                                        resets = http_session.continuation_resets,
                                         "Responses continuation no longer exists; retrying with full history"
                                     );
                                     continue;
@@ -2340,7 +2445,9 @@ impl ModelClientSession {
             }
         }
     }
+}
 
+impl ModelClientSession {
     /// Streams a turn via the Responses API over WebSocket transport.
     #[allow(clippy::too_many_arguments)]
     #[instrument(
@@ -2806,17 +2913,26 @@ impl ModelClientSession {
                     }
                 }
 
-                self.stream_responses_api(
-                    prompt,
-                    model_info,
-                    session_telemetry,
-                    effort,
-                    summary,
-                    service_tier,
-                    responses_metadata,
-                    inference_trace,
-                )
-                .await
+                let result = ResponsesHttpExecutor::new(&self.client)
+                    .stream_responses_http_with_continuation(
+                        &mut self.turn_state,
+                        &mut self.http_session,
+                        /*expected_auth_owner*/ None,
+                        self.client.event_sender.as_ref(),
+                        prompt,
+                        model_info,
+                        session_telemetry,
+                        effort,
+                        summary,
+                        service_tier,
+                        responses_metadata,
+                        inference_trace,
+                    )
+                    .await;
+                if self.http_session.continuation_disabled {
+                    self.disable_response_continuation();
+                }
+                result
             }
         }
     }
@@ -2835,11 +2951,7 @@ impl ModelClientSession {
         self.websocket_session
             .reset(Some("unsupported_persisted_item_context"));
         self.websocket_session.continuation_disabled = true;
-        self.http_session.continuation_disabled = true;
-        self.http_session.last_request = None;
-        self.http_session.last_response_rx = None;
-        self.http_session.last_response = None;
-        self.http_session.resume_point = None;
+        self.http_session.disable_response_continuation();
         true
     }
 

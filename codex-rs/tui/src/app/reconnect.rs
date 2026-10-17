@@ -27,7 +27,12 @@ pub(super) struct Reconnected {
     thread: Option<AppServerStartedThread>,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "retain logical ownership across connection replacement"
+)]
 pub(super) async fn reconnect(
+    backend_id: crate::backend_id::BackendId,
     target: AppServerTarget,
     config: Config,
     local_settings: crate::local_settings::LocalSettings,
@@ -55,7 +60,7 @@ pub(super) async fn reconnect(
         let attempt = async {
             tokio::time::sleep(Duration::from_secs(delay)).await;
             let client = crate::app_server_connection::connect(&target).await?;
-            let mut session = AppServerSession::new(client, mode)
+            let mut session = AppServerSession::new(backend_id, client, mode)
                 .with_local_codex_home(&config.codex_home)
                 .with_remote_cwd_override(remote_cwd.clone())
                 .with_thread_tool_transport(task_tools.clone());
@@ -339,11 +344,19 @@ impl App {
                 && app_server.app_server_platform_os() == Some("windows");
         self.chat_widget.windows_sandbox_host = WindowsSandboxHost::Unknown;
         self.chat_widget.requires_openai_auth = bootstrap.requires_openai_auth;
+        let managed_daemon = self
+            .chat_widget
+            .remote_connection
+            .as_ref()
+            .is_some_and(|connection| connection.is_managed_daemon);
         self.chat_widget.remote_connection =
             crate::status::remote_connection::remote_connection_status_value(
                 &self.app_server_target,
                 app_server.server_version(),
             );
+        if let Some(connection) = &mut self.chat_widget.remote_connection {
+            connection.is_managed_daemon = connection.is_local_daemon && managed_daemon;
+        }
         self.workspace_command_runner = Some(Arc::new(AppServerWorkspaceCommandRunner::new(
             app_server.request_handle(),
         )));

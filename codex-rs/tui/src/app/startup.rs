@@ -249,6 +249,7 @@ impl App {
         startup_bootstrap: Option<AppServerBootstrap>,
         startup_hooks_browser: Option<HooksListEntry>,
         daemon_startup_warning: Option<String>,
+        managed_daemon: bool,
         mut startup_draft: StartupDraftPump,
         managed_worktree: Option<crate::ManagedTuiWorktree>,
         daemon_cli_executable: Option<AbsolutePathBuf>,
@@ -269,6 +270,11 @@ impl App {
         tui.prepare_owned_screen(config.tui_fullscreen_transcript)?;
         let mut local_settings = crate::local_settings::LocalSettings::for_tui(&config, tui);
         let startup_started_at = Instant::now();
+        if let SessionSelection::Resume(target) | SessionSelection::Fork(target) =
+            &session_selection
+        {
+            target.ensure_backend(app_server.backend_id())?;
+        }
         let (app_event_tx, mut app_event_rx) = unbounded_channel();
         let app_event_tx = AppEventSender::new(app_event_tx);
         if let Some(message) = project_config_warning(&config) {
@@ -385,10 +391,14 @@ impl App {
         }
         let mut model = startup_model(&config, &bootstrap, startup_defaults.server_defaults_read);
         let available_models = bootstrap.available_models;
-        let remote_connection = crate::status::remote_connection::remote_connection_status_value(
-            &app_server_target,
-            app_server.server_version(),
-        );
+        let mut remote_connection =
+            crate::status::remote_connection::remote_connection_status_value(
+                &app_server_target,
+                app_server.server_version(),
+            );
+        if let Some(connection) = &mut remote_connection {
+            connection.is_managed_daemon = connection.is_local_daemon && managed_daemon;
+        }
         let initial_server_version_notice =
             if !matches!(app_server_target, AppServerTarget::Embedded) {
                 crate::status::remote_connection::pending_server_version_notice(
@@ -884,6 +894,7 @@ See the Codex keymap documentation for supported actions and examples."
             config_notification_test_pending: None,
             model_catalog,
             session_telemetry: session_telemetry.clone(),
+            terminal_size_tags: tui.terminal_size_tags.clone(),
             app_event_tx,
             chat_widget,
             workspace_command_runner: Some(workspace_command_runner),
@@ -940,6 +951,7 @@ See the Codex keymap documentation for supported actions and examples."
             },
             daemon_cli_executable,
             pending_update_action: None,
+            daemon_restart: None,
             pending_shutdown_exit_thread_id: None,
             windows_sandbox: WindowsSandboxState {
                 prompt_after_trust: should_prompt_windows_sandbox_nux_at_startup
@@ -1156,6 +1168,9 @@ See the Codex keymap documentation for supported actions and examples."
             );
         }
 
+        let mut last_screen_size = tui.terminal.last_known_screen_size;
+        let mut settled_size_tags = crate::terminal_size_telemetry::tags(last_screen_size);
+        let mut pending_resize: Option<(ratatui::layout::Size, Instant)> = None;
         let mut listen_for_app_server_events = true;
         let mut reconnect = None;
         let mut waiting_for_initial_session_configured = wait_for_initial_session_configured;
@@ -1235,6 +1250,7 @@ See the Codex keymap documentation for supported actions and examples."
                 }
                 if app.reconnect.offline && !app.reconnect.failed && reconnect.is_none() {
                     reconnect = Some(Box::pin(reconnect::reconnect(
+                        app_server.backend_id(),
                         app.app_server_target.clone(),
                         app.config.clone(),
                         app.local_settings.clone(),
@@ -1259,11 +1275,36 @@ See the Codex keymap documentation for supported actions and examples."
                             && has_pending_app_events
                         || (!waiting_for_initial_session_configured
                             && app.has_queued_startup_protected_request());
+                // The screen cache is physical geometry, not the inline viewport. This also
+                // notices the final size after returning from a standalone nested screen.
+                let size = tui.terminal.last_known_screen_size;
+                if !crate::terminal_size_telemetry::enabled(&app.config)
+                    || app.terminal_size_tags.is_empty()
+                {
+                    pending_resize = None;
+                    settled_size_tags = crate::terminal_size_telemetry::tags(size);
+                } else if size != last_screen_size {
+                    pending_resize =
+                        Some((size, Instant::now() + Duration::from_secs(/*secs*/ 15)));
+                }
+                last_screen_size = size;
                 let rate_limit_poll_deadline = app
                     .chat_widget
                     .rate_limit_refresh_interval()
                     .and_then(|interval| app.rate_limit_refresh_state.poll_deadline(interval));
                 let control = select! {
+                    result = async {
+                        match app.daemon_restart.as_mut() {
+                            Some(task) => task.await,
+                            None => std::future::pending().await,
+                        }
+                    }, if app.daemon_restart.is_some() => {
+                        app.daemon_restart = None;
+                        if let Err(err) = result.unwrap_or_else(|err| Err(err.into())) {
+                            app.chat_widget.add_error_message(format!("Could not restart the background server: {err:#}"));
+                        }
+                        AppRunControl::Continue
+                    }
                     Some(event) = app_event_rx.recv() => {
                         let is_initial_session_header = matches!(
                             &event,
@@ -1357,7 +1398,9 @@ See the Codex keymap documentation for supported actions and examples."
                         reconnect = None;
                         match result {
                             Ok(connected) => {
-                                app.finish_reconnect(tui, &mut app_server, &mut app_event_rx, connected, CODEX_CLI_VERSION).await?;
+                                if let Err(err) = app.finish_reconnect(tui, &mut app_server, &mut app_event_rx, connected, CODEX_CLI_VERSION).await {
+                                    break Err(err);
+                                }
                                 listen_for_app_server_events = true;
                                 waiting_for_initial_session_configured = false;
                             }
@@ -1368,6 +1411,28 @@ See the Codex keymap documentation for supported actions and examples."
                                 if let Ok(mut state) = app.agents_overview.view_state.lock() {
                                     state.connection_notice = Some("Reconnect failed — agent list is stale; relaunch to retry");
                                 }
+                            }
+                        }
+                        AppRunControl::Continue
+                    }
+                    () = async {
+                        match pending_resize {
+                            Some((_, deadline)) => tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await,
+                            None => std::future::pending().await,
+                        }
+                    } => {
+                        if let Some((expected, _)) = pending_resize.take()
+                            && crate::terminal_size_telemetry::enabled(&app.config)
+                        {
+                            let actual = crate::terminal_size_telemetry::read_size();
+                            if actual != expected {
+                                pending_resize = Some((actual, Instant::now() + Duration::from_secs(/*secs*/ 15)));
+                            } else {
+                                let tags = crate::terminal_size_telemetry::tags(actual);
+                                if tags != settled_size_tags {
+                                    crate::terminal_size_telemetry::record(&app.terminal_size_tags, &app.config, "resize", actual);
+                                }
+                                settled_size_tags = tags;
                             }
                         }
                         AppRunControl::Continue
@@ -1454,6 +1519,11 @@ See the Codex keymap documentation for supported actions and examples."
         }
         let clear_pet_result = tui.clear_ambient_pet_image();
         let clear_result = tui.terminal.clear();
+        if let Some(task) = app.daemon_restart.take()
+            && let Err(err) = task.await.unwrap_or_else(|err| Err(err.into()))
+        {
+            tracing::warn!(error = %err, "failed to finish background server restart during exit");
+        }
         // Keep the alternate screen active until the outer guard restores both keyboard stacks.
         let exit_reason = match exit_reason_result {
             Ok(exit_reason) => {

@@ -761,6 +761,7 @@ tool_namespace = "agents"
 hide_spawn_agent_metadata = true
 expose_spawn_agent_model_overrides = true
 wait_agent_enabled = false
+disable_native_tools = true
 disable_direct_message = true
 message_board_in_memory = true
 non_code_mode_only = true
@@ -791,6 +792,7 @@ non_code_mode_only = true
             hide_spawn_agent_metadata: Some(true),
             expose_spawn_agent_model_overrides: Some(true),
             wait_agent_enabled: Some(false),
+            disable_native_tools: Some(true),
             disable_direct_message: Some(true),
             message_board_in_memory: Some(true),
             message_board_remote: None,
@@ -934,4 +936,23 @@ fn fast_mode_is_force_disabled_for_every_source() {
     assert!(disabled.service_tier_enabled("default"));
     assert!(!disabled.service_tier_enabled("fast"));
     assert!(!disabled.service_tier_enabled("priority"));
+}
+
+#[test]
+fn retired_worktree_and_voice_config_overrides_are_ignored() {
+    for enabled in [false, true] {
+        let features_toml = FeaturesToml::from(BTreeMap::from([
+            ("worktrees".to_string(), enabled),
+            ("realtime_conversation".to_string(), enabled),
+        ]));
+        let features = Features::from_sources(
+            FeatureConfigSource {
+                features: Some(&features_toml),
+                ..Default::default()
+            },
+            FeatureConfigSource::default(),
+            FeatureOverrides::default(),
+        );
+        assert_eq!(features, Features::with_defaults());
+    }
 }

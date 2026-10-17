@@ -6,13 +6,14 @@ import subprocess
 import tempfile
 import unittest
 
+from test_install_localdex import InstallerTestCase
 from test_install_localdex import make_archive
 
 
 INSTALLER = Path(__file__).with_name("install.sh")
 
 
-class InstallShTest(unittest.TestCase):
+class InstallShTest(InstallerTestCase):
     def test_primary_installer_selects_localdex_and_preserves_data(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
