@@ -1151,6 +1151,87 @@ async fn reasoning_effort_override_remote_v2_compaction_resets_pinned_effort(
     Ok(())
 }
 
+#[test_case::test_case(false; "local_compaction")]
+#[test_case::test_case(true; "remote_compaction")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn incomplete_response_during_compaction_is_terminal(remote: bool) -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let response_mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_assistant_message("initial", "Initial reply."),
+                ev_completed_with_tokens("initial", 120_000),
+            ]),
+            sse(vec![json!({
+                "type": "response.incomplete",
+                "response": {
+                    "id": "incomplete-compaction",
+                    "incomplete_details": {"reason": "max_output_tokens"}
+                }
+            })]),
+        ],
+    )
+    .await;
+    let provider = if remote {
+        openai_model_provider(&server)
+    } else {
+        non_openai_model_provider(&server)
+    };
+    let test = test_codex()
+        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_model("gpt-5.4")
+        .with_config(move |config| {
+            config.model_provider = provider;
+            config.model_provider.stream_max_retries = Some(2);
+            config.model_catalog = Some(ModelsResponse {
+                models: vec![
+                    model_info_with_context_window("gpt-5.4", 273_000),
+                    model_info_with_context_window("gpt-5.2", 125_000),
+                ],
+            });
+            set_test_compact_prompt(config);
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    test.submit_turn("hello").await?;
+    test.codex
+        .start_or_steer_turn(disabled_permission_user_turn(
+            "continue with the smaller model",
+            test.cwd.path().to_path_buf(),
+            "gpt-5.2".to_string(),
+        ))
+        .await?;
+    let mut errors = Vec::new();
+    wait_for_event(&test.codex, |event| {
+        match event {
+            EventMsg::Error(error) => errors.push(error.message.clone()),
+            EventMsg::StreamError(_) | EventMsg::RawResponseCompleted(_) => {
+                panic!("unexpected incomplete-compaction event: {event:?}")
+            }
+            _ => {}
+        }
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    let expected_error = if remote {
+        "Error running remote compact task: Incomplete response returned, reason: max_output_tokens"
+    } else {
+        "Incomplete response returned, reason: max_output_tokens"
+    };
+    assert_eq!(errors, vec![expected_error]);
+    assert_eq!(
+        response_mock
+            .requests()
+            .iter()
+            .map(|request| request.body_json()["model"].clone())
+            .collect::<Vec<_>>(),
+        vec![json!("gpt-5.4"), json!("gpt-5.4")],
+    );
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn manual_compact_records_durable_and_local_token_usage() {
     skip_if_no_network!();

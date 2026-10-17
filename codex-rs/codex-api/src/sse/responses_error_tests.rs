@@ -16,6 +16,99 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::time::Duration;
 
+#[tokio::test(start_paused = true)]
+async fn incomplete_response_is_terminal_without_waiting_for_eof() {
+    for reason in [Some("max_output_tokens"), Some("unknown_reason"), None] {
+        for trailing_completed in [false, true] {
+            let incomplete = json!({
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp-incomplete",
+                    "incomplete_details": {"reason": reason}
+                }
+            });
+            let mut body = format!("data: {incomplete}\n\n");
+            if trailing_completed {
+                let completed = json!({
+                    "type": "response.completed",
+                    "response": {"id": "later"}
+                });
+                body.push_str(&format!("data: {completed}\n\n"));
+            }
+            let bytes = stream::iter([Ok(Bytes::from(body))]).chain(stream::pending());
+            let mut response_stream = spawn_response_stream(
+                StreamResponse {
+                    status: StatusCode::OK,
+                    headers: HeaderMap::new(),
+                    bytes: Box::pin(bytes),
+                },
+                Duration::from_secs(60),
+                None,
+                None,
+            );
+            let started = tokio::time::Instant::now();
+            let error = loop {
+                match response_stream.next().await {
+                    Some(Ok(ResponseEvent::RateLimits(_))) => {}
+                    Some(Err(error)) => break map_api_error(error),
+                    event => panic!("expected incomplete-response error, got {event:?}"),
+                }
+            };
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "Incomplete response returned, reason: {}",
+                    reason.unwrap_or("unknown")
+                )
+            );
+            assert_eq!(error.retry_delay(1), None);
+            assert_eq!(started.elapsed(), Duration::ZERO);
+            assert!(response_stream.next().await.is_none());
+        }
+    }
+}
+
+#[test]
+fn incomplete_response_preserves_content_filter_and_interruption() {
+    let filtered = serde_json::from_value(json!({
+        "type": "response.incomplete",
+        "response": {"incomplete_details": {"reason": "content_filter"}}
+    }))
+    .unwrap();
+    let error = map_api_error(
+        process_responses_event(filtered)
+            .unwrap_err()
+            .into_api_error(),
+    );
+    assert!(matches!(
+        error.details(),
+        codex_protocol::error::CodexErrorDetails::ContentFilter
+    ));
+    assert!(error.retry_delay(1).is_some());
+
+    let interrupted = serde_json::from_value(json!({
+        "type": "response.incomplete",
+        "response": {
+            "id": "resp-interrupted",
+            "incomplete_details": {"reason": "interrupted"},
+            "usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}
+        }
+    }))
+    .unwrap();
+    let Some(ResponseEvent::Completed {
+        response_id,
+        token_usage,
+        end_turn,
+        ..
+    }) = process_responses_event(interrupted).unwrap()
+    else {
+        panic!("interrupted response must remain continuable");
+    };
+    assert_eq!(response_id, "resp-interrupted");
+    assert_eq!(end_turn, Some(false));
+    assert_eq!(token_usage.unwrap().total_tokens, 12);
+}
+
 /// Flex failures remain terminal even with retry headers and a later completed event.
 #[tokio::test(start_paused = true)]
 async fn flex_failure_with_retry_header_ends_stream_immediately() {
