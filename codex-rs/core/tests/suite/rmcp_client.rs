@@ -92,6 +92,7 @@ use codex_protocol::request_user_input::RequestUserInputAnswer;
 use codex_protocol::request_user_input::RequestUserInputResponse;
 use codex_protocol::turn_input::TurnInput;
 use codex_protocol::user_input::UserInput;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_cargo_bin::cargo_bin;
 use codex_utils_path_uri::PathUri;
 use core_test_support::apps_test_server::AppsTestServer;
@@ -1737,7 +1738,9 @@ async fn startup_prewarm_connects_before_delayed_mcp_tools_then_reuses_socket(
         server
             .single_handshake()
             .header(X_CODEX_ROUTING_HINT_HEADER),
-        Some(format!("model=gpt-5.4;tier={service_tier}"))
+        // LocalDex force-disables Fast mode, so the requested fast tier is
+        // remapped to standard routing and the hint carries no tier.
+        Some("model=gpt-5.4".to_string())
     );
     assert!(
         server.single_connection().is_empty(),
@@ -1776,7 +1779,9 @@ async fn startup_prewarm_connects_before_delayed_mcp_tools_then_reuses_socket(
     assert_eq!(prewarm["type"].as_str(), Some("response.create"));
     assert_eq!(prewarm["generate"].as_bool(), Some(false));
     assert!(prewarm.get("previous_response_id").is_none());
-    assert_eq!(prewarm["service_tier"].as_str(), Some(service_tier));
+    // LocalDex force-disables Fast mode, so the requested fast tier never
+    // reaches the wire.
+    assert_eq!(prewarm["service_tier"].as_str(), None);
     let tool_body = if use_responses_lite {
         &prewarm["input"][0]
     } else {
@@ -2228,6 +2233,14 @@ async fn stdio_mcp_tool_call_includes_sandbox_state_meta(
         .with_model("gpt-5.5")
         .with_config(move |config| {
             config.prefer_mxc = prefer_mxc;
+            // The real CLI is explicitly provided; the test harness is not a CLI.
+            config.codex_self_exe = Some(
+                AbsolutePathBuf::from_absolute_path_checked(
+                    cargo_bin("codex").expect("codex binary"),
+                )
+                .expect("absolute codex binary path")
+                .into_path_buf(),
+            );
             insert_mcp_server(
                 config,
                 server_name,
@@ -2432,6 +2445,10 @@ async fn stdio_mcp_tool_call_includes_sandbox_state_meta(
     assert_eq!(
         sandbox_state,
         SandboxState {
+            codex_executable: (remote_aware_environment_id()
+                == codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID)
+                .then(|| fixture.config.codex_self_exe.clone())
+                .flatten(),
             permission_profile: owner_permission_profile
                 .materialize_project_roots_with_path_uris(&owner_workspace_roots),
             codex_linux_sandbox_exe: fixture.config.codex_linux_sandbox_exe.clone(),

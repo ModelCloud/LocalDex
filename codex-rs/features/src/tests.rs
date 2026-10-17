@@ -32,7 +32,8 @@ fn sleep_tool_config_rejects_unknown_mode() {
 #[test]
 fn under_development_features_are_disabled_by_default() {
     for spec in crate::FEATURES {
-        if matches!(spec.stage, Stage::UnderDevelopment) {
+        // Instant interrupts are enabled by default while retaining their development stage.
+        if matches!(spec.stage, Stage::UnderDevelopment) && spec.id != Feature::InstantInterrupt {
             assert_eq!(
                 spec.default_enabled, false,
                 "feature `{}` is under development and must be disabled by default",
@@ -121,7 +122,8 @@ fn codex_apps_mcp_protocol_can_be_enabled_independently_of_generic_mcp() {
 #[test]
 fn default_enabled_features_are_stable() {
     for spec in crate::FEATURES {
-        if spec.default_enabled {
+        // Instant interrupts are enabled by default while retaining their development stage.
+        if spec.default_enabled && spec.id != Feature::InstantInterrupt {
             assert!(
                 matches!(spec.stage, Stage::Stable | Stage::Removed),
                 "feature `{}` is enabled by default but is not stable/removed ({:?})",
@@ -753,6 +755,7 @@ usage_hint_text = "Custom delegation guidance."
 root_agent_usage_hint_text = "Root guidance."
 subagent_usage_hint_text = "Subagent guidance."
 subagent_developer_instructions = "Delegate carefully."
+preserve_fork_prefix = true
 multi_agent_mode_hint_text = "Custom mode guidance."
 tool_namespace = "agents"
 hide_spawn_agent_metadata = true
@@ -782,6 +785,7 @@ non_code_mode_only = true
             root_agent_usage_hint_text: Some("Root guidance.".to_string()),
             subagent_usage_hint_text: Some("Subagent guidance.".to_string()),
             subagent_developer_instructions: Some("Delegate carefully.".to_string()),
+            preserve_fork_prefix: Some(true),
             multi_agent_mode_hint_text: Some("Custom mode guidance.".to_string()),
             tool_namespace: Some("agents".to_string()),
             hide_spawn_agent_metadata: Some(true),
@@ -894,4 +898,40 @@ code_mode = true
         "Under-development features enabled: code_mode. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in /tmp/config.toml.".to_string(),
         message
     );
+}
+
+#[test]
+fn fast_mode_is_force_disabled_for_every_source() {
+    // Built-in defaults enable the feature; the force-disable list must win.
+    let defaults = Features::with_defaults();
+    assert!(!defaults.enabled(Feature::FastMode));
+    assert!(
+        !defaults.enabled_features().contains(&Feature::FastMode),
+        "enabled_features must not report a force-disabled feature"
+    );
+
+    let mut features = Features::with_defaults();
+    features
+        .enable(Feature::FastMode)
+        .set_enabled(Feature::FastMode, true);
+    assert!(!features.enabled(Feature::FastMode));
+
+    // Config-style sources cannot turn it back on either.
+    let mut toggles = BTreeMap::new();
+    toggles.insert("fast_mode".to_string(), true);
+    features.apply_map(&toggles);
+    assert!(!features.enabled(Feature::FastMode));
+
+    let mut configured = Features::with_defaults();
+    configured.apply_map(&toggles);
+    assert!(!configured.enabled(Feature::FastMode));
+
+    // Disabling keeps it disabled and flex/default routing stay available.
+    let mut disabled = Features::with_defaults();
+    disabled.disable(Feature::FastMode);
+    assert!(!disabled.enabled(Feature::FastMode));
+    assert!(disabled.service_tier_enabled("flex"));
+    assert!(disabled.service_tier_enabled("default"));
+    assert!(!disabled.service_tier_enabled("fast"));
+    assert!(!disabled.service_tier_enabled("priority"));
 }

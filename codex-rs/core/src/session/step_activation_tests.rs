@@ -35,6 +35,7 @@ use codex_models_manager::model_info::with_config_overrides;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::config_types::ReasoningSummary;
+use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::openai_models::AutoReviewMessages;
 use codex_protocol::openai_models::GuardianV2ModelConfig;
@@ -663,7 +664,9 @@ async fn submitted_sparse_updates_preserve_captured_steps_and_ordering() {
                 MODEL_B,
                 Some(ReasoningEffort::High),
                 ReasoningSummary::Detailed,
-                Some(priority),
+                // LocalDex force-disables Fast mode, so the activated `priority`
+                // tier is remapped to explicit standard routing.
+                Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE),
             ),
         ]
     );

@@ -56,6 +56,7 @@ use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolSuggestCandidates;
 use crate::tools::router::ToolSuggestPresentation;
+use crate::tools::router::record_registration_metrics;
 use crate::tools::spec_plan::build_tool_router;
 use crate::tools::spec_plan::tool_suggest_enabled;
 use crate::turn_diff_tracker::TurnDiffTracker;
@@ -1817,6 +1818,7 @@ async fn run_sampling_request(
         Arc::clone(&turn_diff_tracker),
     );
     let max_retries = turn_context.provider.info().stream_max_retries();
+    record_registration_metrics(&step_context.tool_router, &step_context.session_telemetry);
     let mut retry_state = ResponsesStreamRetryState::default();
     let mut initial_input = Some(input);
     let mut original_input = None;
@@ -2344,6 +2346,7 @@ pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<RealtimeEventTex
         | EventMsg::McpStartupComplete(_)
         | EventMsg::McpToolCallBegin(_)
         | EventMsg::McpToolCallEnd(_)
+        | EventMsg::ElicitationAbandoned(_)
         | EventMsg::WebSearchBegin(_)
         | EventMsg::WebSearchEnd(_)
         | EventMsg::ExecCommandBegin(_)
@@ -2534,7 +2537,7 @@ async fn maybe_complete_plan_item_from_message(
     {
         let mut text = String::new();
         for entry in content {
-            if let ContentItem::OutputText { text: chunk } = entry {
+            if let ContentItem::OutputText { text: chunk, .. } = entry {
                 text.push_str(chunk);
             }
         }

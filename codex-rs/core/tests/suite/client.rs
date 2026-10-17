@@ -108,17 +108,19 @@ const INSTALLATION_ID_FILENAME: &str = "installation_id";
 const TEST_WINDOW_ID: &str = "test-thread:0";
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
 
-#[test_case::test_case(false, false)]
-#[test_case::test_case(false, true)]
-#[test_case::test_case(true, false)]
-#[test_case::test_case(true, true)]
+#[test_case::test_case(false)]
+#[test_case::test_case(true)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_request_enforces_independent_speed_requirements(
-    fast_enabled: bool,
     ultrafast_enabled: bool,
 ) -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
-    for (tier, enabled) in [("priority", fast_enabled), ("ultrafast", ultrafast_enabled)] {
+    // LocalDex force-disables Fast mode, so a configured fast tier never
+    // reaches the wire. Ultra Fast stays gated by its own feature flag.
+    for (tier, expected) in [
+        ("priority", None),
+        ("ultrafast", ultrafast_enabled.then_some("ultrafast")),
+    ] {
         for configure_at_start in [false, true] {
             let server = start_mock_server().await;
             let response_mock = mount_sse_once(&server, sse(vec![ev_completed("done")])).await;
@@ -132,10 +134,6 @@ async fn responses_request_enforces_independent_speed_requirements(
                     }];
                 })
                 .with_config(move |config| {
-                    config
-                        .features
-                        .set_enabled(Feature::FastMode, fast_enabled)
-                        .expect("configure Fast mode");
                     config
                         .features
                         .set_enabled(Feature::UltrafastMode, ultrafast_enabled)
@@ -157,7 +155,7 @@ async fn responses_request_enforces_independent_speed_requirements(
             test.submit_turn("hello").await?;
             assert_eq!(
                 response_mock.single_request().body_json()["service_tier"].as_str(),
-                enabled.then_some(tier),
+                expected,
                 "tier={tier}, configure_at_start={configure_at_start}",
             );
         }
@@ -1065,6 +1063,8 @@ async fn synthetic_call_output_id_is_stable_across_resumes() -> anyhow::Result<(
             timestamp: "2024-01-01T00:00:01.000Z".to_string(),
             ordinal: None,
             item: rollout_response_item(ResponseItem::FunctionCall {
+                status: None,
+                encrypted_content: None,
                 id: Some(ResponseItemId::with_suffix("fc", "existing")),
                 name: "do_it".to_string(),
                 namespace: None,
@@ -1361,6 +1361,8 @@ async fn resume_sends_prior_items() {
 
     // Prior item: user message (should be delivered)
     let prior_user = codex_protocol::models::ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![codex_protocol::models::ContentItem::InputText {
@@ -1383,9 +1385,13 @@ async fn resume_sends_prior_items() {
 
     // Prior item: system message (excluded from API history)
     let prior_system = codex_protocol::models::ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "system".to_string(),
         content: vec![codex_protocol::models::ContentItem::OutputText {
+            annotations: None,
+            logprobs: None,
             text: "resumed system instruction".to_string(),
         }],
         phase: None,
@@ -1405,9 +1411,13 @@ async fn resume_sends_prior_items() {
 
     // Prior item: assistant message
     let prior_item = codex_protocol::models::ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "assistant".to_string(),
         content: vec![codex_protocol::models::ContentItem::OutputText {
+            annotations: None,
+            logprobs: None,
             text: "resumed assistant message".to_string(),
         }],
         phase: Some(MessagePhase::Commentary),
@@ -1533,6 +1543,7 @@ async fn resume_replays_legacy_js_repl_image_rollout_shapes() {
     // Current image tests cover today's shapes; this keeps resume compatibility for that
     // legacy rollout representation.
     let legacy_custom_tool_call = ResponseItem::CustomToolCall {
+        encrypted_content: None,
         id: None,
         status: None,
         call_id: "legacy-js-call".to_string(),
@@ -1582,6 +1593,8 @@ async fn resume_replays_legacy_js_repl_image_rollout_shapes() {
             timestamp: "2024-01-01T00:00:03.000Z".to_string(),
             ordinal: None,
             item: rollout_response_item(ResponseItem::Message {
+                status: None,
+                encrypted_content: None,
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputImage {
@@ -1708,6 +1721,8 @@ async fn resume_replays_image_tool_outputs_with_detail() {
             timestamp: "2024-01-01T00:00:01.000Z".to_string(),
             ordinal: None,
             item: rollout_response_item(ResponseItem::FunctionCall {
+                status: None,
+                encrypted_content: None,
                 id: None,
                 name: "view_image".to_string(),
                 namespace: None,
@@ -1740,6 +1755,7 @@ async fn resume_replays_image_tool_outputs_with_detail() {
             timestamp: "2024-01-01T00:00:02.000Z".to_string(),
             ordinal: None,
             item: rollout_response_item(ResponseItem::CustomToolCall {
+                encrypted_content: None,
                 id: None,
                 status: Some("completed".to_string()),
                 call_id: custom_call_id.to_string(),
@@ -2127,6 +2143,7 @@ async fn send_request_with_provider(provider: ModelProviderInfo) {
         config
             .features
             .enabled(Feature::ConcurrentReasoningSummaries),
+        /*output_token_replay_enabled*/ false,
         /*attestation_provider*/ None,
         config.http_client_factory(),
         config.workspace_routing_context(),
@@ -2147,6 +2164,8 @@ async fn send_request_with_provider(provider: ModelProviderInfo) {
     }
     let mut prompt = Prompt::default();
     prompt.input.push(ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -3626,6 +3645,7 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         /*include_timing_metrics*/ false,
         /*beta_features_header*/ None,
         /*concurrent_reasoning_summaries_enabled*/ false,
+        /*output_token_replay_enabled*/ false,
         /*attestation_provider*/ None,
         config.http_client_factory(),
         config.workspace_routing_context(),
@@ -3647,15 +3667,20 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         internal_chat_message_metadata_passthrough: None,
     });
     prompt.input.push(ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("msg", "message-id")),
         role: "assistant".into(),
         content: vec![ContentItem::OutputText {
+            annotations: None,
+            logprobs: None,
             text: "message".into(),
         }],
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     });
     prompt.input.push(ResponseItem::WebSearchCall {
+        encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("ws", "web-search-id")),
         status: Some("completed".into()),
         action: Some(WebSearchAction::Search {
@@ -3665,6 +3690,8 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         internal_chat_message_metadata_passthrough: None,
     });
     prompt.input.push(ResponseItem::FunctionCall {
+        status: None,
+        encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("fc", "function-id")),
         name: "do_thing".into(),
         namespace: None,
@@ -3682,6 +3709,7 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         internal_chat_message_metadata_passthrough: None,
     });
     prompt.input.push(ResponseItem::LocalShellCall {
+        encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("lsh", "local-shell-id")),
         call_id: Some("local-shell-call-id".into()),
         status: LocalShellStatus::Completed,
@@ -3695,6 +3723,7 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         internal_chat_message_metadata_passthrough: None,
     });
     prompt.input.push(ResponseItem::CustomToolCall {
+        encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("ctc", "custom-tool-id")),
         status: Some("completed".into()),
         call_id: "custom-tool-call-id".into(),
@@ -3758,17 +3787,18 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
     let input = body["input"].as_array().expect("request input");
     assert_eq!(input[0]["role"], "developer");
     let input = &input[1..];
-    assert_eq!(input.len(), 10);
-    assert_eq!(input[0]["id"].as_str(), Some("rs_reasoning-id"));
-    assert_eq!(input[1]["id"].as_str(), Some("msg_message-id"));
-    assert_eq!(input[2]["id"].as_str(), Some("ws_web-search-id"));
-    assert_eq!(input[3]["id"].as_str(), Some("fc_function-id"));
-    assert_eq!(input[4]["call_id"].as_str(), Some("function-call-id"));
-    assert_eq!(input[5]["id"].as_str(), Some("lsh_local-shell-id"));
-    assert_eq!(input[6]["id"].as_str(), Some("ctc_custom-tool-id"));
-    assert_eq!(input[7]["call_id"].as_str(), Some("custom-tool-call-id"));
+    // LocalDex drops plaintext reasoning items for official providers because the
+    // service cannot verify or replay them from a stored response.
+    assert_eq!(input.len(), 9);
+    assert_eq!(input[0]["id"].as_str(), Some("msg_message-id"));
+    assert_eq!(input[1]["id"].as_str(), Some("ws_web-search-id"));
+    assert_eq!(input[2]["id"].as_str(), Some("fc_function-id"));
+    assert_eq!(input[3]["call_id"].as_str(), Some("function-call-id"));
+    assert_eq!(input[4]["id"].as_str(), Some("lsh_local-shell-id"));
+    assert_eq!(input[5]["id"].as_str(), Some("ctc_custom-tool-id"));
+    assert_eq!(input[6]["call_id"].as_str(), Some("custom-tool-call-id"));
+    assert_eq!(input[7].get("id"), None);
     assert_eq!(input[8].get("id"), None);
-    assert_eq!(input[9].get("id"), None);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

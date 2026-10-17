@@ -68,6 +68,8 @@ async fn reported_features_have_boolean_tags_that_change_with_their_state() {
         .collect();
     expected.remove("feature.multi_agent");
     expected.remove("feature.enable_fanout");
+    // Fast mode is force-disabled, so `enable` can never flip its tag to true.
+    expected.insert("feature.fast_mode".to_string(), ("false", "false"));
     assert_eq!(
         actual,
         expected

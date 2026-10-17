@@ -7,6 +7,7 @@ use codex_config::CloudConfigBundlePolicy;
 use codex_config::CloudConfigBundleSnapshot;
 use codex_config::test_support::CloudConfigBundleFixture;
 use codex_login::test_support::auth_manager_from_optional_auth;
+use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::BaseInstructionsProvenance;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -189,7 +190,6 @@ async fn apply_role_preserves_unspecified_keys() {
     )])
     .await;
     config.codex_linux_sandbox_exe = Some(PathBuf::from("/tmp/codex-linux-sandbox"));
-    config.main_execve_wrapper_exe = Some(PathBuf::from("/tmp/codex-execve-wrapper"));
     let role_path = write_role_config(
         &home,
         "instructions-only.toml",
@@ -225,10 +225,6 @@ async fn apply_role_preserves_unspecified_keys() {
     assert_eq!(
         config.codex_linux_sandbox_exe,
         Some(PathBuf::from("/tmp/codex-linux-sandbox"))
-    );
-    assert_eq!(
-        config.main_execve_wrapper_exe,
-        Some(PathBuf::from("/tmp/codex-execve-wrapper"))
     );
     assert_eq!(config.base_instructions, base_instructions);
     assert_eq!(config.base_instructions_provenance, provenance);
@@ -332,7 +328,7 @@ async fn apply_role_refreshes_model_instructions_only_when_personality_opt_out_c
 }
 
 #[tokio::test]
-async fn apply_role_reports_explicit_service_tier() {
+async fn apply_role_remaps_explicit_fast_service_tier_to_default() {
     let (home, mut config) = test_config_with_cli_overrides(Vec::new()).await;
     let role_path = write_role_config(
         &home,
@@ -357,7 +353,7 @@ service_tier = "priority"
 
     assert_eq!(
         config.service_tier,
-        Some(ServiceTier::Fast.request_value().to_string())
+        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
     );
 }
 
