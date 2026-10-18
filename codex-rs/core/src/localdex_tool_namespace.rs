@@ -224,8 +224,10 @@ impl Names {
                     .unwrap_or_else(|| ToolName::plain(name.clone()));
                 *name = self.register(tool)?;
             }
-            ResponseItem::AdditionalTools { tools, .. }
-            | ResponseItem::ToolSearchOutput { tools, .. } => {
+            ResponseItem::AdditionalTools { tools, .. } => {
+                *tools = self.flatten_tools(tools.to_vec())?.into();
+            }
+            ResponseItem::ToolSearchOutput { tools, .. } => {
                 *tools = self.flatten_tools(std::mem::take(tools))?;
             }
             _ => {}
