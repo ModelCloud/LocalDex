@@ -165,7 +165,7 @@ async fn seeds_localdex_package_using_manifest_entrypoint() {
     let home = temp.path().join("home");
     let daemon = daemon(&home);
     let source = temp.path().join("localdex-package");
-    let localdex_bin = package_with_entrypoint(&source, "0.157.1", "bin/localdex");
+    let localdex_bin = package_with_entrypoint(&source, "0.163.0", "bin/localdex");
 
     prepare_from_package(
         &daemon,
