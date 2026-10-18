@@ -1179,7 +1179,7 @@ impl ModelClient {
                         Uuid::new_v5(&prefix_namespace, &serde_json::to_vec(&tools)?),
                     )),
                     role: "developer".to_string(),
-                    tools,
+                    tools: Arc::from(tools),
                 });
             }
             None
