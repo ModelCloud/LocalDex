@@ -20,6 +20,17 @@ CURRENT_LINK="$STANDALONE_ROOT/current"
 BIN_DIR="${LOCALDEX_INSTALL_DIR:-$HOME/.local/bin}"
 LOCAL_ARCHIVE="${LOCALDEX_ARCHIVE:-}"
 TMP_DIR=""
+PREFERRED_ASSET=""
+if [ "$TARGET" = "x86_64-unknown-linux-gnu" ] && [ -f /etc/os-release ]; then
+  # Ubuntu 24.04 needs glibc <= 2.39. The ordinary x86_64 asset may have been
+  # built on a newer system, so choose an OS-specific asset when available.
+  . /etc/os-release
+  case "${ID:-}:${VERSION_ID:-}" in
+    ubuntu:24.04|ubuntu:26.04)
+      PREFERRED_ASSET="localdex-package-$TARGET-ubuntu$VERSION_ID.tar.gz"
+      ;;
+  esac
+fi
 
 cleanup() {
   if [ -n "$TMP_DIR" ]; then
@@ -110,7 +121,22 @@ else
       # the releases as indented JSON with "tag_name" and "prerelease" ahead of
       # the asset list for each entry.
       download "https://api.github.com/repos/$REPOSITORY/releases?per_page=50" "$TMP_DIR/releases.json"
-      RELEASE="$(awk -v asset="\"$asset\"" '
+      if [ -n "$PREFERRED_ASSET" ]; then
+        RELEASE="$(awk -v asset="\"$PREFERRED_ASSET\"" '
+          /"tag_name"[[:space:]]*:/ {
+            line = $0
+            sub(/.*"tag_name"[[:space:]]*:[[:space:]]*"/, "", line)
+            sub(/".*/, "", line)
+            tag = line
+            prerelease = ""
+          }
+          /"prerelease"[[:space:]]*:/ && index($0, "true") > 0 { prerelease = "true" }
+          tag ~ /^localdex-/ && prerelease != "true" && index($0, asset) > 0 { print tag; exit }
+        ' "$TMP_DIR/releases.json")"
+        [ -z "$RELEASE" ] || asset="$PREFERRED_ASSET"
+      fi
+      if [ -z "$RELEASE" ] || [ "$RELEASE" = "latest" ]; then
+        RELEASE="$(awk -v asset="\"$asset\"" '
         /"tag_name"[[:space:]]*:/ {
           line = $0
           sub(/.*"tag_name"[[:space:]]*:[[:space:]]*"/, "", line)
@@ -120,7 +146,8 @@ else
         }
         /"prerelease"[[:space:]]*:/ && index($0, "true") > 0 { prerelease = "true" }
         tag ~ /^localdex-/ && prerelease != "true" && index($0, asset) > 0 { print tag; exit }
-      ' "$TMP_DIR/releases.json")"
+        ' "$TMP_DIR/releases.json")"
+      fi
       [ -n "$RELEASE" ] || {
         echo "No published LocalDex release provides $asset" >&2
         exit 1
@@ -138,8 +165,16 @@ else
       ;;
   esac
   release_url="https://github.com/$REPOSITORY/releases/download/$RELEASE"
-  download "$release_url/$asset" "$ARCHIVE"
-  download "$release_url/$asset.sha256" "$CHECKSUM"
+  if [ -n "$PREFERRED_ASSET" ] && [ "$asset" != "$PREFERRED_ASSET" ]; then
+    if download "$release_url/$PREFERRED_ASSET" "$ARCHIVE" \
+      && download "$release_url/$PREFERRED_ASSET.sha256" "$CHECKSUM"; then
+      asset="$PREFERRED_ASSET"
+    fi
+  fi
+  if [ "$asset" != "$PREFERRED_ASSET" ] || [ ! -s "$CHECKSUM" ]; then
+    download "$release_url/$asset" "$ARCHIVE"
+    download "$release_url/$asset.sha256" "$CHECKSUM"
+  fi
 fi
 
 if [ -f "$CHECKSUM" ]; then

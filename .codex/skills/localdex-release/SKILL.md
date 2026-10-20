@@ -16,6 +16,15 @@ cache and fast linker; the scripts skip both silently when the packages are miss
 3. Stage the three archives as `localdex-package-<target>.tar.gz`, plus a `.sha256` file for each and a combined `SHA256SUMS`. Confirm the manifest in each archive names the matching target and `localdex` variant, and confirm every checksum before upload.
 4. Publish the assets with `install-localdex.sh` to a commit-specific GitHub release tag such as `localdex-build-<version>-<shortsha>` when the workspace version already has a release. Keep existing version tags and their assets immutable. State the full source SHA in release notes and check that all three assets are downloadable after publishing.
 
+For Linux x86_64, also publish `localdex-package-x86_64-unknown-linux-gnu-ubuntu24.04.tar.gz`
+and `localdex-package-x86_64-unknown-linux-gnu-ubuntu26.04.tar.gz`, with checksums.
+Build the 24.04 asset on Ubuntu 24.04 using `scripts/build_localdex_linux_amd64_ubuntu2404.sh`;
+it links OpenSSL statically and checks that both binaries require at most glibc 2.39.
+Use `scripts/package_localdex_linux_amd64_ubuntu2604.sh` to bundle OpenSSL with the
+26.04 asset, then run both binaries on a clean Ubuntu 26.04 container. Run both
+binaries from the 24.04 asset on a clean Ubuntu 24.04 container. Include the
+OS-selecting `install-localdex.sh` in the release.
+
 The Linux release workflow in `.github/workflows/localdex-release-linux.yml` is tied to version tags and covers only the two Linux targets. A new merged commit with the same version still needs this three-platform publication.
 
 `scripts/install/install-localdex.sh` resolves `latest` by walking the published releases newest first and selecting the first one that ships the requested target, so a commit-specific release becomes installable as soon as its assets are uploaded. An explicit `--release` accepts either a version (`0.163.0`, `localdex-v0.163.0`) or a release tag (`localdex-build-0.163.0-18dbfada9`). Publish every platform before announcing a build: a release that is missing the asset for a target is skipped in favor of the next newest release that has it.
