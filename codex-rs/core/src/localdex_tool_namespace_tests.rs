@@ -8,6 +8,7 @@ use serde_json::json;
 fn request(tools: Vec<Value>, input: Vec<ResponseItem>) -> ResponsesApiRequest {
     ResponsesApiRequest {
         model: "zen5-cpu-0".into(),
+        max_output_tokens: None,
         input,
         tools: Some(Arc::<RawValue>::from(serde_json::value::to_raw_value(&tools).unwrap()).into()),
         tool_choice: "auto".into(),

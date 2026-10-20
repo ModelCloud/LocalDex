@@ -1215,6 +1215,87 @@ async fn responses_http_preserves_raw_tool_metadata_for_openai_custom_endpoint()
     Ok(())
 }
 
+#[test]
+fn classifies_loopback_and_private_responses_endpoints_as_local() {
+    for endpoint in [
+        "http://localhost:2120/v1",
+        "http://127.0.0.1:2120/v1",
+        "http://10.0.13.33:2120/v1",
+        "http://192.168.1.20:2120/v1",
+        "http://[::1]:2120/v1",
+    ] {
+        assert!(super::is_local_responses_endpoint(endpoint), "{endpoint}");
+    }
+    for endpoint in [
+        "https://api.openai.com/v1",
+        "https://example.com/v1",
+        "http://8.8.8.8/v1",
+    ] {
+        assert!(!super::is_local_responses_endpoint(endpoint), "{endpoint}");
+    }
+}
+
+#[tokio::test]
+async fn responses_http_sets_local_output_budget_and_continuation_opt_in() -> anyhow::Result<()> {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(
+            ResponseTemplate::new(/*status*/ 200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(concat!(
+                    "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-local\"}}\n\n",
+                    "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-local\"}}\n\n",
+                )),
+        )
+        .expect(/*requests*/ 1)
+        .mount(&server)
+        .await;
+    let mut provider =
+        ModelProviderInfo::create_openai_provider(Some(format!("{}/v1", server.uri())));
+    provider.requires_openai_auth = false;
+    provider.supports_websockets = false;
+    let mut client = test_model_client(SessionSource::Cli);
+    Arc::get_mut(&mut client.state)
+        .expect("test client should have unique session state")
+        .provider = create_model_provider(provider, /*auth_manager*/ None);
+    let responses_metadata = test_responses_metadata_for_client(
+        &client,
+        /*turn_id*/ None,
+        format!("{}:0", client.state.thread_id),
+        /*parent_thread_id*/ None,
+        TestCodexResponsesRequestKind::Turn,
+    );
+    let mut session = client.new_session();
+    let mut stream = session
+        .stream(
+            &Prompt::default(),
+            &test_model_info(),
+            &test_session_telemetry(),
+            /*effort*/ None,
+            codex_protocol::config_types::ReasoningSummary::None,
+            /*service_tier*/ None,
+            &responses_metadata,
+            &InferenceTraceContext::disabled(),
+        )
+        .await?;
+    while let Some(event) = stream.next().await {
+        event?;
+    }
+    let requests = server.received_requests().await.expect("received requests");
+    assert_eq!(requests.len(), 1);
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
+    assert_eq!(body["max_output_tokens"], 65_536);
+    assert_eq!(
+        requests[0]
+            .headers
+            .get("x-inference-lite-auto-continue")
+            .and_then(|value| value.to_str().ok()),
+        Some("true"),
+    );
+    Ok(())
+}
+
 #[test_case::test_case(false; "standard")]
 #[test_case::test_case(true; "responses_lite")]
 fn prefix_ids_track_thread_and_payload(responses_lite: bool) -> anyhow::Result<()> {

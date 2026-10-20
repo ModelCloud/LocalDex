@@ -122,6 +122,25 @@ use tracing::trace;
 use tracing::warn;
 use uuid::Uuid;
 
+const LOCAL_RESPONSES_MAX_OUTPUT_TOKENS: u64 = 65_536;
+const INFERENCE_LITE_AUTO_CONTINUE_HEADER: &str = "x-inference-lite-auto-continue";
+
+fn is_local_responses_endpoint(base_url: &str) -> bool {
+    let Ok(url) = url::Url::parse(base_url) else {
+        return false;
+    };
+    match url.host() {
+        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(host)) => {
+            host.is_loopback() || host.is_private() || host.is_link_local()
+        }
+        Some(url::Host::Ipv6(host)) => {
+            host.is_loopback() || host.is_unique_local() || host.is_unicast_link_local()
+        }
+        None => false,
+    }
+}
+
 use crate::attestation::AttestationContext;
 use crate::attestation::AttestationProvider;
 use crate::attestation::X_OAI_ATTESTATION_HEADER;
@@ -508,6 +527,7 @@ fn responses_request_properties_mismatch(
 ) -> Option<&'static str> {
     let ResponsesApiRequest {
         model: previous_model,
+        max_output_tokens: previous_max_output_tokens,
         input: _,
         previous_response_id: _,
         tools: previous_tools,
@@ -526,6 +546,7 @@ fn responses_request_properties_mismatch(
     } = previous;
     let ResponsesApiRequest {
         model: current_model,
+        max_output_tokens: current_max_output_tokens,
         input: _,
         previous_response_id: _,
         tools: current_tools,
@@ -547,6 +568,8 @@ fn responses_request_properties_mismatch(
     // referenced by `previous_response_id`.
     let reason = if previous_model != current_model {
         "model_changed"
+    } else if previous_max_output_tokens != current_max_output_tokens {
+        "max_output_tokens_changed"
     } else if previous_tools != current_tools {
         "tools_changed"
     } else if previous_tool_choice != current_tool_choice {
@@ -1270,6 +1293,7 @@ impl ModelClient {
         let client_metadata = responses_metadata.client_metadata(include_internal);
         let request = ResponsesApiRequest {
             model: model_info.slug.clone(),
+            max_output_tokens: None,
             input,
             previous_response_id: None,
             tools,
@@ -2213,6 +2237,13 @@ impl ResponsesHttpExecutor<'_> {
                 responses_metadata,
                 include_internal,
             )?;
+            if is_local_responses_endpoint(&client_setup.api_provider.base_url) {
+                request.max_output_tokens = Some(LOCAL_RESPONSES_MAX_OUTPUT_TOKENS);
+                options.extra_headers.insert(
+                    INFERENCE_LITE_AUTO_CONTINUE_HEADER,
+                    HeaderValue::from_static("true"),
+                );
+            }
             self.client.set_guardian_metadata(
                 &mut request.client_metadata,
                 responses_metadata.parent_response_id.as_deref(),

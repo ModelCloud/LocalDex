@@ -1054,6 +1054,7 @@ mod tests {
     fn direct_serialization_preserves_websocket_request_payload() {
         let api_request = ResponsesApiRequest {
             model: "gpt-test".to_string(),
+            max_output_tokens: Some(65_536),
             input: vec![ResponseItem::Message {
                 status: None,
                 encrypted_content: None,
@@ -1109,7 +1110,7 @@ mod tests {
         let request_text =
             serialize_websocket_request(&request).expect("serialize websocket request");
         assert!(request_text.starts_with(
-            r#"{"type":"response.create","model":"gpt-test","stream":true,"service_tier":"priority","previous_response_id":"resp-1","input":"#
+            r#"{"type":"response.create","model":"gpt-test","stream":true,"service_tier":"priority","max_output_tokens":65536,"previous_response_id":"resp-1","input":"#
         ));
         let wire_payload =
             serde_json::from_str::<Value>(&request_text).expect("parse websocket request");
