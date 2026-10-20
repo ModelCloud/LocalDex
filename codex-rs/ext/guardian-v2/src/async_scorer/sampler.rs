@@ -235,6 +235,7 @@ impl LunaSampler {
     ) -> execution::SamplingExecution {
         let api_request = ResponsesApiRequest {
             model: MODEL.to_owned(),
+            max_output_tokens: None,
             input,
             previous_response_id: None,
             tools: None,
