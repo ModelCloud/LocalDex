@@ -7,6 +7,7 @@ use crate::common::ResponseEvent;
 use bytes::Bytes;
 use codex_client::StreamResponse;
 use codex_http_client::RetryAfter;
+use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::protocol::CodexErrorInfo;
 use futures::StreamExt;
 use futures::stream;
@@ -66,6 +67,43 @@ async fn incomplete_response_is_terminal_without_waiting_for_eof() {
             assert!(response_stream.next().await.is_none());
         }
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn incomplete_context_window_triggers_compaction_without_waiting_for_eof() {
+    let incomplete = json!({
+        "type": "response.incomplete",
+        "response": {
+            "id": "resp-context-full",
+            "incomplete_details": {"reason": "context_length_exceeded"}
+        }
+    });
+    let bytes =
+        stream::iter([Ok(Bytes::from(format!("data: {incomplete}\n\n")))]).chain(stream::pending());
+    let mut response_stream = spawn_response_stream(
+        StreamResponse {
+            status: StatusCode::OK,
+            headers: HeaderMap::new(),
+            bytes: Box::pin(bytes),
+        },
+        Duration::from_secs(60),
+        None,
+        None,
+    );
+    let started = tokio::time::Instant::now();
+    let error = loop {
+        match response_stream.next().await {
+            Some(Ok(ResponseEvent::RateLimits(_))) => {}
+            Some(Err(error)) => break map_api_error(error),
+            event => panic!("expected context-window error, got {event:?}"),
+        }
+    };
+    assert!(
+        matches!(error.details(), CodexErrorDetails::ContextWindowExceeded),
+        "{error:?}"
+    );
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    assert!(response_stream.next().await.is_none());
 }
 
 #[test]

@@ -435,6 +435,9 @@ pub fn process_responses_event(
                 if reason == "content_filter" {
                     return Err(ResponsesEventError::Api(ApiError::ContentFilter));
                 }
+                if reason == "context_length_exceeded" {
+                    return Err(ResponsesEventError::Api(ApiError::ContextWindowExceeded));
+                }
                 if reason != "interrupted" {
                     let response = event.response.as_ref();
                     let response_id = response
@@ -664,7 +667,9 @@ async fn process_sse_with_treatment(
                 let error = error.into_api_error();
                 if matches!(
                     error,
-                    ApiError::FlexUnavailable | ApiError::ResponseIncomplete(_)
+                    ApiError::FlexUnavailable
+                        | ApiError::ResponseIncomplete(_)
+                        | ApiError::ContextWindowExceeded
                 ) {
                     let _ = tx_event.send(Err(error)).await;
                     return;
