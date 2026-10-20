@@ -194,6 +194,17 @@ pub(crate) async fn run_turn(
                 .await
                 .new_session()
         };
+    // Pre-sampling compaction runs before the new prompt is recorded. Treat a
+    // non-empty user prompt as an explicit retry of the previous failed
+    // compaction so the unchanged-history guard only suppresses automatic loops.
+    if auto_compaction_enabled
+        && turn_context.provider.info().localdex_compatibility
+        && input
+            .iter()
+            .any(|item| matches!(item, TurnInput::UserInput { content, .. } if !content.is_empty()))
+    {
+        sess.set_failed_auto_compact_context(None).await;
+    }
     // TODO(ccunningham): Pre-turn compaction runs before context updates and the
     // new user message are recorded. Estimate pending incoming items (context
     // diffs/full reinjection + user input) and trigger compaction preemptively

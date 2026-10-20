@@ -204,6 +204,123 @@ async fn failed_localdex_compaction_allows_new_user_context() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_localdex_compaction_retries_on_next_user_prompt() -> Result<()> {
+    let server = MockServer::start().await;
+    let answer = "A long answer. ".repeat(4_000);
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_assistant_message("answer-1", &answer),
+                ev_completed_with_tokens("answer-1", 285_000),
+            ]),
+            sse_failed(
+                "failed-compact",
+                "server_error",
+                "malformed compaction output",
+            ),
+            sse(vec![
+                ev_assistant_message("summary", "Concise summary."),
+                ev_completed_with_tokens("compact-2", 10),
+            ]),
+            sse(vec![
+                ev_assistant_message("answer-2", "The prompt was accepted."),
+                ev_completed_with_tokens("answer-2", 100),
+            ]),
+        ],
+    )
+    .await;
+    let mut providers = merge_configured_model_providers(
+        Default::default(),
+        std::collections::HashMap::from([(
+            LOCALDEX_PROVIDER_ID.to_string(),
+            create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), WireApi::Responses),
+        )]),
+    )
+    .expect("LocalDex provider should normalize");
+    let mut provider = providers
+        .remove(LOCALDEX_PROVIDER_ID)
+        .expect("LocalDex provider should be configured");
+    provider.stream_max_retries = Some(0);
+    let test = test_codex()
+        .with_model_info_override("QB/DSV4.1-Flash", |info| {
+            info.context_window = Some(200_000);
+            info.max_context_window = None;
+        })
+        .with_config(move |config| {
+            config.model_provider_id = LOCALDEX_PROVIDER_ID.to_string();
+            config
+                .model_providers
+                .insert(LOCALDEX_PROVIDER_ID.to_string(), provider.clone());
+            config.model_provider = provider;
+            config.model_auto_compact_token_limit = Some(100_000);
+            config.model_post_turn_compact_threshold_percent = 1;
+            let _ = config.features.disable(Feature::TokenBudget);
+            set_test_compact_prompt(config);
+        })
+        .build_with_auto_env(&server)
+        .await?;
+
+    let mut warnings = Vec::new();
+    for (index, message) in ["First user turn", "Retry after failed compaction"]
+        .into_iter()
+        .enumerate()
+    {
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: message.to_string(),
+                    text_elements: vec![],
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    model: Some("QB/DSV4.1-Flash".to_string()),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        let completed = wait_for_event(&test.codex, |event| {
+            if let EventMsg::Warning(warning) = event {
+                warnings.push(warning.message.clone());
+            }
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        let EventMsg::TurnComplete(completed) = completed else {
+            unreachable!()
+        };
+        if index == 1 {
+            assert_eq!(
+                completed.error, None,
+                "the explicit retry should complete after compaction"
+            );
+        }
+    }
+
+    let requests = mock.requests();
+    assert_eq!(
+        requests.len(),
+        4,
+        "the first prompt after failure must retry compaction"
+    );
+    assert!(!body_contains_text(
+        &requests[0].body_json().to_string(),
+        SUMMARIZATION_PROMPT
+    ));
+    assert!(body_contains_text(
+        &requests[2].body_json().to_string(),
+        SUMMARIZATION_PROMPT
+    ));
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| warning.contains("unchanged context")),
+        "the explicit user retry must not hit the unchanged-context guard: {warnings:?}"
+    );
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
 #[test_case::test_case("openai", "localdex", "gpt-5.5", "QB/DSV4.1-Flash"; "openai_to_localdex")]
 #[test_case::test_case("localdex", "openai", "QB/DSV4.1-Flash", "gpt-5.5"; "localdex_to_openai")]
 #[test_case::test_case("omnigent-localdex-test", "openai", "QB/DSV4.1-Flash", "gpt-5.5"; "namespaced_localdex_to_openai")]
