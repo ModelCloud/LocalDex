@@ -247,6 +247,8 @@ impl ConfigLayerEntry {
 pub struct ConfigLayerStack {
     /// Runtime-only EMA authority; it does not change the configuration's contents.
     cloud_config_binding: Option<crate::CloudConfigBundleBinding>,
+    /// Runtime-only cancellation inherited by config snapshots and pending EMA startups.
+    mcp_ema_cancellation: crate::McpEmaCancellation,
     /// Cached TOML projection derived only from `requirements_toml`.
     /// Construction validates provider definitions and reports serialization errors,
     /// so `effective_config()` can replace complete entries without a fallible conversion.
@@ -279,6 +281,7 @@ impl PartialEq for ConfigLayerStack {
     fn eq(&self, other: &Self) -> bool {
         let Self {
             cloud_config_binding: _,
+            mcp_ema_cancellation: _,
             model_provider_requirements,
             layers,
             requirements,
@@ -309,8 +312,9 @@ impl ConfigLayerStack {
         let model_provider_requirements = Some(crate::model_provider_requirements::to_config(
             &requirements_toml,
         )?);
-        Ok(Self {
+        let stack = Self {
             cloud_config_binding: None,
+            mcp_ema_cancellation: crate::McpEmaCancellation::default(),
             model_provider_requirements,
             layers,
             requirements,
@@ -318,7 +322,31 @@ impl ConfigLayerStack {
             ignore_user_and_project_exec_policy_rules: false,
             startup_warnings: None,
             is_projectless: false,
-        })
+        };
+        stack.validate_project_mitm_profiles()?;
+        Ok(stack)
+    }
+
+    /// Recheck project provenance after combining layer snapshots as well as on initial load.
+    pub fn validate_project_mitm_profiles(&self) -> std::io::Result<()> {
+        crate::loader::validate_project_mitm_profiles(
+            self.layers_low_to_high()
+                .map(|layer| (&layer.name, &layer.config)),
+            self.requirements_toml
+                .permissions
+                .iter()
+                .flat_map(|permissions| permissions.profiles.iter())
+                .map(|(name, profile)| {
+                    (
+                        name.clone(),
+                        profile.extends.clone(),
+                        profile
+                            .network
+                            .as_ref()
+                            .is_some_and(|network| network.mitm.is_some()),
+                    )
+                }),
+        )
     }
 
     pub fn with_user_and_project_exec_policy_rules_ignored(
@@ -343,6 +371,15 @@ impl ConfigLayerStack {
 
     pub fn cloud_config_binding(&self) -> Option<&crate::CloudConfigBundleBinding> {
         self.cloud_config_binding.as_ref()
+    }
+
+    pub fn with_mcp_ema_cancellation(mut self, cancellation: crate::McpEmaCancellation) -> Self {
+        self.mcp_ema_cancellation = cancellation;
+        self
+    }
+
+    pub fn mcp_ema_cancellation(&self) -> &crate::McpEmaCancellation {
+        &self.mcp_ema_cancellation
     }
 
     /// Retains session layers while adopting current MCP, plugin, and feature restrictions.
@@ -476,6 +513,7 @@ impl ConfigLayerStack {
         Ok(Self {
             layers,
             cloud_config_binding: self.cloud_config_binding.clone(),
+            mcp_ema_cancellation: self.mcp_ema_cancellation.clone(),
             model_provider_requirements: self.model_provider_requirements.clone(),
             requirements: self.requirements.clone(),
             requirements_toml: self.requirements_toml.clone(),
@@ -513,6 +551,7 @@ impl ConfigLayerStack {
         Self {
             layers,
             cloud_config_binding: self.cloud_config_binding.clone(),
+            mcp_ema_cancellation: self.mcp_ema_cancellation.clone(),
             model_provider_requirements: self.model_provider_requirements.clone(),
             requirements: self.requirements.clone(),
             requirements_toml: self.requirements_toml.clone(),

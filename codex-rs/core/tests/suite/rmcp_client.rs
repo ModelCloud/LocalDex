@@ -1954,6 +1954,18 @@ async fn startup_prewarm_connects_before_delayed_mcp_tools_then_reuses_socket(
     assert_eq!(first_turn["type"], "response.create");
     assert!(first_turn.get("generate").is_none());
     assert_eq!(first_turn["previous_response_id"], "warm-1");
+    let tool_body = if use_responses_lite {
+        first_turn["input"]
+            .as_array()
+            .and_then(|items| items.iter().find(|item| item["type"] == "additional_tools"))
+            .context("first Responses Lite turn should declare discovered tools")?
+    } else {
+        &prewarm
+    };
+    assert!(
+        responses::namespace_child_tool(tool_body, namespace, "echo").is_some(),
+        "startup should declare the discovered MCP echo tool before sampling: {tool_body:?}"
+    );
     let handshakes = server.handshakes();
     assert_eq!(handshakes.len(), connection_index + 1);
     if close_eager_socket {
@@ -2102,6 +2114,15 @@ async fn interrupt_during_mcp_startup_preserves_user_input_in_history(
             )
         })
         .expect("an interrupted turn should retain its submitted user prompt");
+    assert!(
+        history.items[..user_prompt_index]
+            .iter()
+            .any(|item| matches!(
+                item,
+                RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(applied))
+                    if applied.thread_id == Some(fixture.session_configured.thread_id)
+            ))
+    );
     let RolloutItem::ResponseItem(envelope) = &history.items[user_prompt_index] else {
         unreachable!("found the user prompt");
     };
