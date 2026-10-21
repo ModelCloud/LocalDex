@@ -154,7 +154,8 @@ async fn check_suggestion(scenario: Scenario) -> color_eyre::Result<()> {
                     app.handle_event(&mut tui, &mut app_server, event).await?;
 
                 }
-                Some(event) = app_server.next_event() => {
+                Some(session_event) = app_server.next_event() => {
+                    let event = session_event.event;
                     if let AppServerEvent::ServerNotification(notification) = &event {
                         if let ServerNotification::TurnCompleted(completed) = notification.as_ref()
                             && completed.thread_id != thread_id.to_string()
