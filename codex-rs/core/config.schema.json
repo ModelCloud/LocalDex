@@ -3123,6 +3123,7 @@
       "type": "object"
     },
     "NetworkMitmActionToml": {
+      "additionalProperties": false,
       "properties": {
         "inject_request_headers": {
           "default": [],
@@ -3176,6 +3177,15 @@
           },
           "type": "array"
         },
+        "ports": {
+          "default": [],
+          "items": {
+            "format": "uint16",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
         "query": {
           "additionalProperties": {
             "items": {
@@ -3185,6 +3195,13 @@
           },
           "default": {},
           "type": "object"
+        },
+        "schemes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -3196,9 +3213,14 @@
       "type": "object"
     },
     "NetworkMitmInjectedHeaderToml": {
+      "additionalProperties": false,
       "properties": {
         "name": {
           "default": "",
+          "type": "string"
+        },
+        "placeholder": {
+          "default": null,
           "type": "string"
         },
         "prefix": {
@@ -3230,6 +3252,13 @@
             "$ref": "#/definitions/NetworkMitmHookToml"
           },
           "type": "object"
+        },
+        "version": {
+          "description": "Set to 2 when using origin-scoped hooks or credential substitution.",
+          "format": "uint8",
+          "maximum": 2.0,
+          "minimum": 2.0,
+          "type": "integer"
         }
       },
       "type": "object"
