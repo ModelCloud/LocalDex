@@ -18,7 +18,6 @@ use codex_features::Feature;
 use codex_features::feature_for_key;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
-use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::config_types::Verbosity;
 use codex_protocol::models::BaseInstructionsProvenance;
@@ -202,13 +201,10 @@ mod role_overrides {
         }
         if let Some(service_tier) = &overrides.service_tier {
             next_config.service_tier = match ServiceTier::from_request_value(service_tier) {
-                Some(ServiceTier::Fast) if next_config.features.enabled(Feature::FastMode) => {
-                    Some(ServiceTier::Fast.request_value().to_string())
-                }
-                // LocalDex force-disables Fast mode: role-level `fast`/`priority`
-                // preferences are remapped to explicit standard routing instead of
-                // being dropped, so a role can never carry the paid tier.
-                Some(ServiceTier::Fast) => Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string()),
+                Some(ServiceTier::Fast) => next_config
+                    .features
+                    .enabled(Feature::FastMode)
+                    .then(|| ServiceTier::Fast.request_value().to_string()),
                 Some(ServiceTier::Flex) => Some(ServiceTier::Flex.request_value().to_string()),
                 None if service_tier == "ultrafast" => next_config
                     .features

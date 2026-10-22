@@ -1207,15 +1207,9 @@ pub(crate) fn get_service_tier(
     if service_tier == ServiceTier::Flex.request_value() {
         return Some(service_tier);
     }
-    if !features.service_tier_enabled(&service_tier) {
-        // LocalDex force-disables Fast mode: never forward the paid fast tier.
-        // Pin explicit standard routing instead so neither the request nor the
-        // stored session state can carry `priority`.
-        return (ServiceTier::from_request_value(&service_tier) == Some(ServiceTier::Fast))
-            .then(|| SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string());
-    }
-    if service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
-        || model_info.supports_service_tier(&service_tier)
+    if features.service_tier_enabled(&service_tier)
+        && (service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
+            || model_info.supports_service_tier(&service_tier))
     {
         return Some(service_tier);
     }

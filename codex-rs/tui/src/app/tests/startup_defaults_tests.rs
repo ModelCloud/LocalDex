@@ -210,9 +210,7 @@ async fn cli_fork_omits_implicit_model_and_effort() -> Result<()> {
     assert_eq!(fork.len(), 1);
     assert_eq!(fork[0]["model"], serde_json::Value::Null);
     assert!(fork[0]["config"].get("model_reasoning_effort").is_none());
-    // LocalDex force-disables Fast mode, so forks pin explicit standard routing
-    // instead of letting a stored fast tier carry into the forked thread.
-    assert_eq!(fork[0]["serviceTier"], serde_json::json!("default"));
+    assert_eq!(fork[0]["serviceTier"], serde_json::Value::Null);
     assert!(recorded_params(&requests, "config/read").is_empty());
     drop(run);
     proxy.abort();

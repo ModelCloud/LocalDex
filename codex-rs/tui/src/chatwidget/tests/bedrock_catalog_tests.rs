@@ -215,9 +215,7 @@ async fn bedrock_ultrafast_slash_command_selects_and_clears_tier() {
             .await;
         chat.model_catalog = Arc::new(ModelCatalog::new(presets));
         chat.set_service_tier(/*service_tier*/ None);
-        // LocalDex requires an explicit speed-tier selection, so the catalog's
-        // default tier is not adopted just because the model changed.
-        assert_eq!(chat.current_service_tier(), None);
+        assert_eq!(chat.current_service_tier(), Some("ultrafast"));
         chat.set_service_tier(Some("default".to_string()));
         assert_eq!(chat.current_service_tier(), Some("default"));
         chat.bottom_pane

@@ -497,18 +497,12 @@ async fn dynamic_service_tier_command_returns_to_latest() -> Result<()> {
     assert_matches!(&follow, AppEvent::FollowTranscript);
     app.handle_event(&mut tui, &mut server, follow).await?;
     assert!(app.transcript_view.is_following());
-    // LocalDex force-disables Fast mode: `/fast` is refused before it can
-    // persist a selection or forward a tier to the app server.
     assert!(
-        !std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
+        std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
             event,
-            AppEvent::PersistServiceTierSelection { .. }
-                | AppEvent::CodexOp(Op::OverrideTurnContext {
-                    service_tier: Some(_),
-                    ..
-                })
-        )),
-        "force-disabled /fast must not change the service tier"
+            AppEvent::PersistServiceTierSelection { service_tier: Some(tier) }
+                if tier == ServiceTier::Fast.request_value()
+        ))
     );
 
     tui.set_owned_screen(/*owned*/ false)?;
