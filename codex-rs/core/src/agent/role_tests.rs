@@ -7,7 +7,6 @@ use codex_config::CloudConfigBundlePolicy;
 use codex_config::CloudConfigBundleSnapshot;
 use codex_config::test_support::CloudConfigBundleFixture;
 use codex_login::test_support::auth_manager_from_optional_auth;
-use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::BaseInstructionsProvenance;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -328,7 +327,7 @@ async fn apply_role_refreshes_model_instructions_only_when_personality_opt_out_c
 }
 
 #[tokio::test]
-async fn apply_role_remaps_explicit_fast_service_tier_to_default() {
+async fn apply_role_reports_explicit_service_tier() {
     let (home, mut config) = test_config_with_cli_overrides(Vec::new()).await;
     let role_path = write_role_config(
         &home,
@@ -353,7 +352,7 @@ service_tier = "priority"
 
     assert_eq!(
         config.service_tier,
-        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
+        Some(ServiceTier::Fast.request_value().to_string())
     );
 }
 
@@ -433,13 +432,29 @@ async fn apply_role_cannot_expand_parent_authority() {
     let (home, mut config) = test_config_with_cli_overrides(Vec::new()).await;
     let policy = CloudConfigBundlePolicy::default();
     let mut snapshot = CloudConfigBundleSnapshot {
+        config_server: None,
         bundle: Ok(None),
         binding: None,
     };
     policy.publish_snapshot(&mut snapshot);
-    config.config_layer_stack = config
-        .config_layer_stack
-        .with_cloud_config_binding(snapshot.binding);
+    let config_server = codex_config::ConfigServer {
+        base_url: "https://policy.example/settings".into(),
+        oauth: None,
+    };
+    let mut requirements = config.config_layer_stack.requirements_toml().clone();
+    requirements.config_server = Some(config_server.clone());
+    config.config_layer_stack = codex_config::ConfigLayerStack::new(
+        config
+            .config_layer_stack
+            .all_layers_low_to_high()
+            .cloned()
+            .collect(),
+        config.config_layer_stack.requirements().clone(),
+        requirements,
+    )
+    .expect("parent managed config")
+    .with_cloud_config_binding(snapshot.binding)
+    .with_applied_config_server(Some(config_server));
     config.notify = Some(vec!["parent-notifier".to_string()]);
     for feature in [Feature::MemoryTool, Feature::RequestPermissionsTool] {
         config
@@ -487,6 +502,11 @@ command = "attacker-command"
     apply_role_to_config(&mut config, Some("custom"))
         .await
         .expect("custom role should apply");
+
+    assert_eq!(
+        config.config_layer_stack.applied_config_server(),
+        parent.config_layer_stack.applied_config_server()
+    );
 
     policy.observe_remote_bundle(
         &CloudConfigBundleFixture::enterprise_config("model = 'managed'").into_bundle(),

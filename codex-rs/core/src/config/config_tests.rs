@@ -5602,6 +5602,10 @@ fn filter_plugin_mcp_servers_by_matchers_enforces_name_and_invocation() {
 
 #[tokio::test]
 async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result<()> {
+    let service_config = codex_config::ConfigServer {
+        base_url: "https://policy.example/settings".into(),
+        oauth: None,
+    };
     let codex_home = TempDir::new()?;
     let user_file = AbsolutePathBuf::resolve_path_against_base(CONFIG_TOML_FILE, codex_home.path());
     let project_dot_codex =
@@ -5641,6 +5645,7 @@ async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result
         ),
     ]);
     let requirements_toml = codex_config::ConfigRequirementsToml {
+        config_server: Some(service_config.clone()),
         mcp_servers: Some(mcp_requirements.clone()),
         ..Default::default()
     };
@@ -5687,7 +5692,8 @@ async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result
         requirements,
         requirements_toml,
     )
-    .map_err(std::io::Error::other)?;
+    .map_err(std::io::Error::other)?
+    .with_applied_config_server(Some(service_config));
     let thread_layer_stack = ConfigLayerStack::new(
         vec![
             ConfigLayerEntry::new(
@@ -5762,6 +5768,26 @@ async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result
         codex_home.abs(),
     )
     .await?;
+    assert_eq!(
+        config.config_layer_stack.applied_config_server(),
+        refreshed_layer_stack.applied_config_server()
+    );
+
+    // User-only refreshes keep this policy; managed refreshes must supply it.
+    let mut missing_policy = config.clone();
+    missing_policy.config_layer_stack = missing_policy
+        .config_layer_stack
+        .with_applied_config_server(/*service_config*/ None);
+    assert!(
+        config
+            .resolve_runtime_refresh(&missing_policy, RuntimeConfigRefresh::User)
+            .is_ok()
+    );
+    assert!(
+        config
+            .resolve_runtime_refresh(&missing_policy, RuntimeConfigRefresh::Mcp)
+            .is_err()
+    );
 
     assert_eq!(
         config.mcp_servers.get(),
@@ -10352,8 +10378,7 @@ async fn default_service_tier_override_uses_default_request_value() -> std::io::
 }
 
 #[tokio::test]
-async fn legacy_fast_service_tier_override_remaps_to_default_when_fast_mode_disabled()
--> std::io::Result<()> {
+async fn legacy_fast_service_tier_override_uses_priority_request_value() -> std::io::Result<()> {
     let fixture = create_test_fixture()?;
 
     let config = Config::load_from_base_config_with_overrides(
@@ -10369,14 +10394,13 @@ async fn legacy_fast_service_tier_override_remaps_to_default_when_fast_mode_disa
 
     assert_eq!(
         config.service_tier,
-        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
+        Some(ServiceTier::Fast.request_value().to_string())
     );
     Ok(())
 }
 
 #[tokio::test]
-async fn config_toml_priority_service_tier_remaps_to_default_when_fast_mode_disabled()
--> std::io::Result<()> {
+async fn config_toml_priority_service_tier_uses_priority_request_value() -> std::io::Result<()> {
     let mut fixture = create_test_fixture()?;
     fixture.cfg.service_tier = Some(ServiceTier::Fast.request_value().to_string());
     let cwd = fixture.cwd_path();
@@ -10394,7 +10418,7 @@ async fn config_toml_priority_service_tier_remaps_to_default_when_fast_mode_disa
 
     assert_eq!(
         config.service_tier,
-        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
+        Some(ServiceTier::Fast.request_value().to_string())
     );
     Ok(())
 }
@@ -10424,8 +10448,7 @@ async fn config_toml_service_tier_accepts_arbitrary_string() -> std::io::Result<
 }
 
 #[tokio::test]
-async fn config_toml_legacy_fast_service_tier_remaps_to_default_when_fast_mode_disabled()
--> std::io::Result<()> {
+async fn config_toml_legacy_fast_service_tier_uses_priority_request_value() -> std::io::Result<()> {
     let mut fixture = create_test_fixture()?;
     fixture.cfg.service_tier = Some("fast".to_string());
     let cwd = fixture.cwd_path();
@@ -10443,7 +10466,7 @@ async fn config_toml_legacy_fast_service_tier_remaps_to_default_when_fast_mode_d
 
     assert_eq!(
         config.service_tier,
-        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
+        Some(ServiceTier::Fast.request_value().to_string())
     );
     Ok(())
 }
@@ -10478,6 +10501,7 @@ async fn test_requirements_web_search_mode_allowlist_does_not_warn_when_unset() 
     let fixture = create_test_fixture()?;
 
     let requirements_toml = codex_config::ConfigRequirementsToml {
+        config_server: None,
         model_provider: None,
         model_providers: None,
         allowed_login_methods: None,

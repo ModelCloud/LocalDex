@@ -597,6 +597,9 @@ impl Session {
     }
 
     async fn spawn_internal(args: SessionSpawnArgs) -> CodexResult<(Arc<Self>, SessionIo)> {
+        args.config
+            .config_layer_stack
+            .ensure_config_server_applied()?;
         args.config.validate_windows_mxc_requirement()?;
         let SessionSpawnArgs {
             startup,
@@ -1207,15 +1210,9 @@ pub(crate) fn get_service_tier(
     if service_tier == ServiceTier::Flex.request_value() {
         return Some(service_tier);
     }
-    if !features.service_tier_enabled(&service_tier) {
-        // LocalDex force-disables Fast mode: never forward the paid fast tier.
-        // Pin explicit standard routing instead so neither the request nor the
-        // stored session state can carry `priority`.
-        return (ServiceTier::from_request_value(&service_tier) == Some(ServiceTier::Fast))
-            .then(|| SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string());
-    }
-    if service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
-        || model_info.supports_service_tier(&service_tier)
+    if features.service_tier_enabled(&service_tier)
+        && (service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
+            || model_info.supports_service_tier(&service_tier))
     {
         return Some(service_tier);
     }
@@ -4020,8 +4017,6 @@ impl Session {
                 .executor_capability_discovery_for_step_v2(&turn_context.config, &environments)
                 .await;
             let v2_snapshots = executor_capability_discovery_v2.as_ref();
-            // V1 discovery is still retained on StepContext for executor Stop/Interrupt hooks.
-            // TODO: Prepare hook sources at capture time, including V2, instead.
             let (executor_capability_discovery, discovery_recovered) = if v2_snapshots.is_some() {
                 (None, false)
             } else {
@@ -4096,6 +4091,12 @@ impl Session {
                     .or_cancel(cancellation_token)
                     .await?;
             }
+            let executor_hook_sources = crate::hook_runtime::prepare_executor_hook_sources(
+                &mcp,
+                &selected_plugins,
+                executor_capability_discovery.as_deref(),
+                executor_capability_discovery_v2.as_deref(),
+            );
             extension_data.insert(selected_plugins);
             let tool_router = turn::built_tools(
                 self.as_ref(),
@@ -4107,12 +4108,7 @@ impl Session {
                 prepared_recommendations,
             )
             .await?;
-            Ok::<_, CodexErr>((
-                executor_capability_discovery,
-                mcp,
-                tool_router,
-                extension_data,
-            ))
+            Ok::<_, CodexErr>((executor_hook_sources, mcp, tool_router, extension_data))
         });
         // Returned warnings must finish delivery even if tools fail or preparation is cancelled.
         let (loaded_agents_md, prepared_tools) =
@@ -4121,7 +4117,7 @@ impl Session {
         if cancellation_token.is_cancelled() {
             return Err(CodexErr::TurnAborted);
         }
-        let (executor_capability_discovery, mcp, tool_router, extension_data) = prepared_tools??;
+        let (executor_hook_sources, mcp, tool_router, extension_data) = prepared_tools??;
         Ok(Arc::new(StepContext {
             preempt: turn_context
                 .config
@@ -4136,7 +4132,7 @@ impl Session {
             extension_data,
             environments,
             inherited_environments,
-            executor_capability_discovery,
+            executor_hook_sources,
             mcp,
             tool_router,
             loaded_agents_md,

@@ -270,15 +270,6 @@ fn parse_feature_requirements(
             );
             continue;
         }
-        if key == Feature::FastMode.key() {
-            push_feature_requirement_warning(
-                &mut startup_warnings,
-                format!(
-                    "Ignoring `features` requirement `{key}` from {source}; Fast mode is disabled in this build."
-                ),
-            );
-            continue;
-        }
         if key == "auto_review" {
             pinned_features.insert(Feature::GuardianApproval, enabled);
             continue;

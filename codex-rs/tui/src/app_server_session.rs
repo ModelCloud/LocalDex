@@ -135,12 +135,10 @@ use codex_app_server_protocol::TurnSteerParams;
 use codex_app_server_protocol::TurnSteerResponse;
 use codex_app_server_protocol::UserInput;
 use codex_config::ConfigLayerSource;
-use codex_features::Feature;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::ThreadId;
 use codex_protocol::approvals::GuardianAssessmentEvent;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
-use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::BaseInstructionsProvenance;
 use codex_protocol::models::PermissionProfile;
@@ -2070,23 +2068,10 @@ fn remove_permission_config_overrides(config: &mut Option<HashMap<String, serde_
 
 fn service_tier_override_from_config(config: &Config) -> Option<Option<String>> {
     let local_settings = LocalSettings::from(config);
-    let configured =
-        service_tier_resolution::configured_service_tier(config, &local_settings.notices);
-    // LocalDex force-disables Fast mode. Always pin an explicit tier so starting,
-    // forking, or resuming a thread can never keep or regress to a stored `/fast`
-    // tier: the configured flex tier when present, otherwise the `default`
-    // sentinel that records explicit standard routing.
-    let service_tier = match configured {
-        Some(service_tier)
-            if ServiceTier::from_request_value(&service_tier) == Some(ServiceTier::Fast)
-                && !config.features.enabled(Feature::FastMode) =>
-        {
-            SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string()
-        }
-        Some(service_tier) => service_tier,
-        None => SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string(),
-    };
-    Some(Some(service_tier))
+    config.service_tier.clone().map(Some).or_else(|| {
+        (local_settings.notices.fast_default_opt_out == Some(true))
+            .then(|| Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string()))
+    })
 }
 
 fn sandbox_mode_from_permission_profile(
@@ -3629,9 +3614,7 @@ mod tests {
             /*remote_cwd_override*/ None,
         );
 
-        // Fast mode is force-disabled, so a configured fast tier is pinned to the
-        // explicit `default` sentinel instead of being forwarded as `priority`.
-        let expected_service_tier = Some(Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string()));
+        let expected_service_tier = Some(Some(ServiceTier::Fast.request_value().to_string()));
         assert_eq!(start.service_tier, expected_service_tier);
         assert_eq!(resume.service_tier, expected_service_tier);
         assert_eq!(fork.service_tier, expected_service_tier);
@@ -3784,7 +3767,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn thread_resume_params_rejoin_pins_explicit_default_when_not_selected() {
+    async fn thread_resume_params_rejoin_leaves_service_tier_unset_when_not_selected() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let config = build_config(&temp_dir).await;
         let thread_id = ThreadId::new();
@@ -3798,10 +3781,7 @@ mod tests {
             crate::resume_permissions::ResumePermissions::CURRENT_CONFIG,
         );
 
-        assert_eq!(
-            params.service_tier,
-            Some(Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string()))
-        );
+        assert_eq!(params.service_tier, None);
     }
 
     #[tokio::test]
@@ -3839,7 +3819,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn persisted_resume_pins_explicit_default_instead_of_stored_fast_tier() -> Result<()> {
+    async fn persisted_resume_does_not_forward_implicit_service_tier() -> Result<()> {
         let codex_home = tempfile::tempdir().expect("tempdir");
         let mut config = build_config(&codex_home).await;
         config.model = Some("gpt-5.5".to_string());
@@ -3882,10 +3862,7 @@ mod tests {
             )
             .await?;
 
-        assert_eq!(
-            resumed.session.service_tier,
-            Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
-        );
+        assert_eq!(resumed.session.service_tier, None);
         app_server.shutdown().await?;
         Ok(())
     }

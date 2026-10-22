@@ -15,9 +15,7 @@ pub(crate) fn constrain_server_service_tiers(
     else {
         return;
     };
-    // LocalDex force-disables Fast mode: the tier is removed from the catalog
-    // even when a server requirement still advertises it.
-    let fast_enabled = false;
+    let fast_enabled = features.get("fast_mode") != Some(&false);
     // Older servers enforce Ultra Fast through their shared Fast mode gate.
     let ultrafast_enabled = features.get("ultrafast_mode") != Some(&false)
         && (requirements.supports_independent_speed_modes == Some(true) || fast_enabled);

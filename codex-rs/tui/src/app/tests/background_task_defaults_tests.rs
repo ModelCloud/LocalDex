@@ -398,7 +398,11 @@ async fn command_center_new_reads_server_defaults_for_actual_destination() -> Re
                     serde_json::Value::Null
                 },
                 &serde_json::json!("high"),
-                &serde_json::json!(if explicit_cwd { "flex" } else { "default" }),
+                &serde_json::json!(if mode == "local" && explicit_cwd {
+                    "flex"
+                } else {
+                    "priority"
+                }),
             ),
             "{mode} {expected_cwd}"
         );

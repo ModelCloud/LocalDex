@@ -2031,6 +2031,7 @@ impl Config {
             refreshed_layers.requirements_toml().clone(),
         )?
         .with_cloud_config_binding(refreshed_layers.cloud_config_binding().cloned())
+        .with_applied_config_server(refreshed_layers.applied_config_server().cloned())
         .with_user_and_project_exec_policy_rules_ignored(
             refreshed_layers.ignore_user_and_project_exec_policy_rules(),
         ))
@@ -4159,13 +4160,9 @@ impl Config {
         };
         let service_tier = service_tier.and_then(|service_tier| {
             match ServiceTier::from_request_value(&service_tier) {
-                Some(ServiceTier::Fast) if features.enabled(Feature::FastMode) => {
-                    Some(ServiceTier::Fast.request_value().to_string())
-                }
-                // LocalDex force-disables Fast mode: a stored `fast`/`priority`
-                // preference is remapped to explicit standard routing instead of
-                // being dropped, so no config surface can carry the paid tier.
-                Some(ServiceTier::Fast) => Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string()),
+                Some(ServiceTier::Fast) => features
+                    .enabled(Feature::FastMode)
+                    .then(|| ServiceTier::Fast.request_value().to_string()),
                 Some(ServiceTier::Flex) => Some(ServiceTier::Flex.request_value().to_string()),
                 None if service_tier == "ultrafast" => features
                     .enabled(Feature::UltrafastMode)

@@ -649,9 +649,10 @@ async fn thread_settings_updated_updates_visible_state_without_transcript() {
         chat.current_reasoning_effort(),
         Some(ReasoningEffortConfig::High)
     );
-    // LocalDex force-disables Fast mode: a server-advertised fast tier is
-    // ignored instead of being surfaced as the active service tier.
-    assert_eq!(chat.current_service_tier(), None);
+    assert_eq!(
+        chat.current_service_tier(),
+        Some(ServiceTier::Fast.request_value())
+    );
     assert_eq!(
         chat.config_ref().permissions.approval_policy.value(),
         AskForApproval::OnRequest.to_core()

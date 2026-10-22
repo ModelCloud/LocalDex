@@ -537,7 +537,7 @@ async fn settings_update_during_active_turn_applies_to_next_turn_only() -> Resul
             model: Some("gpt-5.5".to_string()),
             effort: Some(Some(ReasoningEffort::High)),
             summary: Some(ReasoningSummary::Detailed),
-            service_tier: Some(Some(ServiceTier::Flex.request_value().to_string())),
+            service_tier: Some(Some(ServiceTier::Fast.request_value().to_string())),
             approval_policy: Some(AskForApproval::Never),
             approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
             ..Default::default()
@@ -598,7 +598,7 @@ async fn settings_update_during_active_turn_applies_to_next_turn_only() -> Resul
             json!({
                 "model": "gpt-5.5",
                 "reasoning": { "effort": "high", "summary": "detailed" },
-                "service_tier": "flex",
+                "service_tier": "priority",
                 "approval_policy_never": true,
             }),
         ]
@@ -620,7 +620,7 @@ async fn service_tier_change_is_applied_on_next_http_turn() -> Result<()> {
 
     let test = test_codex().build(&server).await?;
 
-    test.submit_turn_with_service_tier("flex turn", Some(ServiceTier::Flex.request_value()))
+    test.submit_turn_with_service_tier("fast turn", Some(ServiceTier::Fast.request_value()))
         .await?;
     test.submit_turn_with_service_tier("standard turn", /*service_tier*/ None)
         .await?;
@@ -631,30 +631,8 @@ async fn service_tier_change_is_applied_on_next_http_turn() -> Result<()> {
     let first_body = requests[0].body_json();
     let second_body = requests[1].body_json();
 
-    assert_eq!(first_body["service_tier"].as_str(), Some("flex"));
+    assert_eq!(first_body["service_tier"].as_str(), Some("priority"));
     assert_eq!(second_body.get("service_tier"), None);
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fast_service_tier_is_never_forwarded_to_http_turn() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
-    let server = start_mock_server().await;
-    let resp_mock = mount_sse_once(&server, sse_completed("resp-1")).await;
-
-    let test = test_codex().build(&server).await?;
-
-    test.submit_turn_with_service_tier("fast turn", Some(ServiceTier::Fast.request_value()))
-        .await?;
-
-    let body = resp_mock.single_request().body_json();
-    assert_eq!(
-        body.get("service_tier"),
-        None,
-        "LocalDex force-disables Fast mode: the paid fast tier must never reach the wire"
-    );
 
     Ok(())
 }
@@ -745,9 +723,7 @@ async fn unsupported_configured_service_tier_warns_at_session_start() -> Result<
     let mut builder = test_codex()
         .with_model(model_slug)
         .with_config(move |config| {
-            // Fast mode is force-disabled, so the warning path is exercised with
-            // a speed tier that remains selectable (Ultra Fast).
-            config.service_tier = Some("ultrafast".to_string());
+            config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
             config.model_catalog = Some(ModelsResponse {
                 models: vec![model],
             });
@@ -767,7 +743,7 @@ async fn unsupported_configured_service_tier_warns_at_session_start() -> Result<
     };
     assert_eq!(
         warning.message,
-        "Configured service tier `ultrafast` is not advertised as supported for model `test-no-tier-model` and will be omitted from requests."
+        "Configured service tier `priority` is not advertised as supported for model `test-no-tier-model` and will be omitted from requests."
     );
     Ok(())
 }

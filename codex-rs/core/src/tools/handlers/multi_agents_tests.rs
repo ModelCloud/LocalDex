@@ -44,7 +44,6 @@ use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::ReasoningSummary;
-use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
 use codex_protocol::items::TurnItem;
@@ -528,21 +527,16 @@ async fn spawn_agent_service_tier_uses_root_preference_when_root_model_cannot_su
         .start_thread(StartThreadOptions::new(config.clone()))
         .await
         .expect("root thread should start");
-    assert_eq!(
-        root.thread.config_snapshot().await.service_tier,
-        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
-    );
+    assert_eq!(root.thread.config_snapshot().await.service_tier, None);
 
     config.model = Some("gpt-5.5".to_string());
     apply_spawn_agent_service_tier(root.thread.session.as_ref(), &mut config)
         .await
         .expect("root preference should be resolved against the child model");
 
-    // LocalDex force-disables Fast mode, so the root's stored fast preference is
-    // pinned to explicit standard routing before it reaches the child.
     assert_eq!(
         config.service_tier,
-        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
+        Some(ServiceTier::Fast.request_value().to_string())
     );
 }
 
@@ -602,7 +596,7 @@ async fn spawn_agent_service_tier_inheritance_uses_root_preference_and_child_mod
 
         assert_eq!(
             snapshot.service_tier,
-            Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
+            Some(ServiceTier::Fast.request_value().to_string())
         );
     }
 
@@ -645,7 +639,7 @@ async fn spawn_agent_service_tier_inheritance_uses_root_preference_and_child_mod
                 })),
             ))
             .await
-            .expect("spawn_agent should keep the inherited standard-routing tier");
+            .expect("spawn_agent should clear unsupported inherited service tier");
         let (content, _) = expect_text_output(output);
         let result: SpawnAgentResult =
             serde_json::from_str(&content).expect("spawn_agent result should be json");
@@ -656,10 +650,7 @@ async fn spawn_agent_service_tier_inheritance_uses_root_preference_and_child_mod
             .config_snapshot()
             .await;
 
-        assert_eq!(
-            snapshot.service_tier,
-            Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
-        );
+        assert_eq!(snapshot.service_tier, None);
     }
 
     {
@@ -801,7 +792,7 @@ service_tier = "turbo"
 
     assert_eq!(
         snapshot.service_tier,
-        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
+        Some(ServiceTier::Fast.request_value().to_string())
     );
 }
 
@@ -858,7 +849,7 @@ async fn spawn_agent_full_history_fork_inherits_root_service_tier() {
 
     assert_eq!(
         snapshot.service_tier,
-        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
+        Some(ServiceTier::Fast.request_value().to_string())
     );
 }
 
@@ -931,7 +922,7 @@ async fn multi_agent_v2_full_history_fork_inherits_root_service_tier() {
 
     assert_eq!(
         snapshot.service_tier,
-        Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())
+        Some(ServiceTier::Fast.request_value().to_string())
     );
 }
 

@@ -814,9 +814,6 @@ impl ChatWidget {
                 .and_then(|usage| usage.estimated_usage_usd_micros)
                 .and_then(format_estimated_usd_micros),
             StatusLineItem::SessionId => self.thread_id.map(|id| id.to_string()),
-            // LocalDex force-disables Fast mode: hide the indicator entirely so
-            // the status line never advertises a tier that cannot be enabled.
-            StatusLineItem::FastMode if !self.config.features.enabled(Feature::FastMode) => None,
             StatusLineItem::FastMode => self
                 .model_catalog
                 .try_list_models()

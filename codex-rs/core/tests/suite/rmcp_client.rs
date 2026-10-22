@@ -1878,9 +1878,7 @@ async fn startup_prewarm_connects_before_delayed_mcp_tools_then_reuses_socket(
         server
             .single_handshake()
             .header(X_CODEX_ROUTING_HINT_HEADER),
-        // LocalDex force-disables Fast mode, so the requested fast tier is
-        // remapped to standard routing and the hint carries no tier.
-        Some("model=gpt-5.4".to_string())
+        Some(format!("model=gpt-5.4;tier={service_tier}"))
     );
     assert!(
         server.single_connection().is_empty(),
@@ -1919,9 +1917,7 @@ async fn startup_prewarm_connects_before_delayed_mcp_tools_then_reuses_socket(
     assert_eq!(prewarm["type"].as_str(), Some("response.create"));
     assert_eq!(prewarm["generate"].as_bool(), Some(false));
     assert!(prewarm.get("previous_response_id").is_none());
-    // LocalDex force-disables Fast mode, so the requested fast tier never
-    // reaches the wire.
-    assert_eq!(prewarm["service_tier"].as_str(), None);
+    assert_eq!(prewarm["service_tier"].as_str(), Some(service_tier));
     let tool_body = if use_responses_lite {
         &prewarm["input"][0]
     } else {
