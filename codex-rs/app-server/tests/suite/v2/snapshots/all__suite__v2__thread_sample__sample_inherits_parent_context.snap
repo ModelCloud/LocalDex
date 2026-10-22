@@ -7,6 +7,7 @@ Scenario: A parent uses high effort with custom instructions, client tools, perm
 ## Window 1
 Settings:
   include: ["reasoning.encrypted_content"]
+  max_output_tokens: 65536
   model: "gpt-5.4"
   parallel_tool_calls: false
   prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
