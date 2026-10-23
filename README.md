@@ -55,7 +55,7 @@ wire_api = "responses"
 requires_openai_auth = false
 
 [profiles.dsv41]
-model = "DeepSeek v4.1-Flash-1017"
+model = "DS v4.1 Flash 1017"
 model_provider = "dsv41"
 ```
 
@@ -91,9 +91,9 @@ requires_openai_auth = false
 
 ```toml
 # ~/.local/share/localdex/models.toml
-[models."DeepSeek v4.1-Flash-1017"]
+[models."DS v4.1 Flash 1017"]
 provider = "dsv41"
-display_name = "DeepSeek v4.1-Flash-1017"
+display_name = "DS v4.1 Flash 1017"
 discover_capabilities = true
 
 [models."lab/coder-32b"]

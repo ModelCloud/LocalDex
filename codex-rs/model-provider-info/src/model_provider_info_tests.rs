@@ -577,7 +577,7 @@ fn test_merge_configured_localdex_provider_enables_responses_continuation() {
 #[test]
 fn test_is_localdex_model_uses_only_the_canonical_id() {
     assert!(is_localdex_model(LOCALDEX_MODEL_ID));
-    assert!(!is_localdex_model("DeepSeek v4.1-Flash-1017-preview"));
+    assert!(!is_localdex_model("DS v4.1 Flash 1017-preview"));
     assert!(!is_localdex_model("gpt-5.6"));
 }
 

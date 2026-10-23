@@ -10291,7 +10291,7 @@ async fn side_backtrack_rejection_reports_unavailable_message_snapshot() {
 #[tokio::test]
 async fn localdex_model_selection_switches_provider_with_model() {
     let mut app = make_test_app().await;
-    app.config.model = Some("DeepSeek v4.1-Flash-1017".to_string());
+    app.config.model = Some("DS v4.1 Flash 1017".to_string());
     app.config.model_provider_id = "localdex".to_string();
     app.active_thread_id = Some(ThreadId::new());
 
@@ -10310,14 +10310,14 @@ async fn localdex_model_selection_switches_provider_with_model() {
     );
 
     let local = app
-        .active_thread_model_setting_update_params("DeepSeek v4.1-Flash-1017".to_string())
+        .active_thread_model_setting_update_params("DS v4.1 Flash 1017".to_string())
         .expect("active thread should produce update params");
     assert_eq!(local.model_provider, Some("localdex".to_string()));
 
     app.config.model = Some("gpt-5.6-sol".to_string());
     app.config.model_provider_id = "openai".to_string();
     let local_from_openai = app
-        .active_thread_model_setting_update_params("DeepSeek v4.1-Flash-1017".to_string())
+        .active_thread_model_setting_update_params("DS v4.1 Flash 1017".to_string())
         .expect("active thread should produce update params");
     assert_eq!(
         local_from_openai.model_provider,

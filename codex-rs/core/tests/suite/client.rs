@@ -4243,7 +4243,7 @@ async fn incomplete_response_is_terminal(
         None
     };
     let model = if localdex {
-        "DeepSeek v4.1-Flash-1017"
+        "DS v4.1 Flash 1017"
     } else {
         "gpt-5.4"
     };

@@ -95,7 +95,7 @@ pub const OPENAI_PROVIDER_ID: &str = "openai";
 /// default.
 pub const LOCALDEX_PROVIDER_ID: &str = "localdex";
 /// The canonical model ID served by the bundled LocalDex endpoint.
-pub const LOCALDEX_MODEL_ID: &str = "DeepSeek v4.1-Flash-1017";
+pub const LOCALDEX_MODEL_ID: &str = "DS v4.1 Flash 1017";
 /// LocalDex may spend several minutes prefilling a very large prompt before it
 /// emits the next SSE event. Keep the stream alive for up to 15 minutes so the
 /// client does not treat a valid cold prefill as a dead connection.

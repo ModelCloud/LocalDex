@@ -1146,7 +1146,7 @@ async fn qb_model_selects_localdex_without_changing_official_model_routing() -> 
 {
     let cfg = toml::from_str::<ConfigToml>(
         r#"
-model = "DeepSeek v4.1-Flash-1017"
+model = "DS v4.1 Flash 1017"
 model_provider = "omnigent-localdex-test"
 
 [model_providers.localdex]

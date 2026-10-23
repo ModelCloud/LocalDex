@@ -899,7 +899,7 @@ pub(crate) async fn run_turn(
                 if auto_summarization_enabled
                     && matches!(err.details(), CodexErrorDetails::ContextWindowExceeded)
                     && !context_overflow_compacted
-                    && (turn_context.model_info().slug == "DeepSeek v4.1-Flash-1017"
+                    && (turn_context.model_info().slug == "DS v4.1 Flash 1017"
                         || sess
                             .services
                             .thread_extension_data
@@ -1514,7 +1514,7 @@ async fn maybe_run_previous_model_inline_compact(
     // budget no longer accommodates the retained history. Upstream providers
     // retain their existing model-switch-only behavior.
     if previous_model == turn_context.model_info().slug
-        && turn_context.model_info().slug == "DeepSeek v4.1-Flash-1017"
+        && turn_context.model_info().slug == "DS v4.1 Flash 1017"
         && sess.get_total_token_usage().await
             > turn_context
                 .model_info()

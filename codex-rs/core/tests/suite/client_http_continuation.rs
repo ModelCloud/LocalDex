@@ -82,7 +82,7 @@ async fn responses_http_continuation_survives_user_turns(
     .expect("LocalDex provider should normalize");
     let provider = providers.remove(LOCALDEX_PROVIDER_ID).unwrap();
     let test = test_codex()
-        .with_model_info_override("DeepSeek v4.1-Flash-1017", move |model_info| {
+        .with_model_info_override("DS v4.1 Flash 1017", move |model_info| {
             model_info.use_responses_lite = responses_lite;
         })
         .with_config(move |config| {
@@ -104,7 +104,7 @@ async fn responses_http_continuation_survives_user_turns(
                     text_elements: Vec::new(),
                 }])
                 .with_thread_settings(ThreadSettingsOverrides {
-                    model: Some("DeepSeek v4.1-Flash-1017".to_string()),
+                    model: Some("DS v4.1 Flash 1017".to_string()),
                     ..Default::default()
                 }),
             )
