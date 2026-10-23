@@ -3477,19 +3477,21 @@ async fn pre_sampling_compact_advised_errors_fall_back_then_retry_on_selected_mo
         },
     )
     .await;
-    let overload = wiremock::ResponseTemplate::new(/*s*/ 503)
+    // Advised-but-bounded failures still exhaust the retry budget; capacity
+    // overloads are intentionally unbounded, so rate limits stand in here.
+    let rate_limited = wiremock::ResponseTemplate::new(/*s*/ 429)
         .insert_header("Retry-After", "0")
-        .set_body_json(json!({ "error": { "code": "server_is_overloaded" } }));
+        .set_body_json(json!({ "error": { "code": "rate_limit_exceeded" } }));
     let mut responses = vec![
         sse_response(sse(vec![
             ev_assistant_message("m1", "before switch"),
             ev_completed_with_tokens("r1", /*total_tokens*/ 120_000),
         ])),
-        overload.clone(), // Old model: initial attempt and two retries.
-        overload.clone(),
-        overload.clone(),
+        rate_limited.clone(), // Old model: initial attempt and two retries.
+        rate_limited.clone(),
+        rate_limited.clone(),
     ];
-    responses.extend(vec![overload; selected_model_failures]);
+    responses.extend(vec![rate_limited; selected_model_failures]);
     if selected_model_failures < 3 {
         responses.extend([
             sse_response(remote_v2_compaction_response()),
@@ -3543,14 +3545,21 @@ async fn pre_sampling_compact_advised_errors_fall_back_then_retry_on_selected_mo
                 EventMsg::TurnComplete(event) => {
                     assert_eq!(
                         event.error.and_then(|error| error.codex_error_info),
-                        Some(CodexErrorInfo::ServerOverloaded)
+                        Some(CodexErrorInfo::ResponseTooManyFailedAttempts {
+                            http_status_code: Some(429)
+                        })
                     );
                     break;
                 }
                 _ => {}
             }
         }
-        assert_eq!(errors, vec![Some(CodexErrorInfo::ServerOverloaded)]);
+        assert_eq!(
+            errors,
+            vec![Some(CodexErrorInfo::ResponseTooManyFailedAttempts {
+                http_status_code: Some(429)
+            })]
+        );
     }
     let actual_models = request_log
         .requests()
@@ -3577,7 +3586,87 @@ async fn pre_sampling_compact_advised_errors_fall_back_then_retry_on_selected_mo
     assert_eq!(actual_models, expected_models);
 }
 
+/// Local compaction keeps retrying capacity overloads at the configured delay
+/// without consuming its bounded retry budget.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_local_compact_overload_retries_until_recovery() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    let overload = wiremock::ResponseTemplate::new(/*s*/ 503)
+        .set_body_json(json!({ "error": { "code": "server_is_overloaded" } }));
+    // Three consecutive overloads exceed any reasonable bounded budget; the
+    // local loop must keep retrying until the stream recovers.
+    let request_log = mount_response_sequence(
+        &server,
+        vec![
+            sse_response(sse(vec![
+                ev_assistant_message("m0", FIRST_REPLY),
+                ev_completed_with_tokens("r0", /*total_tokens*/ 80),
+            ])),
+            overload.clone(),
+            overload.clone(),
+            overload.clone(),
+            sse_response(sse(vec![
+                ev_assistant_message("m1", SUMMARY_TEXT),
+                ev_completed_with_tokens("r1", /*total_tokens*/ 100),
+            ])),
+        ],
+    )
+    .await;
+    let mut model_provider = non_openai_model_provider(&server);
+    model_provider.request_max_retries = Some(0);
+    model_provider.stream_max_retries = Some(0);
+    model_provider.server_overloaded_retry_delay_ms = Some(50);
+    let test = test_codex()
+        .with_config(move |config| {
+            config.model_provider = model_provider;
+            set_test_compact_prompt(config);
+        })
+        .build(&server)
+        .await
+        .expect("create conversation");
+
+    test.submit_turn("seed history").await.expect("seed turn");
+    test.codex
+        .submit(Op::Compact)
+        .await
+        .expect("trigger compact");
+
+    let mut stream_error_messages = Vec::new();
+    loop {
+        match wait_for_event(&test.codex, |_| true).await {
+            EventMsg::Error(error) => {
+                panic!("capacity overload must not fail local compaction: {error:?}");
+            }
+            EventMsg::StreamError(error) => stream_error_messages.push(error.message),
+            EventMsg::TurnComplete(event) => {
+                assert_eq!(event.error, None, "local compaction should recover");
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(stream_error_messages.len(), 3);
+    for message in &stream_error_messages {
+        assert!(
+            message.contains("Selected model is at capacity. Please try a different model."),
+            "capacity notice should carry the provider's message: {message}"
+        );
+        assert!(
+            message.contains("Retrying in 0.1s"),
+            "capacity notice should name the configured delay: {message}"
+        );
+    }
+    assert_eq!(
+        request_log.requests().len(),
+        5,
+        "expected a seed turn, three capacity retries, and the recovered request"
+    );
+}
+
 /// Manual compaction keeps the configured retry limit even when the server supplies advice.
+/// Capacity overloads retry forever by design, so an advised rate limit stands in.
 #[test_case::test_case(0; "no_retries")]
 #[test_case::test_case(2; "two_retries")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3585,11 +3674,11 @@ async fn manual_remote_compact_advice_respects_retry_limit(max_retries: u64) {
     skip_if_no_network!();
 
     let server = start_mock_server().await;
-    let overload = wiremock::ResponseTemplate::new(/*s*/ 503)
+    let rate_limited = wiremock::ResponseTemplate::new(/*s*/ 429)
         .insert_header("Retry-After", "0")
-        .set_body_json(json!({ "error": { "code": "server_is_overloaded" } }));
+        .set_body_json(json!({ "error": { "code": "rate_limit_exceeded" } }));
     let request_log =
-        mount_response_sequence(&server, vec![overload; (max_retries + 1) as usize]).await;
+        mount_response_sequence(&server, vec![rate_limited; (max_retries + 1) as usize]).await;
     let mut model_provider = openai_model_provider(&server);
     model_provider.request_max_retries = Some(0);
     model_provider.stream_max_retries = Some(max_retries);
@@ -3614,14 +3703,21 @@ async fn manual_remote_compact_advice_respects_retry_limit(max_retries: u64) {
             EventMsg::TurnComplete(event) => {
                 assert_eq!(
                     event.error.and_then(|error| error.codex_error_info),
-                    Some(CodexErrorInfo::ServerOverloaded)
+                    Some(CodexErrorInfo::ResponseTooManyFailedAttempts {
+                        http_status_code: Some(429)
+                    })
                 );
                 break;
             }
             _ => {}
         }
     }
-    assert_eq!(errors, vec![Some(CodexErrorInfo::ServerOverloaded)]);
+    assert_eq!(
+        errors,
+        vec![Some(CodexErrorInfo::ResponseTooManyFailedAttempts {
+            http_status_code: Some(429)
+        })]
+    );
     assert_eq!(
         reconnect_messages,
         (1..=max_retries)

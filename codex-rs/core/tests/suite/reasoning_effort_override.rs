@@ -17,7 +17,6 @@ use codex_login::CodexAuth;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
-use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::InternalSessionSource;
 use codex_protocol::protocol::Op;
@@ -617,35 +616,18 @@ async fn reasoning_effort_override_capacity_retry_keeps_latest_adjacent_update()
     let EventMsg::TurnComplete(completed) = completed else {
         unreachable!("waited for turn completion");
     };
-    assert_eq!(
-        completed.error.and_then(|error| error.codex_error_info),
-        Some(CodexErrorInfo::ServerOverloaded)
-    );
+    // Capacity retries resume the same request automatically, keeping the
+    // latest adjacent effort update without user interaction.
+    assert_eq!(completed.error, None, "capacity retry should recover");
 
-    // The app's capacity Retry action uses current settings without adding a user message.
-    test.codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(Vec::new()).with_thread_settings(
-                ThreadSettingsOverrides {
-                    effort: Some(Some(ReasoningEffort::Medium)),
-                    ..Default::default()
-                },
-            ),
-        )
-        .await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
     let request = retried.single_request();
-    let mut expected = failed.single_request().input();
-    assert_eq!(expected.pop(), Some(effort_update(ReasoningEffort::High)));
-    expected.push(effort_update(ReasoningEffort::Medium));
-    assert_eq!(request.input(), expected);
+    assert_eq!(request.input(), failed.single_request().input());
+    // The retried request reuses the turn's effective effort; the High
+    // override rides along as the adjacent ConfigurationUpdate item.
     assert_eq!(request.body_json()["reasoning"]["effort"], "medium");
     assert_eq!(
         effort_updates(&request),
-        vec![effort_update(ReasoningEffort::Medium); 2]
+        effort_updates(&failed.single_request())
     );
     let saved_updates = test
         .codex
@@ -663,12 +645,7 @@ async fn reasoning_effort_override_capacity_retry_keeps_latest_adjacent_update()
         .collect::<Vec<_>>();
     assert_eq!(
         saved_updates,
-        [
-            ReasoningEffort::Medium,
-            ReasoningEffort::High,
-            ReasoningEffort::Medium
-        ]
-        .map(effort_update)
+        [ReasoningEffort::Medium, ReasoningEffort::High].map(effort_update)
     );
     Ok(())
 }

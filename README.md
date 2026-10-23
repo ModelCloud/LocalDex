@@ -112,6 +112,26 @@ stops the request without retrying or switching compaction models. Increase the
 inference server's output-token limit or request a shorter response before
 trying again; increasing connection retries will not raise the output budget.
 
+### Model at capacity (`server_is_overloaded`)
+
+When the provider reports the selected model is at capacity ("Selected model is
+at capacity. Please try a different model."), LocalDex waits and resumes the
+request automatically — no user interaction and no retry budget is consumed;
+the request retries indefinitely until capacity frees up. A `Retry-After` hint
+from the provider is honored; otherwise the delay defaults to 1 second and is
+configurable per provider or globally:
+
+```toml
+[model_providers.dsv41]
+# ... other fields ...
+server_overloaded_retry_delay_ms = 2000
+```
+
+```bash
+# Global override (also covers the built-in openai provider)
+export CODEX_SERVER_OVERLOADED_RETRY_DELAY_MS=2000
+```
+
 <details>
 <summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
 

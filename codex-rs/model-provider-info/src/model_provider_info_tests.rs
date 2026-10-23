@@ -93,6 +93,7 @@ base_url = "http://localhost:11434/v1"
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
         websocket_connect_timeout_ms: None,
+        server_overloaded_retry_delay_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
@@ -134,6 +135,7 @@ query_params = { api-version = "2025-04-01-preview" }
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
         websocket_connect_timeout_ms: None,
+        server_overloaded_retry_delay_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
@@ -179,6 +181,7 @@ supports_standalone_web_search = true
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
         websocket_connect_timeout_ms: None,
+        server_overloaded_retry_delay_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
@@ -203,6 +206,32 @@ wire_api = "chat"
 
     let err = toml::from_str::<ModelProviderInfo>(provider_toml).unwrap_err();
     assert!(err.to_string().contains(CHAT_WIRE_API_REMOVED_ERROR));
+}
+
+#[test]
+fn server_overloaded_retry_delay_prefers_field_then_env_then_default() {
+    // SAFETY: single-threaded mutation of this var; restored before returning.
+    unsafe { std::env::set_var("CODEX_SERVER_OVERLOADED_RETRY_DELAY_MS", "75") };
+    let configured = ModelProviderInfo {
+        server_overloaded_retry_delay_ms: Some(50),
+        ..ModelProviderInfo::default()
+    };
+    assert_eq!(
+        configured.server_overloaded_retry_delay(),
+        Duration::from_millis(50),
+        "explicit provider field wins over the env var"
+    );
+    assert_eq!(
+        ModelProviderInfo::default().server_overloaded_retry_delay(),
+        Duration::from_millis(75),
+        "env var applies when the field is unset"
+    );
+    unsafe { std::env::remove_var("CODEX_SERVER_OVERLOADED_RETRY_DELAY_MS") };
+    assert_eq!(
+        ModelProviderInfo::default().server_overloaded_retry_delay(),
+        Duration::from_millis(1_000),
+        "neither set: default 1s"
+    );
 }
 
 #[test]
@@ -371,6 +400,7 @@ fn test_create_amazon_bedrock_provider() {
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
+            server_overloaded_retry_delay_ms: None,
             requires_openai_auth: false,
             supports_websockets: false,
             supports_responses_continuation: false,

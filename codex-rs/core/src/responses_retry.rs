@@ -35,6 +35,9 @@ pub(crate) struct ResponsesStreamRetryState {
     retries: u64,
     connection_retries: u64,
     connection_retry_delay: Duration,
+    /// Capacity (`server_is_overloaded`) retries so far; they never consume
+    /// `retries` because overloads are out of the caller's control.
+    overloaded_retries: u64,
 }
 
 impl Default for ResponsesStreamRetryState {
@@ -43,6 +46,7 @@ impl Default for ResponsesStreamRetryState {
             retries: 0,
             connection_retries: 0,
             connection_retry_delay: INITIAL_CONNECTION_RETRY_DELAY,
+            overloaded_retries: 0,
         }
     }
 }
@@ -102,11 +106,42 @@ pub(crate) async fn handle_response_stream_error(
         ResponsesStreamRequest::Sampling => RetryOperation::Sampling,
         ResponsesStreamRequest::RemoteCompactionV2 => RetryOperation::RemoteCompactionV2,
     };
+    let retry_after = err.retry_after();
+
+    // A capacity rejection is transient by definition: the provider is still
+    // up, the model is just saturated. Retry it forever at a fixed delay
+    // without consuming `stream_max_retries` so capacity bursts can never
+    // fail the turn.
+    if matches!(err.details(), CodexErrorDetails::ServerOverloaded) {
+        retry_state.overloaded_retries = retry_state.overloaded_retries.saturating_add(1);
+        let attempt = retry_state.overloaded_retries;
+        // Honor server retry advice over the configured delay.
+        let delay = turn_context.provider.info().server_overloaded_retry_delay();
+        let now = Instant::now();
+        let retry_at = retry_after.map(RetryAfter::deadline).unwrap_or(now + delay);
+        let sleep_for = retry_at.saturating_duration_since(now);
+        warn!(
+            turn_id = %turn_context.sub_id,
+            attempt,
+            error = %err,
+            ?sleep_for,
+            "model at capacity; waiting to retry"
+        );
+        sess.notify_stream_error(
+            turn_context,
+            format!("{err} Retrying in {:.1}s...", sleep_for.as_secs_f64()),
+            err,
+        )
+        .await;
+        codex_client::record_retry!(attempt, sleep_for, operation);
+        tokio::time::sleep_until(retry_at).await;
+        return Ok(());
+    }
+
     let retry_count = retry_state.retries.saturating_add(1);
     let Some(delay) = err.retry_delay(retry_count) else {
         return Err(err);
     };
-    let retry_after = err.retry_after();
 
     if turn_context
         .config

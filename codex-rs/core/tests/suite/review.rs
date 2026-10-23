@@ -303,10 +303,17 @@ async fn review_overload_preserves_lifecycle_order() {
     skip_if_no_network!();
 
     let server = start_mock_server().await;
-    responses::mount_response_once(
+    // A capacity overload retries internally first; the follow-up plain 500
+    // is the terminal failure whose lifecycle order this test guards.
+    responses::mount_response_sequence(
         &server,
-        ResponseTemplate::new(503)
-            .set_body_json(serde_json::json!({ "error": { "code": "server_is_overloaded" } })),
+        vec![
+            ResponseTemplate::new(503)
+                .insert_header("Retry-After", "0")
+                .set_body_json(serde_json::json!({ "error": { "code": "server_is_overloaded" } })),
+            ResponseTemplate::new(500)
+                .set_body_json(serde_json::json!({ "error": { "message": "backend down" } })),
+        ],
     )
     .await;
     let codex = new_conversation_for_server(&server, Arc::new(TempDir::new().unwrap()), |config| {
