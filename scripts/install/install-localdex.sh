@@ -3,12 +3,21 @@
 set -eu
 
 REPOSITORY="ModelCloud/LocalDex"
+os="$(uname -s)"
 machine="$(uname -m)"
 case "$machine" in
-  x86_64|amd64) TARGET="x86_64-unknown-linux-gnu" ;;
-  aarch64|arm64) TARGET="aarch64-unknown-linux-gnu" ;;
+  x86_64|amd64) machine="x86_64" ;;
+  aarch64|arm64) machine="aarch64" ;;
   *)
     echo "Unsupported LocalDex architecture: $machine" >&2
+    exit 1
+    ;;
+esac
+case "$os" in
+  Linux) TARGET="$machine-unknown-linux-gnu" ;;
+  Darwin) TARGET="$machine-apple-darwin" ;;
+  *)
+    echo "Unsupported LocalDex operating system: $os" >&2
     exit 1
     ;;
 esac
@@ -227,10 +236,13 @@ mv "$staged_release" "$release_dir"
 
 temporary_link="$STANDALONE_ROOT/.current-localdex.$$"
 ln -s "$release_dir" "$temporary_link"
-# Treat the destination as the symlink itself; plain `mv -f` follows an
-# existing symlink-to-directory on GNU coreutils and can leave `current`
-# pointing at the previous release.
-mv -Tf "$temporary_link" "$CURRENT_LINK"
+# `mv -T` is GNU-only; remove the destination symlink first so this works with
+# both GNU and BSD mv (an existing symlink-to-directory must be replaced, not
+# followed into).
+if [ -L "$CURRENT_LINK" ] || [ ! -e "$CURRENT_LINK" ]; then
+  rm -f "$CURRENT_LINK"
+fi
+mv -f "$temporary_link" "$CURRENT_LINK"
 
 backup_existing_link() {
   path="$1"
@@ -255,7 +267,10 @@ ln -s "$CURRENT_LINK/bin/localdex" "$BIN_DIR/localdex"
 ln -s "$CURRENT_LINK/bin/codex-code-mode-host" "$BIN_DIR/codex-code-mode-host"
 
 if [ "$BIN_DIR" = "$HOME/.local/bin" ]; then
-  profile="${HOME}/.profile"
+  case "$(basename "${SHELL:-sh}")" in
+    zsh) profile="${HOME}/.zprofile" ;;
+    *) profile="${HOME}/.profile" ;;
+  esac
   marker="# LocalDex CLI"
   if ! grep -Fq "$marker" "$profile" 2>/dev/null; then
     {
