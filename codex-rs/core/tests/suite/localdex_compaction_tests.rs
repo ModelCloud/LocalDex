@@ -41,7 +41,7 @@ async fn localdex_post_turn_compaction_measures_history_progress(growing: bool) 
     .expect("LocalDex provider should normalize");
     let provider = providers.remove(LOCALDEX_PROVIDER_ID).unwrap();
     let test = test_codex()
-        .with_model_info_override("QB/DSV4.1-Flash", |info| {
+        .with_model_info_override("DeepSeek v4.1-Flash-1017", |info| {
             info.context_window = Some(100_000);
             info.max_context_window = None;
         })
@@ -65,7 +65,7 @@ async fn localdex_post_turn_compaction_measures_history_progress(growing: bool) 
                 text_elements: vec![],
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                model: Some("QB/DSV4.1-Flash".to_string()),
+                model: Some("DeepSeek v4.1-Flash-1017".to_string()),
                 ..Default::default()
             }),
         )
@@ -147,7 +147,7 @@ async fn failed_localdex_compaction_allows_new_user_context() -> Result<()> {
     let mut provider = providers.remove(LOCALDEX_PROVIDER_ID).unwrap();
     provider.stream_max_retries = Some(0);
     let test = test_codex()
-        .with_model_info_override("QB/DSV4.1-Flash", |info| {
+        .with_model_info_override("DeepSeek v4.1-Flash-1017", |info| {
             info.context_window = Some(100_000);
             info.max_context_window = None;
         })
@@ -173,7 +173,7 @@ async fn failed_localdex_compaction_allows_new_user_context() -> Result<()> {
                     text_elements: vec![],
                 }])
                 .with_thread_settings(ThreadSettingsOverrides {
-                    model: Some("QB/DSV4.1-Flash".to_string()),
+                    model: Some("DeepSeek v4.1-Flash-1017".to_string()),
                     ..Default::default()
                 }),
             )
@@ -244,7 +244,7 @@ async fn failed_localdex_compaction_retries_on_next_user_prompt() -> Result<()> 
         .expect("LocalDex provider should be configured");
     provider.stream_max_retries = Some(0);
     let test = test_codex()
-        .with_model_info_override("QB/DSV4.1-Flash", |info| {
+        .with_model_info_override("DeepSeek v4.1-Flash-1017", |info| {
             info.context_window = Some(200_000);
             info.max_context_window = None;
         })
@@ -274,7 +274,7 @@ async fn failed_localdex_compaction_retries_on_next_user_prompt() -> Result<()> 
                     text_elements: vec![],
                 }])
                 .with_thread_settings(ThreadSettingsOverrides {
-                    model: Some("QB/DSV4.1-Flash".to_string()),
+                    model: Some("DeepSeek v4.1-Flash-1017".to_string()),
                     ..Default::default()
                 }),
             )
@@ -321,10 +321,10 @@ async fn failed_localdex_compaction_retries_on_next_user_prompt() -> Result<()> 
     Ok(())
 }
 
-#[test_case::test_case("openai", "localdex", "gpt-5.5", "QB/DSV4.1-Flash"; "openai_to_localdex")]
-#[test_case::test_case("localdex", "openai", "QB/DSV4.1-Flash", "gpt-5.5"; "localdex_to_openai")]
-#[test_case::test_case("omnigent-localdex-test", "openai", "QB/DSV4.1-Flash", "gpt-5.5"; "namespaced_localdex_to_openai")]
-#[test_case::test_case("custom", "localdex", "custom/old", "QB/DSV4.1-Flash"; "custom_to_localdex")]
+#[test_case::test_case("openai", "localdex", "gpt-5.5", "DeepSeek v4.1-Flash-1017"; "openai_to_localdex")]
+#[test_case::test_case("localdex", "openai", "DeepSeek v4.1-Flash-1017", "gpt-5.5"; "localdex_to_openai")]
+#[test_case::test_case("omnigent-localdex-test", "openai", "DeepSeek v4.1-Flash-1017", "gpt-5.5"; "namespaced_localdex_to_openai")]
+#[test_case::test_case("custom", "localdex", "custom/old", "DeepSeek v4.1-Flash-1017"; "custom_to_localdex")]
 #[test_case::test_case("openai", "custom", "gpt-5.5", "custom/next"; "openai_to_custom")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn previous_model_compaction_keeps_its_provider(
@@ -507,7 +507,7 @@ async fn cold_resume_hash_change_compacts_with_current_provider_below_budget() -
         .with_model_info_override("gpt-5.5", |info| {
             info.comp_hash = Some("old-hash".to_string());
         })
-        .with_model_info_override("QB/DSV4.1-Flash", |info| {
+        .with_model_info_override("DeepSeek v4.1-Flash-1017", |info| {
             info.comp_hash = Some("new-hash".to_string());
         })
         .with_model("gpt-5.5")
@@ -525,7 +525,7 @@ async fn cold_resume_hash_change_compacts_with_current_provider_below_budget() -
     let catalog = initial.config.model_catalog.clone();
     let mut resumed_builder =
         test_codex()
-            .with_model("QB/DSV4.1-Flash")
+            .with_model("DeepSeek v4.1-Flash-1017")
             .with_config(move |config| {
                 config.model_catalog = catalog;
                 config.model_provider_id = LOCALDEX_PROVIDER_ID.to_string();
@@ -568,7 +568,7 @@ async fn cold_resume_hash_change_compacts_with_current_provider_below_budget() -
     assert!(
         requests
             .iter()
-            .all(|request| request.body_json()["model"] == "QB/DSV4.1-Flash")
+            .all(|request| request.body_json()["model"] == "DeepSeek v4.1-Flash-1017")
     );
     assert!(
         requests

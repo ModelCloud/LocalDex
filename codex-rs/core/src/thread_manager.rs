@@ -492,7 +492,7 @@ fn localdex_model_catalog_for_config(
     config.model_catalog.clone().or_else(|| {
         // Include the local model whenever LocalDex is registered, even when
         // this session currently uses OpenAI. The app-server's model picker
-        // must let a live thread switch to QB without restarting it.
+        // must let a live thread switch to the LocalDex model without restarting it.
         (codex_model_provider_info::is_localdex_provider_id(&config.model_provider_id)
             || config
                 .model_providers

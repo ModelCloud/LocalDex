@@ -534,7 +534,7 @@ impl ModelInfo {
     pub fn auto_compact_token_limit(&self) -> Option<i64> {
         // LocalDex publishes a fixed headroom budget for this model. Other models
         // retain upstream's 90% auto-compaction ceiling.
-        if self.slug == "QB/DSV4.1-Flash"
+        if self.slug == "DeepSeek v4.1-Flash-1017"
             && let Some(config_limit) = self.auto_compact_token_limit
         {
             return Some(
@@ -1973,7 +1973,7 @@ mod tests {
     #[test]
     fn localdex_explicit_auto_compact_limit_can_reserve_fixed_headroom() {
         let model = ModelInfo {
-            slug: "QB/DSV4.1-Flash".to_string(),
+            slug: "DeepSeek v4.1-Flash-1017".to_string(),
             context_window: Some(393_216),
             auto_compact_token_limit: Some(389_020),
             effective_context_window_percent: 100,

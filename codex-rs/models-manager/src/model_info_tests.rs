@@ -242,9 +242,9 @@ fn unknown_model_uses_builtin_instruction_template() {
 
 #[test]
 fn localdex_dsv41_flash_uses_native_metadata() {
-    let model = model_info_from_slug("QB/DSV4.1-Flash");
+    let model = model_info_from_slug("DeepSeek v4.1-Flash-1017");
 
-    assert_eq!(model.display_name, "DeepSeek v4.1 Flash 1017");
+    assert_eq!(model.display_name, "DeepSeek v4.1-Flash-1017");
     assert_eq!(model.context_window, Some(262_144));
     assert_eq!(model.max_context_window, None);
     assert_eq!(model.auto_compact_token_limit(), Some(257_948));
@@ -299,22 +299,22 @@ fn localdex_catalog_makes_the_local_model_selectable_without_replacing_codex_mod
 fn localdex_runtime_capability_uses_only_matching_positive_context_window() {
     assert_eq!(
         super::localdex_runtime_context_window(
-            r#"{"model":"QB/DSV4.1-Flash","context_window":262144}"#,
-            "QB/DSV4.1-Flash",
+            r#"{"model":"DeepSeek v4.1-Flash-1017","context_window":262144}"#,
+            "DeepSeek v4.1-Flash-1017",
         ),
         Some(262_144)
     );
     assert_eq!(
         super::localdex_runtime_context_window(
             r#"{"model":"other","context_window":262144}"#,
-            "QB/DSV4.1-Flash",
+            "DeepSeek v4.1-Flash-1017",
         ),
         None
     );
     assert_eq!(
         super::localdex_runtime_context_window(
-            r#"{"model":"QB/DSV4.1-Flash","context_window":0}"#,
-            "QB/DSV4.1-Flash",
+            r#"{"model":"DeepSeek v4.1-Flash-1017","context_window":0}"#,
+            "DeepSeek v4.1-Flash-1017",
         ),
         None
     );

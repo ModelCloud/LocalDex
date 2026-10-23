@@ -23,7 +23,7 @@ use tracing::warn;
 
 pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 const PERSONALITY_SECTION_HEADER: &str = "# Personality";
-const LOCALDEX_DSV41_FLASH: &str = "QB/DSV4.1-Flash";
+const LOCALDEX_DSV41_FLASH: &str = "DeepSeek v4.1-Flash-1017";
 const LOCALDEX_DSV41_FLASH_CONTEXT_WINDOW: i64 = 262_144;
 const LOCALDEX_DSV41_FLASH_COMPACTION_HEADROOM: i64 = 4_196;
 const LOCALDEX_DSV41_FLASH_AUTO_COMPACT_TOKEN_LIMIT: i64 =
@@ -229,8 +229,8 @@ pub fn localdex_model_catalog() -> ModelsResponse {
 fn localdex_dsv41_flash_model_info() -> ModelInfo {
     ModelInfo {
         slug: LOCALDEX_DSV41_FLASH.to_string(),
-        display_name: "DeepSeek v4.1 Flash 1017".to_string(),
-        description: Some("Local DeepSeek V4.1 Flash coding model.".to_string()),
+        display_name: LOCALDEX_DSV41_FLASH.to_string(),
+        description: Some("Local DeepSeek v4.1-Flash-1017 coding model.".to_string()),
         // DSV4.1 accepts `off`, `low`, `high`, `max`, or a numeric budget. Its
         // OpenAI-compatible endpoint explicitly rejects Codex's generic
         // `medium` default, and the local model defaults to maximum depth.

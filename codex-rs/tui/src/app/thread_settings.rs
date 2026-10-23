@@ -87,7 +87,7 @@ impl App {
             })
         });
 
-        // Route QB models through LocalDex regardless of the provider used to
+        // Route the LocalDex model through LocalDex regardless of the provider used to
         // start the thread. When leaving LocalDex for an official model,
         // restore the built-in OpenAI provider.
         let model_provider = if is_localdex_model(&model) {

@@ -4013,14 +4013,14 @@ impl Config {
             .or(model_provider)
             .or(cfg.model_provider)
             .unwrap_or_else(|| "openai".to_string());
-        // A QB model must never be sent to the OpenAI/ChatGPT provider. CLI
+        // The LocalDex model must never be sent to the OpenAI/ChatGPT provider. CLI
         // --model and app-server launches both pass through this config load.
         let selected_model = model.as_deref().or(cfg.model.as_deref());
         let model_provider_id = if selected_model.is_some_and(is_localdex_model) {
             if required_model_provider.is_some_and(|provider| provider != LOCALDEX_PROVIDER_ID) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    "QB models require the localdex provider, but a different provider is required by managed configuration",
+                    "the LocalDex model requires the localdex provider, but a different provider is required by managed configuration",
                 ));
             }
             LOCALDEX_PROVIDER_ID.to_string()
