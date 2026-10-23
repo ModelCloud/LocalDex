@@ -3657,7 +3657,7 @@ dependencies = [
 
 [[package]]
 name = "codex-guardian-v3"
-version = "0.0.0"
+version = "0.164.0"
 dependencies = [
  "codex-message-board",
  "codex-protocol",
