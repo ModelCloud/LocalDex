@@ -34,12 +34,6 @@ pub fn managed_config_auth_manager(
     crate::config_server_auth_manager(service_config, auth.codex_home, &factory)
 }
 
-struct CloudConfigBundleLoaderLifetime<C> {
-    service: Arc<CloudConfigBundleService<C>>,
-    refresh_task: JoinHandle<()>,
-
-}
-
 pub fn managed_config_bundle_loader(
     auth_manager: Arc<AuthManager>,
     chatgpt_base_url: String,
