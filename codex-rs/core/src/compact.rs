@@ -371,6 +371,28 @@ async fn run_compact_task_inner_impl(
                 sess.set_total_tokens_full(turn_context.as_ref()).await;
                 return Err(e);
             }
+            Err(e) if matches!(e.details(), CodexErrorDetails::ServerOverloaded) => {
+                // Capacity rejections are transient: keep retrying at a fixed
+                // delay instead of consuming the generic retry budget.
+                let delay = e
+                    .retry_after()
+                    .map(|retry_after| {
+                        retry_after
+                            .deadline()
+                            .saturating_duration_since(tokio::time::Instant::now())
+                    })
+                    .unwrap_or_else(|| {
+                        turn_context.provider.info().server_overloaded_retry_delay()
+                    });
+                sess.notify_stream_error(
+                    turn_context.as_ref(),
+                    format!("{e} Retrying in {:.1}s...", delay.as_secs_f64()),
+                    e,
+                )
+                .await;
+                tokio::time::sleep(delay).await;
+                continue;
+            }
             Err(e) => {
                 if retries < max_retries {
                     retries += 1;

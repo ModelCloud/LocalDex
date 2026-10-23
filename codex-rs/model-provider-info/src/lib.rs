@@ -68,6 +68,14 @@ pub fn read_managed_residency_requirement() -> Option<ResidencyRequirement> {
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS: u64 = 300_000;
 const DEFAULT_STREAM_MAX_RETRIES: u64 = 5;
 const DEFAULT_REQUEST_MAX_RETRIES: u64 = 4;
+/// Delay between automatic retries when the provider reports the model is at
+/// capacity (`server_is_overloaded`). Such retries never count against
+/// `stream_max_retries` and repeat indefinitely until capacity frees up.
+const DEFAULT_SERVER_OVERLOADED_RETRY_DELAY_MS: u64 = 1_000;
+/// Environment variable that overrides the at-capacity retry delay for every
+/// provider, including providers that cannot be configured in TOML such as the
+/// built-in OpenAI provider.
+const SERVER_OVERLOADED_RETRY_DELAY_ENV_VAR: &str = "CODEX_SERVER_OVERLOADED_RETRY_DELAY_MS";
 const DEFAULT_AWS_CREDENTIAL_EXPORT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_AWS_AUTH_REFRESH_TIMEOUT_MS: u64 = 300_000;
 pub const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 = 15_000;
@@ -208,6 +216,11 @@ pub struct ModelProviderInfo {
     /// Maximum time (in milliseconds) to wait for a websocket connection attempt before treating
     /// it as failed.
     pub websocket_connect_timeout_ms: Option<u64>,
+    /// Delay (in milliseconds) before retrying a request that failed because the
+    /// model is at capacity (`server_is_overloaded`). Capacity retries are
+    /// unbounded and never consume `stream_max_retries`. Defaults to 1000ms;
+    /// `CODEX_SERVER_OVERLOADED_RETRY_DELAY_MS` overrides it globally when unset.
+    pub server_overloaded_retry_delay_ms: Option<u64>,
     /// Does this provider require an OpenAI API key or ChatGPT login token? If true,
     /// the user is presented with a login screen on first run, and credentials are
     /// stored using the backend selected by `cli_auth_credentials_store`.
@@ -548,6 +561,22 @@ other non-default provider fields are not supported"
             .unwrap_or(Duration::from_millis(DEFAULT_STREAM_IDLE_TIMEOUT_MS))
     }
 
+    /// Effective delay before retrying an at-capacity (`server_is_overloaded`)
+    /// request. The provider field wins, then the global env override, then the
+    /// 1s default.
+    pub fn server_overloaded_retry_delay(&self) -> Duration {
+        if let Some(delay_ms) = self.server_overloaded_retry_delay_ms {
+            return Duration::from_millis(delay_ms);
+        }
+        let env_delay_ms = std::env::var(SERVER_OVERLOADED_RETRY_DELAY_ENV_VAR)
+            .ok()
+            .and_then(|raw| raw.parse::<u64>().ok());
+        env_delay_ms
+            .or(Some(DEFAULT_SERVER_OVERLOADED_RETRY_DELAY_MS))
+            .map(Duration::from_millis)
+            .expect("default server-overloaded retry delay is set")
+    }
+
     /// Effective timeout for websocket connect attempts.
     pub fn websocket_connect_timeout(&self) -> Duration {
         self.websocket_connect_timeout_ms
@@ -589,6 +618,7 @@ other non-default provider fields are not supported"
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
+            server_overloaded_retry_delay_ms: None,
             requires_openai_auth: true,
             supports_websockets: true,
             supports_responses_continuation: false,
@@ -631,6 +661,7 @@ other non-default provider fields are not supported"
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
+            server_overloaded_retry_delay_ms: None,
             requires_openai_auth: false,
             supports_websockets: false,
             supports_responses_continuation: false,
@@ -822,6 +853,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
         websocket_connect_timeout_ms: None,
+        server_overloaded_retry_delay_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
