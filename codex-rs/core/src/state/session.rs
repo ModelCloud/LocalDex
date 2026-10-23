@@ -106,6 +106,10 @@ pub(crate) struct SessionState {
     /// Identity of the last context whose automatic compaction failed or made no progress.
     /// This prevents the same unchanged context from repeatedly issuing an expensive request.
     failed_auto_compact_context: Option<AutoCompactContextKey>,
+    /// Set when the endpoint answers a V2 compaction request without a compaction output
+    /// item, meaning it does not implement the remote-compaction item protocol. Sticky so
+    /// later auto-compacts go straight to the local path instead of burning another request.
+    remote_compaction_v2_unsupported: bool,
     pub(crate) async_compaction: crate::session::async_compaction::AsyncCompactionState,
     /// Original request effort for the current model while configuration updates remain active.
     pub(crate) reasoning_effort_pin: ReasoningEffortPin,
@@ -155,6 +159,7 @@ impl SessionState {
             turn_attribution: None,
             auto_compact_window: AutoCompactWindow::new_with_ids(auto_compact_window_ids),
             failed_auto_compact_context: None,
+            remote_compaction_v2_unsupported: false,
             async_compaction: crate::session::async_compaction::AsyncCompactionState::default(),
             reasoning_effort_pin: ReasoningEffortPin::Unset,
             shutting_down: false,
@@ -346,6 +351,14 @@ impl SessionState {
         context: Option<AutoCompactContextKey>,
     ) {
         self.failed_auto_compact_context = context;
+    }
+
+    pub(crate) fn remote_compaction_v2_unsupported(&self) -> bool {
+        self.remote_compaction_v2_unsupported
+    }
+
+    pub(crate) fn set_remote_compaction_v2_unsupported(&mut self) {
+        self.remote_compaction_v2_unsupported = true;
     }
 
     pub(crate) fn claim_token_budget_reminder(&mut self) -> bool {

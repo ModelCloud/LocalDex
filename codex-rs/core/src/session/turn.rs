@@ -1725,74 +1725,110 @@ async fn run_auto_compact(
             return Ok(true);
         }
 
-        match turn_context.provider.capabilities().remote_compaction {
-            RemoteCompactionSupport::V2 => {
-                let has_candidate = candidate.is_some();
-                if !has_candidate {
-                    emit_compact_metric(
-                        &sess.services.session_telemetry,
-                        "remote_v2",
-                        /*manual*/ false,
-                    );
-                }
-                let fallback = if has_candidate && matches!(reason, CompactionReason::ContextLimit)
-                {
-                    let status =
-                        super::context_window::context_window_token_status(sess, &turn_context)
-                            .await;
-                    let required = match phase {
-                        CompactionPhase::PostTurn => status.turn_end_compaction_threshold_reached,
-                        CompactionPhase::PreTurn
-                        | CompactionPhase::MidTurn
-                        | CompactionPhase::StandaloneTurn => status.token_limit_reached,
-                    };
-                    if required {
-                        crate::compact_remote_v2::CompactionFallback::Foreground
-                    } else {
-                        crate::compact_remote_v2::CompactionFallback::Skip
-                    }
-                } else {
-                    crate::compact_remote_v2::CompactionFallback::Foreground
-                };
-                let installed = run_inline_remote_auto_compact_task_v2(
-                    Arc::clone(sess),
-                    step_context,
-                    replacement_step_context,
-                    client_session,
-                    world_state,
-                    reason,
-                    phase,
-                    candidate,
-                    fallback,
-                )
-                .await?;
-                if has_candidate && installed {
-                    emit_compact_metric(
-                        &sess.services.session_telemetry,
-                        "remote_v2",
-                        /*manual*/ false,
-                    );
-                }
-                Ok(installed)
-            }
-            RemoteCompactionSupport::Unsupported => {
+        let v2_supported = matches!(
+            turn_context.provider.capabilities().remote_compaction,
+            RemoteCompactionSupport::V2
+        ) && !(localdex_compaction && sess.remote_compaction_v2_unsupported().await);
+        if v2_supported {
+            let has_candidate = candidate.is_some();
+            if !has_candidate {
                 emit_compact_metric(
                     &sess.services.session_telemetry,
-                    "local",
+                    "remote_v2",
                     /*manual*/ false,
                 );
-                run_inline_auto_compact_task(
-                    Arc::clone(sess),
-                    Arc::clone(&turn_context),
-                    replacement_step_context,
-                    world_state,
-                    reason,
-                    phase,
-                )
-                .await?;
-                Ok(true)
             }
+            let fallback = if has_candidate && matches!(reason, CompactionReason::ContextLimit) {
+                let status =
+                    super::context_window::context_window_token_status(sess, &turn_context).await;
+                let required = match phase {
+                    CompactionPhase::PostTurn => status.turn_end_compaction_threshold_reached,
+                    CompactionPhase::PreTurn
+                    | CompactionPhase::MidTurn
+                    | CompactionPhase::StandaloneTurn => status.token_limit_reached,
+                };
+                if required {
+                    crate::compact_remote_v2::CompactionFallback::Foreground
+                } else {
+                    crate::compact_remote_v2::CompactionFallback::Skip
+                }
+            } else {
+                crate::compact_remote_v2::CompactionFallback::Foreground
+            };
+            let installed = match run_inline_remote_auto_compact_task_v2(
+                Arc::clone(sess),
+                step_context,
+                Arc::clone(&replacement_step_context),
+                client_session,
+                Arc::clone(&world_state),
+                reason,
+                phase,
+                candidate,
+                fallback,
+            )
+            .await
+            {
+                Ok(installed) => {
+                    if has_candidate && installed {
+                        emit_compact_metric(
+                            &sess.services.session_telemetry,
+                            "remote_v2",
+                            /*manual*/ false,
+                        );
+                    }
+                    installed
+                }
+                Err(err)
+                    if localdex_compaction && is_compaction_v2_protocol_mismatch(&err) =>
+                {
+                    // The endpoint does not implement the remote-compaction item
+                    // protocol. Downgrade to the local summarizer once and stay there
+                    // instead of re-issuing a request it cannot answer.
+                    sess.set_remote_compaction_v2_unsupported().await;
+                    let message = format!(
+                        "Endpoint does not support remote compaction v2; using local compaction ({err})"
+                    );
+                    sess.send_event(
+                        turn_context.as_ref(),
+                        EventMsg::Warning(WarningEvent { message }),
+                    )
+                    .await;
+                    emit_compact_metric(
+                        &sess.services.session_telemetry,
+                        "local",
+                        /*manual*/ false,
+                    );
+                    run_inline_auto_compact_task(
+                        Arc::clone(sess),
+                        Arc::clone(&turn_context),
+                        replacement_step_context,
+                        world_state,
+                        reason,
+                        phase,
+                    )
+                    .await?;
+                    true
+                }
+                Err(err) => return Err(err),
+            };
+            return Ok(installed);
         }
+
+        emit_compact_metric(
+            &sess.services.session_telemetry,
+            "local",
+            /*manual*/ false,
+        );
+        run_inline_auto_compact_task(
+            Arc::clone(sess),
+            Arc::clone(&turn_context),
+            replacement_step_context,
+            world_state,
+            reason,
+            phase,
+        )
+        .await?;
+        Ok(true)
     }
     .await;
 
@@ -1836,6 +1872,17 @@ async fn run_auto_compact(
         sess.set_failed_auto_compact_context(None).await;
     }
     Ok(installed)
+}
+
+/// The endpoint answered a V2 compaction request without the required compaction
+/// output item, so it does not implement the remote-compaction item protocol.
+/// Stream-shaped failures (disconnects, incomplete responses) stay ordinary errors.
+fn is_compaction_v2_protocol_mismatch(err: &CodexErr) -> bool {
+    matches!(
+        err.details(),
+        CodexErrorDetails::Fatal(message)
+            if message.contains("expected exactly one compaction output item")
+    )
 }
 
 pub(super) fn collect_explicit_app_ids_from_skill_items(

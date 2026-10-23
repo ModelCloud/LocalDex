@@ -46,6 +46,7 @@ impl ProviderCapabilities {
             web_search: supports_openai_only_tools,
             external_web_access: supports_openai_only_tools,
             remote_compaction: if info.is_openai()
+                || info.localdex_compatibility
                 || is_azure_responses_provider(&info.name, info.base_url.as_deref())
             {
                 RemoteCompactionSupport::V2
