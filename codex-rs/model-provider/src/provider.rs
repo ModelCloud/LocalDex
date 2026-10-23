@@ -803,7 +803,7 @@ mod tests {
                 image_generation: false,
                 web_search: false,
                 external_web_access: false,
-                remote_compaction: RemoteCompactionSupport::Unsupported,
+                remote_compaction: RemoteCompactionSupport::V2,
             }
         );
     }

@@ -95,6 +95,21 @@ async fn plan_mode_uses_contributed_turn_item_for_last_agent_message() {
 }
 
 #[test]
+fn compaction_v2_protocol_mismatch_only_matches_missing_compaction_output() {
+    assert!(is_compaction_v2_protocol_mismatch(&CodexErr::new(
+        CodexErrorDetails::Fatal(
+            "remote compaction v2 expected exactly one compaction output item, got 0".to_string(),
+        ),
+    )));
+    assert!(!is_compaction_v2_protocol_mismatch(&CodexErr::new(
+        CodexErrorDetails::Fatal("unrelated fatal error".to_string()),
+    )));
+    assert!(!is_compaction_v2_protocol_mismatch(&CodexErr::new(
+        CodexErrorDetails::Interrupted,
+    )));
+}
+
+#[test]
 fn realtime_user_verification_notice_excludes_request_payload() {
     let event = EventMsg::ElicitationRequest(codex_protocol::approvals::ElicitationRequestEvent {
         turn_id: None,

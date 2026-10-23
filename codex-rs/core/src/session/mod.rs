@@ -1586,6 +1586,17 @@ impl Session {
             .set_failed_auto_compact_context(context);
     }
 
+    pub(crate) async fn remote_compaction_v2_unsupported(&self) -> bool {
+        self.state.lock().await.remote_compaction_v2_unsupported()
+    }
+
+    pub(crate) async fn set_remote_compaction_v2_unsupported(&self) {
+        self.state
+            .lock()
+            .await
+            .set_remote_compaction_v2_unsupported();
+    }
+
     pub(crate) async fn auto_compact_window_snapshot(&self) -> AutoCompactWindowSnapshot {
         let state = self.state.lock().await;
         state.auto_compact_window_snapshot()
