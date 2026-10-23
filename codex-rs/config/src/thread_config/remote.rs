@@ -199,6 +199,8 @@ fn model_provider_from_proto(
         localdex_compatibility: false,
         supports_standalone_web_search: provider.supports_standalone_web_search,
         capabilities: None,
+        project_id: provider.project_id,
+        location: provider.location,
         include_internal_metadata: false,
     };
     Ok((id, info))
@@ -219,6 +221,8 @@ fn model_provider_to_proto(
         auth,
         gateway_oauth: _,
         aws: _,
+        project_id,
+        location,
         wire_api,
         query_params,
         http_headers,
@@ -258,6 +262,8 @@ fn model_provider_to_proto(
         supports_websockets,
         supports_responses_continuation,
         supports_standalone_web_search,
+        project_id,
+        location,
     }
 }
 
@@ -453,11 +459,17 @@ mod tests {
     #[test]
     fn model_provider_proto_roundtrips_through_domain_type() {
         let mut expected = expected_provider();
+        expected.supports_responses_continuation = true;
+        expected.project_id = Some("vertex-project".to_string());
+        expected.location = Some("us-central1".to_string());
         expected.auth = None;
         expected.experimental_bearer_token = Some("synthetic-provider-token".into());
         let proto = model_provider_to_proto("local", expected.clone());
         assert!(proto.supports_standalone_web_search);
-        let (id, actual) = model_provider_from_proto(proto).expect("model provider from proto");
+        let bytes = prost::Message::encode_to_vec(&proto);
+        let decoded = <proto::ModelProvider as prost::Message>::decode(bytes.as_slice())
+            .expect("decode model provider");
+        let (id, actual) = model_provider_from_proto(decoded).expect("model provider from proto");
 
         assert_eq!(id, "local");
         assert_eq!(actual, expected);
@@ -528,6 +540,8 @@ mod tests {
                             supports_websockets: true,
                             supports_responses_continuation: false,
                             supports_standalone_web_search: true,
+                            project_id: None,
+                            location: None,
                         }],
                         features: HashMap::from([
                             ("plugins".to_string(), false),
@@ -596,6 +610,8 @@ mod tests {
             gateway_oauth: None,
             aws: None,
             capabilities: None,
+            project_id: None,
+            location: None,
             include_internal_metadata: false,
         }
     }
