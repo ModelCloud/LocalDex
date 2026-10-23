@@ -52,8 +52,8 @@ usage() {
   cat <<'EOF'
 Usage: install-localdex.sh [--release VERSION|TAG]
 
-Installs the ModelCloud LocalDex Linux x86_64 or ARM64 distribution as the
-`codex` command. Existing CODEX_HOME configuration, auth, and session data are kept.
+Installs the ModelCloud LocalDex Linux or macOS distribution as the `codex`
+command. Existing CODEX_HOME configuration, auth, and session data are kept.
 
 Environment:
   LOCALDEX_RELEASE      Release version or release tag, or latest (default).

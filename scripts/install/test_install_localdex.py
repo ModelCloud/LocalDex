@@ -8,7 +8,6 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
 
 
 INSTALLER = Path(__file__).with_name("install-localdex.sh")
@@ -24,31 +23,10 @@ INSTALLER_TARGET = f"{INSTALLER_ARCH}-{INSTALLER_SUFFIX}"
 
 
 class InstallerTestCase(unittest.TestCase):
-    def setUp(self) -> None:
-        if os.uname().sysname != "Darwin":
-            return
-        tools_directory = tempfile.TemporaryDirectory()
-        self.addCleanup(tools_directory.cleanup)
-        tools_path = Path(tools_directory.name)
-        mock_mv = tools_path / "mv"
-        mock_mv.write_text(
-            "#!/bin/sh\n"
-            'if [ "$1" = "-Tf" ]; then\n'
-            "  shift\n"
-            '  exec /bin/mv -fh "$@"\n'
-            "fi\n"
-            'exec /bin/mv "$@"\n',
-            encoding="utf-8",
-        )
-        mock_mv.chmod(0o755)
-        environment = patch.dict(
-            os.environ, {"PATH": f"{tools_path}:{os.environ['PATH']}"}
-        )
-        environment.start()
-        self.addCleanup(environment.stop)
+    pass
 
 
-def make_archive(root: Path, version: str) -> Path:
+def make_archive(root: Path, version: str, target: str = INSTALLER_TARGET) -> Path:
     package = root / f"package-{version}"
     (package / "bin").mkdir(parents=True)
     (package / "codex-path").mkdir()
@@ -56,7 +34,7 @@ def make_archive(root: Path, version: str) -> Path:
     manifest = {
         "layoutVersion": 1,
         "version": version,
-        "target": INSTALLER_TARGET,
+        "target": target,
         "variant": "localdex",
         "entrypoint": "bin/localdex",
         "resourcesDir": "codex-resources",
@@ -86,6 +64,141 @@ def make_archive(root: Path, version: str) -> Path:
 
 
 class LocalDexInstallerTest(InstallerTestCase):
+    def test_installer_does_not_require_gnu_mv(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = make_archive(root, "0.155.1")
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            mock_mv = fake_bin / "mv"
+            mock_mv.write_text(
+                "#!/bin/sh\n"
+                'for arg in "$@"; do\n'
+                '  case "$arg" in\n'
+                "    -T|-Tf|-fT)\n"
+                "      echo 'mock mv: GNU-only -T option' >&2\n"
+                "      exit 64\n"
+                "      ;;\n"
+                "  esac\n"
+                "done\n"
+                'exec /bin/mv "$@"\n',
+                encoding="utf-8",
+            )
+            mock_mv.chmod(0o755)
+            codex_home = root / "codex-home"
+            standalone = codex_home / "packages" / "standalone"
+            previous = standalone / "releases" / "previous"
+            previous.mkdir(parents=True)
+            (standalone / "current").symlink_to(previous)
+
+            result = subprocess.run(
+                [str(INSTALLER)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "HOME": str(root),
+                    "CODEX_HOME": str(codex_home),
+                    "LOCALDEX_INSTALL_DIR": str(root / "bin"),
+                    "LOCALDEX_ARCHIVE": str(archive),
+                    "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                (standalone / "current").resolve(),
+                (
+                    standalone
+                    / "releases"
+                    / f"0.155.1-localdex-{INSTALLER_TARGET}"
+                ).resolve(),
+            )
+
+    def test_darwin_arm64_selects_apple_package(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            target = "aarch64-apple-darwin"
+            asset = f"localdex-package-{target}.tar.gz"
+            archive = make_archive(root, "0.155.5", target)
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            urls = root / "requested-urls"
+
+            mock_uname = fake_bin / "uname"
+            mock_uname.write_text(
+                "#!/bin/sh\n"
+                'case "$1" in\n'
+                "  -s) echo Darwin ;;\n"
+                "  -m) echo arm64 ;;\n"
+                '  *) exec /usr/bin/uname "$@" ;;\n'
+                "esac\n",
+                encoding="utf-8",
+            )
+            mock_uname.chmod(0o755)
+
+            releases = json.dumps(
+                [
+                    {
+                        "tag_name": "localdex-build-0.155.5-darwin",
+                        "prerelease": False,
+                        "assets": [
+                            {"name": asset},
+                            {
+                                "name": (
+                                    "localdex-package-aarch64-unknown-linux-gnu"
+                                    ".tar.gz"
+                                )
+                            },
+                        ],
+                    }
+                ],
+                indent=2,
+            )
+            mock_curl = fake_bin / "curl"
+            mock_curl.write_text(
+                "#!/bin/sh\n"
+                'url="$2"\noutput="$4"\n'
+                f"printf '%s\\n' \"$url\" >> '{urls}'\n"
+                'case "$url" in\n'
+                "  *'/releases?per_page=50') cat > \"$output\" <<'RELEASES'\n"
+                f"{releases}\n"
+                "RELEASES\n"
+                "    ;;\n"
+                f"  *'/localdex-build-0.155.5-darwin/{asset}.sha256') cp "
+                f"'{archive}.sha256' \"$output\" ;;\n"
+                f"  *'/localdex-build-0.155.5-darwin/{asset}') cp "
+                f"'{archive}' \"$output\" ;;\n"
+                "  *) exit 9 ;;\n"
+                "esac\n",
+                encoding="utf-8",
+            )
+            mock_curl.chmod(0o755)
+
+            result = subprocess.run(
+                [str(INSTALLER)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "HOME": str(root),
+                    "CODEX_HOME": str(root / "codex-home"),
+                    "LOCALDEX_INSTALL_DIR": str(root / "bin"),
+                    "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            requested = urls.read_text(encoding="utf-8")
+            self.assertIn(
+                "/localdex-build-0.155.5-darwin/"
+                "localdex-package-aarch64-apple-darwin.tar.gz",
+                requested,
+            )
+            self.assertNotIn("aarch64-unknown-linux-gnu", requested)
+
     def test_install_uses_localdex_codex_and_preserves_codex_home(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
