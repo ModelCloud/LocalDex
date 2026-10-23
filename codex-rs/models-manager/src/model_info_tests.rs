@@ -244,12 +244,12 @@ fn unknown_model_uses_builtin_instruction_template() {
 fn localdex_dsv41_flash_uses_native_metadata() {
     let model = model_info_from_slug("QB/DSV4.1-Flash");
 
-    assert_eq!(model.display_name, "DeepSeek V4.1 Flash");
+    assert_eq!(model.display_name, "DeepSeek v4.1 Flash 1017");
     assert_eq!(model.context_window, Some(262_144));
     assert_eq!(model.max_context_window, None);
     assert_eq!(model.auto_compact_token_limit(), Some(257_948));
     assert_eq!(model.usable_context_window(), Some(262_144));
-    assert_eq!(model.default_reasoning_level, Some(ReasoningEffort::High));
+    assert_eq!(model.default_reasoning_level, Some(ReasoningEffort::Max));
     assert_eq!(
         model
             .supported_reasoning_levels

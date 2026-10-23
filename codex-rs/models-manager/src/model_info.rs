@@ -229,12 +229,12 @@ pub fn localdex_model_catalog() -> ModelsResponse {
 fn localdex_dsv41_flash_model_info() -> ModelInfo {
     ModelInfo {
         slug: LOCALDEX_DSV41_FLASH.to_string(),
-        display_name: "DeepSeek V4.1 Flash".to_string(),
+        display_name: "DeepSeek v4.1 Flash 1017".to_string(),
         description: Some("Local DeepSeek V4.1 Flash coding model.".to_string()),
         // DSV4.1 accepts `off`, `low`, `high`, `max`, or a numeric budget. Its
         // OpenAI-compatible endpoint explicitly rejects Codex's generic
-        // `medium` default, so use a valid default even outside Omnigent.
-        default_reasoning_level: Some(ReasoningEffort::High),
+        // `medium` default, and the local model defaults to maximum depth.
+        default_reasoning_level: Some(ReasoningEffort::Max),
         supported_reasoning_levels: vec![
             ReasoningEffortPreset {
                 effort: ReasoningEffort::Custom("off".to_string()),
@@ -255,11 +255,11 @@ fn localdex_dsv41_flash_model_info() -> ModelInfo {
         ],
         shell_type: ConfigShellToolType::UnifiedExec,
         // This is a configured local provider model, not a hidden fallback.
-        // Keep its low priority so it never becomes the global default, while
-        // making it selectable alongside official models in `/model`.
+        // The local model leads the picker: the lowest priority sorts first,
+        // which also makes it the default when this catalog is in use.
         visibility: ModelVisibility::List,
         supported_in_api: true,
-        priority: 99,
+        priority: 0,
         additional_speed_tiers: Vec::new(),
         service_tiers: Vec::new(),
         default_service_tier: None,
