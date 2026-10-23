@@ -16,7 +16,11 @@ INSTALLER_MACHINE = subprocess.check_output(["uname", "-m"], text=True).strip()
 INSTALLER_ARCH = {"amd64": "x86_64", "arm64": "aarch64"}.get(
     INSTALLER_MACHINE, INSTALLER_MACHINE
 )
-INSTALLER_TARGET = f"{INSTALLER_ARCH}-unknown-linux-gnu"
+INSTALLER_OS = subprocess.check_output(["uname", "-s"], text=True).strip()
+INSTALLER_SUFFIX = (
+    "apple-darwin" if INSTALLER_OS == "Darwin" else "unknown-linux-gnu"
+)
+INSTALLER_TARGET = f"{INSTALLER_ARCH}-{INSTALLER_SUFFIX}"
 
 
 class InstallerTestCase(unittest.TestCase):
