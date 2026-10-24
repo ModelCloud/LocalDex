@@ -89,6 +89,7 @@ use codex_protocol::auth::AuthMode;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::config_types::Verbosity as VerbosityConfig;
+use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
@@ -223,6 +224,39 @@ fn sanitize_reasoning_for_official_provider(
     for item in input {
         if let ResponseItem::Reasoning { content, .. } = item {
             *content = None;
+        }
+    }
+}
+
+fn sanitize_plaintext_compaction_for_official_provider(
+    input: &mut [ResponseItem],
+    localdex_compatibility: bool,
+) {
+    if localdex_compatibility {
+        return;
+    }
+    for item in input {
+        let ResponseItem::Compaction {
+            encrypted_content, ..
+        } = item
+        else {
+            continue;
+        };
+        // Older Lite versions copied a readable summary into this field. A
+        // provider-issued encrypted token has no whitespace; the readable
+        // summary must travel as ordinary text when the model changes.
+        if encrypted_content.chars().any(char::is_whitespace) {
+            *item = ResponseItem::Message {
+                encrypted_content: None,
+                status: None,
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: encrypted_content.clone(),
+                }],
+                phase: None,
+                internal_chat_message_metadata_passthrough: None,
+            };
         }
     }
 }
@@ -1218,6 +1252,10 @@ impl ModelClient {
         // Local providers may put plaintext reasoning in history, while official
         // Responses models reject reasoning items with nonempty `content`.
         sanitize_reasoning_for_official_provider(
+            &mut input,
+            self.state.provider.info().localdex_compatibility,
+        );
+        sanitize_plaintext_compaction_for_official_provider(
             &mut input,
             self.state.provider.info().localdex_compatibility,
         );

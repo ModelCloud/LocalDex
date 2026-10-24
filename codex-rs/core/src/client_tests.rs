@@ -185,6 +185,73 @@ fn local_reasoning_at_compacted_handoff_is_not_sent_to_official_model() -> anyho
     Ok(())
 }
 
+#[test]
+fn local_plaintext_compaction_is_sent_as_text_after_provider_switch() -> anyhow::Result<()> {
+    let original = test_model_client(SessionSource::Cli);
+    let mut local_provider = original.provider_info().clone();
+    local_provider.localdex_compatibility = true;
+    let local = original.with_provider(create_model_provider(local_provider, None));
+    let official = original.with_provider(create_model_provider(
+        ModelProviderInfo::create_openai_provider(None),
+        None,
+    ));
+    let plaintext = "## Active Objective\nContinue the previous work.";
+    let prompt = Prompt {
+        input: vec![
+            ResponseItem::Compaction {
+                id: None,
+                encrypted_content: plaintext.to_string(),
+                internal_chat_message_metadata_passthrough: None,
+            },
+            ResponseItem::Compaction {
+                id: None,
+                encrypted_content: "opaqueEncryptedToken".to_string(),
+                internal_chat_message_metadata_passthrough: None,
+            },
+        ],
+        ..Default::default()
+    };
+    let saved_history = prompt.input.clone();
+    let build = |client: &ModelClient| {
+        client.build_responses_request(
+            &prompt,
+            &test_model_info(),
+            None,
+            codex_protocol::config_types::ReasoningSummary::None,
+            None,
+            &test_responses_metadata_for_client(
+                client,
+                None,
+                format!("{}:0", client.state.thread_id),
+                None,
+                TestCodexResponsesRequestKind::Turn,
+            ),
+            false,
+        )
+    };
+    let official_wire = serde_json::to_value(build(&official)?)?;
+    let official_input = official_wire["input"].as_array().expect("official input");
+    let summary = official_input
+        .iter()
+        .find(|item| item["content"][0]["text"] == plaintext)
+        .expect("plain summary on official wire");
+    assert_eq!(summary["type"], "message");
+    assert_eq!(summary["role"], "user");
+    assert!(official_input.iter().any(|item| {
+        item["type"] == "compaction" && item["encrypted_content"] == "opaqueEncryptedToken"
+    }));
+    let local_wire = serde_json::to_value(build(&local)?)?;
+    assert!(
+        local_wire["input"]
+            .as_array()
+            .expect("local input")
+            .iter()
+            .any(|item| { item["type"] == "compaction" && item["encrypted_content"] == plaintext })
+    );
+    assert_eq!(prompt.input, saved_history);
+    Ok(())
+}
+
 #[path = "client_http_continuation_tests.rs"]
 mod http_continuation;
 
