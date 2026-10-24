@@ -2029,7 +2029,7 @@ async fn localdex_steer_reconnects_websocket_and_sends_full_history() -> anyhow:
     ])
     .await;
     let test = test_codex()
-        .with_model("QB/DSV4.1-Flash")
+        .with_model("DS v4.1 Flash 1017")
         .with_config(|config| {
             let providers = codex_model_provider_info::merge_configured_model_providers(
                 Default::default(),

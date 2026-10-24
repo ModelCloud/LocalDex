@@ -71,7 +71,7 @@ async fn localdex_model_is_in_catalog_while_openai_is_selected() {
         catalog
             .models
             .iter()
-            .any(|model| model.slug == "QB/DSV4.1-Flash")
+            .any(|model| model.slug == "DS v4.1 Flash 1017")
     );
 }
 

@@ -55,7 +55,7 @@ wire_api = "responses"
 requires_openai_auth = false
 
 [profiles.dsv41]
-model = "QB/DSV4.1-Flash"
+model = "DS v4.1 Flash 1017"
 model_provider = "dsv41"
 ```
 
@@ -91,9 +91,9 @@ requires_openai_auth = false
 
 ```toml
 # ~/.local/share/localdex/models.toml
-[models."QB/DSV4.1-Flash"]
+[models."DS v4.1 Flash 1017"]
 provider = "dsv41"
-display_name = "DSV4.1 Flash"
+display_name = "DS v4.1 Flash 1017"
 discover_capabilities = true
 
 [models."lab/coder-32b"]

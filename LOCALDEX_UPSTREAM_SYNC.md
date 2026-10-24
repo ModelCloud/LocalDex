@@ -5,7 +5,7 @@ place when merging; carry LocalDex behavior as small, provider-specific changes.
 
 Compatibility points to preserve:
 
-- Official OpenAI models use their official provider. `QB/DSV4.1-Flash` uses
+- Official OpenAI models use their official provider. `DS v4.1 Flash 1017` uses
   the configured `localdex` provider, including after a model switch or resume.
 - LocalDex reads its live context capacity and compacts at context minus 4,196
   tokens. A changed capacity can trigger compaction before the next request.

@@ -94,6 +94,8 @@ pub const OPENAI_PROVIDER_ID: &str = "openai";
 /// arbitrary OpenAI-compatible endpoints retain the conservative stateless
 /// default.
 pub const LOCALDEX_PROVIDER_ID: &str = "localdex";
+/// The canonical model ID served by the bundled LocalDex endpoint.
+pub const LOCALDEX_MODEL_ID: &str = "DS v4.1 Flash 1017";
 /// LocalDex may spend several minutes prefilling a very large prompt before it
 /// emits the next SSE event. Keep the stream alive for up to 15 minutes so the
 /// client does not treat a valid cold prefill as a dead connection.
@@ -104,7 +106,7 @@ pub fn is_localdex_provider_id(provider_id: &str) -> bool {
 }
 /// ModelCloud model IDs served by the configured LocalDex endpoint.
 pub fn is_localdex_model(model: &str) -> bool {
-    model.starts_with("QB/") && model.len() > 3
+    model == LOCALDEX_MODEL_ID
 }
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";

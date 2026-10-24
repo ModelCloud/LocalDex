@@ -5297,7 +5297,7 @@ async fn session_switches_between_omnigent_localdex_and_openai() {
     config.model_provider = config.model_providers["omnigent-localdex-test"].clone();
     session.original_config_do_not_use = Arc::new(config);
     let mut step_settings = (*session.step_settings).clone();
-    step_settings.collaboration_mode.settings.model = "QB/DSV4.1-Flash".to_string();
+    step_settings.collaboration_mode.settings.model = "DS v4.1 Flash 1017".to_string();
     session.step_settings = Arc::new(step_settings);
 
     let official = session
@@ -5348,7 +5348,7 @@ async fn session_switches_between_omnigent_localdex_and_openai() {
         .apply(
             &SessionSettingsUpdate {
                 step_settings: StepSettingsUpdate {
-                    model: Some("QB/DSV4.1-Flash".to_string()),
+                    model: Some("DS v4.1 Flash 1017".to_string()),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -5389,7 +5389,7 @@ async fn session_switches_between_omnigent_localdex_and_openai() {
     );
 
     let mut collaboration_mode = official_again.step_settings.collaboration_mode.clone();
-    collaboration_mode.settings.model = "QB/DSV4.1-Flash".to_string();
+    collaboration_mode.settings.model = "DS v4.1 Flash 1017".to_string();
     let local_from_mode = official_again
         .apply(
             &SessionSettingsUpdate {

@@ -4243,7 +4243,7 @@ async fn incomplete_response_is_terminal(
         None
     };
     let model = if localdex {
-        "QB/DSV4.1-Flash"
+        "DS v4.1 Flash 1017"
     } else {
         "gpt-5.4"
     };
