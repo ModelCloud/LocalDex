@@ -56,6 +56,11 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
+        // A remote attach is driven by an external orchestrator with no one to
+        // answer this modal, and hiding the composer blocks its readiness check.
+        if matches!(self.app_server_target, crate::AppServerTarget::Remote { .. }) {
+            return;
+        }
         if self.chat_widget.has_misalignment_policy_violation() {
             return;
         }
