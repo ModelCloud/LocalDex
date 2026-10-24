@@ -2110,6 +2110,8 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
         localdex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
+        project_id: None,
+        location: None,
         include_internal_metadata: false,
     };
 
@@ -3621,6 +3623,8 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         localdex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
+        project_id: None,
+        location: None,
         include_internal_metadata: false,
     };
 
@@ -4493,6 +4497,8 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
         localdex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
+        project_id: None,
+        location: None,
         include_internal_metadata: false,
     };
 
@@ -4584,6 +4590,8 @@ async fn env_var_overrides_loaded_auth() {
         localdex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
+        project_id: None,
+        location: None,
         include_internal_metadata: false,
     };
 

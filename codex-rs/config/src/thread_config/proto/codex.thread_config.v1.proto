@@ -50,7 +50,10 @@ message ModelProvider {
   bool supports_websockets = 17;
   bool supports_standalone_web_search = 18;
   optional string model_catalog_url = 19;
-  bool supports_responses_continuation = 20;
+  optional string project_id = 20;
+  optional string location = 21;
+  // Keep fork-only fields outside the upstream allocation range.
+  bool supports_responses_continuation = 1000;
 }
 
 message StringMap {

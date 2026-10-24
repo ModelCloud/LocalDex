@@ -79,7 +79,12 @@ pub struct ModelProvider {
     pub supports_standalone_web_search: bool,
     #[prost(string, optional, tag = "19")]
     pub model_catalog_url: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(bool, tag = "20")]
+    #[prost(string, optional, tag = "20")]
+    pub project_id: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag = "21")]
+    pub location: ::core::option::Option<::prost::alloc::string::String>,
+    /// Keep fork-only fields outside the upstream allocation range.
+    #[prost(bool, tag = "1000")]
     pub supports_responses_continuation: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
