@@ -291,6 +291,38 @@ struct RemoteCompactionV2Output {
     token_usage: Option<TokenUsage>,
 }
 
+fn portable_compaction_summary(text: String) -> ResponseItem {
+    ResponseItem::Message {
+        encrypted_content: None,
+        status: None,
+        id: None,
+        role: "user".to_string(),
+        content: vec![ContentItem::InputText { text }],
+        phase: None,
+        internal_chat_message_metadata_passthrough: None,
+    }
+}
+
+fn lite_compaction_summary(item: &ResponseItem) -> Option<ResponseItem> {
+    let ResponseItem::Message { role, content, .. } = item else {
+        return None;
+    };
+    if role != "assistant" {
+        return None;
+    }
+    let text = content
+        .iter()
+        .filter_map(|part| match part {
+            ContentItem::OutputText { text, .. } | ContentItem::InputText { text } => {
+                Some(text.as_str())
+            }
+            ContentItem::InputImage { .. } | ContentItem::InputAudio { .. } => None,
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    (!text.trim().is_empty()).then(|| portable_compaction_summary(text))
+}
+
 async fn run_remote_compaction_request_v2(
     sess: &Session,
     step_context: &StepContext,
@@ -387,9 +419,12 @@ async fn collect_compaction_output(
     mut stream: ResponseStream,
     request_kind: CompactionRequestKind<'_>,
 ) -> CodexResult<RemoteCompactionV2Output> {
+    let localdex_compatibility = turn_context.provider.info().localdex_compatibility;
     let mut output_item_count = 0usize;
     let mut compaction_count = 0usize;
     let mut compaction_output = None;
+    let mut plain_summary_count = 0usize;
+    let mut plain_summary_output = None;
     let mut completed_response_id = None;
     let mut completed_token_usage = None;
     loop {
@@ -427,10 +462,17 @@ async fn collect_compaction_output(
         match event? {
             ResponseEvent::OutputItemDone(item) => {
                 output_item_count += 1;
-                if let ResponseItem::Compaction { .. } = item {
+                if matches!(&item, ResponseItem::Compaction { .. }) {
                     compaction_count += 1;
                     if compaction_output.is_none() {
                         compaction_output = Some(item);
+                    }
+                } else if localdex_compatibility
+                    && let Some(summary) = lite_compaction_summary(&item)
+                {
+                    plain_summary_count += 1;
+                    if plain_summary_output.is_none() {
+                        plain_summary_output = Some(summary);
                     }
                 }
             }
@@ -470,14 +512,23 @@ async fn collect_compaction_output(
         ));
     };
 
-    if compaction_count != 1 {
+    if compaction_count > 1
+        || (compaction_count == 0 && (!localdex_compatibility || plain_summary_count != 1))
+    {
         return Err(CodexErr::Fatal(format!(
-            "remote compaction v2 expected exactly one compaction output item, got {compaction_count} from {output_item_count} output items"
+            "remote compaction v2 expected exactly one compaction output item or Lite summary message, got {compaction_count} compaction and {plain_summary_count} summary items from {output_item_count} output items"
         )));
     }
-
-    let Some(compaction_output) = compaction_output else {
-        unreachable!("compaction output must exist when count is exactly one");
+    let compaction_output = match compaction_output {
+        Some(ResponseItem::Compaction {
+            encrypted_content, ..
+        }) if localdex_compatibility && encrypted_content.chars().any(char::is_whitespace) => {
+            // Older Lite versions put the readable summary in the encrypted
+            // field. Install it as ordinary text so later provider switches work.
+            portable_compaction_summary(encrypted_content)
+        }
+        Some(item) => item,
+        None => plain_summary_output.expect("exactly one Lite summary was collected"),
     };
     Ok(RemoteCompactionV2Output {
         compaction_output,
@@ -1354,6 +1405,54 @@ mod tests {
                 codex_rollout_budget_units: None,
             })
         );
+    }
+
+    #[tokio::test]
+    async fn collect_lite_summaries_as_portable_messages() {
+        for legacy_compaction_item in [false, true] {
+            let summary = "## Active Objective\nContinue the work.";
+            let lite_message: ResponseItem = serde_json::from_value(serde_json::json!({
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": summary}],
+            }))
+            .expect("Lite message");
+            let mut events = vec![Ok(ResponseEvent::OutputItemDone(lite_message))];
+            if legacy_compaction_item {
+                events.push(Ok(ResponseEvent::OutputItemDone(
+                    ResponseItem::Compaction {
+                        id: None,
+                        encrypted_content: summary.to_string(),
+                        internal_chat_message_metadata_passthrough: None,
+                    },
+                )));
+            }
+            events.push(Ok(ResponseEvent::Completed {
+                response_id: "resp-lite-compact".to_string(),
+                token_usage: None,
+                usage_metadata: None,
+                end_turn: Some(true),
+            }));
+            let (sess, turn_context, _rx) =
+                crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
+                    codex_login::CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+                    Vec::new(),
+                    |config| config.model_provider.localdex_compatibility = true,
+                )
+                .await;
+            let output = collect_compaction_output(
+                &sess,
+                &turn_context,
+                response_stream(events),
+                CompactionRequestKind::Foreground,
+            )
+            .await
+            .expect("Lite summary should be accepted");
+            assert_eq!(
+                output.compaction_output,
+                portable_compaction_summary(summary.to_string())
+            );
+        }
     }
 }
 
