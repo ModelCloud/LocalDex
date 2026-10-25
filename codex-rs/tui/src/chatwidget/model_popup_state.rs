@@ -72,15 +72,19 @@ impl ChatWidget {
         model_ids: Vec<String>,
         mut params: SelectionViewParams,
     ) {
-        let selected_index = params
-            .view_id
-            .and_then(|view_id| self.bottom_pane.selected_index_for_present_view(view_id));
-        let selected_model = selected_index.and_then(|index| self.model_popup_model_ids.get(index));
+        let view_id = params.view_id;
+        let selected_index =
+            view_id.and_then(|view_id| self.bottom_pane.selected_index_for_present_view(view_id));
+        let selected_model = view_id
+            .and_then(|view_id| self.model_popup_model_ids.get(view_id))
+            .and_then(|ids| selected_index.and_then(|index| ids.get(index)));
         params.initial_selected_idx = model_ids
             .iter()
             .position(|model| Some(model) == selected_model);
-        self.model_popup_model_ids = model_ids;
-        if let Some(view_id) = params.view_id.filter(|_| selected_index.is_some()) {
+        if let Some(view_id) = view_id {
+            self.model_popup_model_ids.insert(view_id, model_ids);
+        }
+        if let Some(view_id) = view_id.filter(|_| selected_index.is_some()) {
             self.bottom_pane
                 .replace_selection_view_if_present(view_id, params);
         } else {

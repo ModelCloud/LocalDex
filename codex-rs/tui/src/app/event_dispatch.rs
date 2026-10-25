@@ -2366,6 +2366,12 @@ impl App {
             AppEvent::OpenAllModelsPopup => {
                 self.chat_widget.open_all_models_popup();
             }
+            AppEvent::OpenProviderPopup { presets } => {
+                self.chat_widget.open_provider_popup(presets);
+            }
+            AppEvent::OpenVariantPopup { presets } => {
+                self.chat_widget.open_variant_popup(presets);
+            }
             AppEvent::OpenFullAccessConfirmation {
                 preset,
                 return_to_permissions,

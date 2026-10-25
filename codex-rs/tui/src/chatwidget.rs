@@ -553,7 +553,7 @@ pub(crate) struct ChatWidget {
         Option<permission_discovery::InlinePermissionProfileSelection>,
     worktree_popup_request_id: Option<uuid::Uuid>,
     permission_profiles_menu_opened: bool,
-    model_popup_model_ids: Vec<String>,
+    model_popup_model_ids: HashMap<&'static str, Vec<String>>,
     session_telemetry: SessionTelemetry,
     session_header: SessionHeader,
     pub(crate) initial_user_message: Option<UserMessage>,

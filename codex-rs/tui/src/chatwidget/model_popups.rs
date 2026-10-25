@@ -5,10 +5,136 @@
 
 use super::*;
 use crate::model_catalog::LUNA_RESERVE_MODEL;
+use codex_model_provider_info::is_lithos_model;
+use codex_model_provider_info::is_multidex_model;
+use codex_model_provider_info::is_openrouter_model;
 
 const ULTRA_REASONING_CONCURRENCY_WARNING_THRESHOLD: usize = 8;
 pub(super) const MODEL_SELECTION_VIEW_ID: &str = "model-selection";
 pub(super) const ALL_MODELS_SELECTION_VIEW_ID: &str = "all-models-selection";
+pub(super) const PROVIDER_SELECTION_VIEW_ID: &str = "provider-selection";
+pub(super) const VARIANT_SELECTION_VIEW_ID: &str = "variant-selection";
+
+/// A provider serving one of the picker presets that several providers offer
+/// under a shared model family name (e.g. DeepSeek v4.1 Flash).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PickerProvider {
+    Local,
+    OpenRouter,
+    Lithos,
+}
+
+impl PickerProvider {
+    fn for_model(model: &str) -> Option<Self> {
+        if is_multidex_model(model) {
+            Some(Self::Local)
+        } else if is_openrouter_model(model) {
+            Some(Self::OpenRouter)
+        } else if is_lithos_model(model) {
+            Some(Self::Lithos)
+        } else {
+            None
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Local => "Local",
+            Self::OpenRouter => "OpenRouter",
+            Self::Lithos => "LithosAI",
+        }
+    }
+}
+
+/// One row of the all-models picker: either a flat preset or a collapsed
+/// family of presets that several providers offer under one model name.
+enum PickerRow {
+    Single(ModelPreset),
+    Family {
+        name: String,
+        providers: Vec<(PickerProvider, Vec<ModelPreset>)>,
+    },
+}
+
+/// Group key for presets offered by several providers under one model name,
+/// derived from the shared `Name (Provider …)` display-name convention.
+fn model_family_key(preset: &ModelPreset) -> Option<String> {
+    let name = preset.display_name.strip_suffix(')')?;
+    let (base, _) = name.rsplit_once(" (")?;
+    let base = base.trim();
+    (!base.is_empty()).then(|| base.to_string())
+}
+
+/// Collapse presets that share a family name across multiple providers into
+/// one row. Families with a single provider stay flat; unclassified presets
+/// (for example upstream OpenAI models) always stay flat.
+fn group_picker_rows(presets: Vec<ModelPreset>) -> Vec<PickerRow> {
+    let mut rows: Vec<PickerRow> = Vec::new();
+    for preset in presets {
+        let grouped = PickerProvider::for_model(&preset.model)
+            .and_then(|provider| model_family_key(&preset).map(|key| (provider, key)));
+        let Some((provider, key)) = grouped else {
+            rows.push(PickerRow::Single(preset));
+            continue;
+        };
+        let index = rows
+            .iter()
+            .position(|row| matches!(row, PickerRow::Family { name, .. } if *name == key));
+        let Some(index) = index else {
+            rows.push(PickerRow::Family {
+                name: key,
+                providers: vec![(provider, vec![preset])],
+            });
+            continue;
+        };
+        let PickerRow::Family { providers, .. } = &mut rows[index] else {
+            unreachable!("position only matches family rows");
+        };
+        if let Some((_, presets)) = providers
+            .iter_mut()
+            .find(|(existing, _)| *existing == provider)
+        {
+            presets.push(preset);
+        } else {
+            providers.push((provider, vec![preset]));
+        }
+    }
+    rows
+}
+
+/// Derive a variant label from the slug suffix relative to the family's base
+/// slug; the base preset is the Regular variant.
+fn variant_label(preset: &ModelPreset, base_slug: &str) -> String {
+    let Some(suffix) = preset
+        .model
+        .strip_prefix(base_slug)
+        .and_then(|rest| rest.strip_prefix('-'))
+    else {
+        return "Regular".to_string();
+    };
+    let mut chars = suffix.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => "Regular".to_string(),
+    }
+}
+
+/// Group presets by provider name, preserving first-appearance order. A preset
+/// with no provider classification becomes its own row named by display name.
+fn group_presets_by_provider(presets: Vec<ModelPreset>) -> Vec<(String, Vec<ModelPreset>)> {
+    let mut groups: Vec<(String, Vec<ModelPreset>)> = Vec::new();
+    for preset in presets {
+        let name = PickerProvider::for_model(&preset.model)
+            .map(|provider| provider.name().to_string())
+            .unwrap_or_else(|| preset.display_name.clone());
+        if let Some((_, presets)) = groups.iter_mut().find(|(group, _)| *group == name) {
+            presets.push(preset);
+        } else {
+            groups.push((name, vec![preset]));
+        }
+    }
+    groups
+}
 
 impl ChatWidget {
     /// Open a popup to choose a quick auto model. Selecting "All models"
@@ -243,37 +369,48 @@ impl ChatWidget {
         }
 
         let mut items: Vec<SelectionItem> = Vec::new();
-        let model_ids = presets.iter().map(|preset| preset.model.clone()).collect();
-        for preset in presets.into_iter() {
-            let description =
-                (!preset.description.is_empty()).then_some(preset.description.to_string());
-            let is_current = preset.model.as_str() == self.current_model();
-            let direct_effort = match preset.supported_reasoning_efforts.as_slice() {
-                [] => Some(preset.default_reasoning_effort.clone()),
-                [option] => Some(option.effort.clone()),
-                _ => None,
+        let mut model_ids: Vec<String> = Vec::new();
+        for row in group_picker_rows(presets) {
+            match row {
+                PickerRow::Single(preset) => {
+                    model_ids.push(preset.model.clone());
+                    items.push(self.model_picker_item(preset.clone(), preset.display_name));
+                }
+                PickerRow::Family { name, providers } if providers.len() > 1 => {
+                    let member_presets: Vec<ModelPreset> = providers
+                        .iter()
+                        .flat_map(|(_, presets)| presets.iter().cloned())
+                        .collect();
+                    model_ids.push(member_presets[0].model.clone());
+                    let is_current = member_presets
+                        .iter()
+                        .any(|preset| preset.model.as_str() == self.current_model());
+                    let provider_names = providers
+                        .iter()
+                        .map(|(provider, _)| provider.name())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    items.push(SelectionItem {
+                        name,
+                        description: Some(format!("Available via {provider_names}")),
+                        is_current,
+                        actions: vec![Box::new(move |tx| {
+                            tx.send(AppEvent::OpenProviderPopup {
+                                presets: member_presets.clone(),
+                            });
+                        })],
+                        dismiss_parent_on_child_accept: true,
+                        ..Default::default()
+                    });
+                }
+                // Families served by a single provider stay flat.
+                PickerRow::Family { providers, .. } => {
+                    for preset in providers.into_iter().flat_map(|(_, presets)| presets) {
+                        model_ids.push(preset.model.clone());
+                        items.push(self.model_picker_item(preset.clone(), preset.display_name));
+                    }
+                }
             }
-            .filter(|effort| !Self::is_advanced_reasoning_effort(effort));
-            let single_supported_effort = direct_effort.is_some();
-            let preset_for_action = preset.clone();
-            let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
-                let preset_for_event = preset_for_action.clone();
-                tx.send(AppEvent::OpenReasoningPopup {
-                    model: preset_for_event,
-                });
-            })];
-            items.push(SelectionItem {
-                name: preset.display_name.clone(),
-                description,
-                is_current,
-                secondary_action: direct_effort.and_then(|effort| {
-                    self.session_model_selection_action(preset.model.clone(), Some(effort))
-                }),
-                actions,
-                dismiss_on_select: single_supported_effort,
-                dismiss_parent_on_child_accept: !single_supported_effort,
-                ..Default::default()
-            });
         }
 
         let header = self.model_menu_header("Select Model and Effort", "");
@@ -281,6 +418,130 @@ impl ChatWidget {
             model_ids,
             SelectionViewParams {
                 view_id: Some(view_id),
+                items,
+                header,
+                ..SelectionViewParams::picker()
+            },
+        );
+    }
+
+    /// A picker row that continues to the model's reasoning-effort step, or
+    /// applies directly when the model has a single usable effort.
+    fn model_picker_item(&self, preset: ModelPreset, name: String) -> SelectionItem {
+        let description =
+            (!preset.description.is_empty()).then_some(preset.description.to_string());
+        let is_current = preset.model.as_str() == self.current_model();
+        let direct_effort = match preset.supported_reasoning_efforts.as_slice() {
+            [] => Some(preset.default_reasoning_effort.clone()),
+            [option] => Some(option.effort.clone()),
+            _ => None,
+        }
+        .filter(|effort| !Self::is_advanced_reasoning_effort(effort));
+        let single_supported_effort = direct_effort.is_some();
+        let preset_for_action = preset.clone();
+        let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+            let preset_for_event = preset_for_action.clone();
+            tx.send(AppEvent::OpenReasoningPopup {
+                model: preset_for_event,
+            });
+        })];
+        SelectionItem {
+            name,
+            description,
+            is_current,
+            secondary_action: direct_effort.and_then(|effort| {
+                self.session_model_selection_action(preset.model.clone(), Some(effort))
+            }),
+            actions,
+            dismiss_on_select: single_supported_effort,
+            dismiss_parent_on_child_accept: !single_supported_effort,
+            ..Default::default()
+        }
+    }
+
+    /// Open the provider step of a grouped model family (for example Local /
+    /// OpenRouter / LithosAI). Providers with a single preset continue
+    /// directly to the reasoning step; providers with several presets open the
+    /// variant step.
+    pub(crate) fn open_provider_popup(&mut self, presets: Vec<ModelPreset>) {
+        let family = presets.first().and_then(model_family_key);
+        let mut groups = group_presets_by_provider(presets);
+        if let [(_, presets)] = groups.as_mut_slice()
+            && let [preset] = presets.as_slice()
+        {
+            self.open_reasoning_popup(preset.clone());
+            return;
+        }
+
+        let mut items: Vec<SelectionItem> = Vec::new();
+        let mut model_ids: Vec<String> = Vec::new();
+        for (name, presets) in groups {
+            model_ids.push(presets[0].model.clone());
+            if let [preset] = presets.as_slice() {
+                items.push(self.model_picker_item(preset.clone(), name));
+            } else {
+                let is_current = presets
+                    .iter()
+                    .any(|preset| preset.model.as_str() == self.current_model());
+                let description = presets
+                    .first()
+                    .map(|preset| preset.description.clone())
+                    .filter(|description| !description.is_empty());
+                let presets_for_action = presets.clone();
+                items.push(SelectionItem {
+                    name,
+                    description,
+                    is_current,
+                    actions: vec![Box::new(move |tx| {
+                        tx.send(AppEvent::OpenVariantPopup {
+                            presets: presets_for_action.clone(),
+                        });
+                    })],
+                    dismiss_parent_on_child_accept: true,
+                    ..Default::default()
+                });
+            }
+        }
+
+        let header = self.model_menu_header("Select Provider", family.as_deref().unwrap_or(""));
+        self.show_model_selection_view(
+            model_ids,
+            SelectionViewParams {
+                view_id: Some(PROVIDER_SELECTION_VIEW_ID),
+                items,
+                header,
+                ..SelectionViewParams::picker()
+            },
+        );
+    }
+
+    /// Open the variant step for a provider serving one model in several
+    /// variants (for example LithosAI Regular / Fast / Ultra).
+    pub(crate) fn open_variant_popup(&mut self, mut presets: Vec<ModelPreset>) {
+        let family = presets.first().and_then(model_family_key);
+        if let [preset] = presets.as_slice() {
+            self.open_reasoning_popup(preset.clone());
+            return;
+        }
+        let base_slug = presets
+            .iter()
+            .map(|preset| preset.model.as_str())
+            .min_by_key(|model| model.len())
+            .unwrap_or_default()
+            .to_string();
+        let mut items: Vec<SelectionItem> = Vec::new();
+        let mut model_ids: Vec<String> = Vec::new();
+        for preset in presets.drain(..) {
+            model_ids.push(preset.model.clone());
+            let label = variant_label(&preset, &base_slug);
+            items.push(self.model_picker_item(preset, label));
+        }
+
+        let header = self.model_menu_header("Select Variant", family.as_deref().unwrap_or(""));
+        self.show_model_selection_view(
+            model_ids,
+            SelectionViewParams {
+                view_id: Some(VARIANT_SELECTION_VIEW_ID),
                 items,
                 header,
                 ..SelectionViewParams::picker()

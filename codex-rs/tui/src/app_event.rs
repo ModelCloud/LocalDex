@@ -1381,6 +1381,17 @@ pub(crate) enum AppEvent {
         model: ModelPreset,
     },
 
+    /// Open the provider selection popup for a grouped model family.
+    OpenProviderPopup {
+        presets: Vec<ModelPreset>,
+    },
+
+    /// Open the variant selection popup for a provider serving the same model
+    /// in multiple variants.
+    OpenVariantPopup {
+        presets: Vec<ModelPreset>,
+    },
+
     /// Apply an advanced reasoning effort to the active conversation without changing defaults.
     ApplyAdvancedReasoning {
         model: String,
