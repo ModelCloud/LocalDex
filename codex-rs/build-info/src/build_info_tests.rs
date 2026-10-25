@@ -195,3 +195,67 @@ fn build_id_requires_a_valid_stamp_and_target() {
     }
     assert_eq!(build_id(BUILD_COMMIT, ""), None);
 }
+
+/// Packaged builds keep the release version and expose the stamped commit.
+#[test]
+fn packaged_display_version_includes_short_commit() {
+    let package = tempdir().expect("create runtime package");
+    let bin_dir = package.path().join("bin");
+    fs::create_dir(&bin_dir).expect("create runtime binary directory");
+    let executable = bin_dir.join("codex");
+    fs::write(&executable, b"").expect("create runtime binary");
+    fs::write(
+        package.path().join("codex-package.json"),
+        r#"{"version":"0.164.0"}"#,
+    )
+    .expect("create runtime package manifest");
+
+    let context = InstallContext::from_exe(
+        cfg!(target_os = "macos"),
+        Some(&executable),
+        /*method_override*/ None,
+    );
+    let info = BuildInfo::resolve(&context, BUILD_COMMIT);
+
+    assert_eq!(info.version_with_commit(), "0.164.0+012345678");
+    assert_eq!(info.display_version(), "v0.164.0+012345678");
+}
+
+/// Source and unpackaged builds keep showing the commit alone.
+#[test]
+fn unpackaged_display_version_is_unchanged() {
+    let context = InstallContext::from_exe(
+        cfg!(target_os = "macos"),
+        /*current_exe*/ None,
+        /*method_override*/ None,
+    );
+    let info = BuildInfo::resolve(&context, BUILD_COMMIT);
+
+    assert_eq!(info.version_with_commit(), BUILD_COMMIT);
+    assert_eq!(info.display_version(), format!("v{BUILD_COMMIT}"));
+}
+
+/// Non-commit stamps ("dev", "unknown") never appear as semver metadata.
+#[test]
+fn non_commit_stamps_do_not_append_metadata() {
+    let package = tempdir().expect("create runtime package");
+    let bin_dir = package.path().join("bin");
+    fs::create_dir(&bin_dir).expect("create runtime binary directory");
+    let executable = bin_dir.join("codex");
+    fs::write(&executable, b"").expect("create runtime binary");
+    fs::write(
+        package.path().join("codex-package.json"),
+        r#"{"version":"0.164.0"}"#,
+    )
+    .expect("create runtime package manifest");
+
+    let context = InstallContext::from_exe(
+        cfg!(target_os = "macos"),
+        Some(&executable),
+        /*method_override*/ None,
+    );
+    for stamp in ["dev", "unknown"] {
+        let info = BuildInfo::resolve(&context, Box::leak(stamp.to_string().into_boxed_str()));
+        assert_eq!(info.version_with_commit(), "0.164.0");
+    }
+}
