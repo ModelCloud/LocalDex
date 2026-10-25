@@ -39,7 +39,11 @@ async fn multidex_post_turn_compaction_measures_history_progress(growing: bool) 
         )]),
     )
     .expect("MultiDex provider should normalize");
-    let provider = providers.remove(MULTIDEX_PROVIDER_ID).unwrap();
+    let mut provider = providers.remove(MULTIDEX_PROVIDER_ID).unwrap();
+    provider
+        .capabilities
+        .get_or_insert_with(Default::default)
+        .remote_compaction = Some(codex_model_provider_info::RemoteCompactionSupport::Unsupported);
     let test = test_codex()
         .with_model_info_override("DS v4.1 Flash 1017", |info| {
             info.context_window = Some(100_000);
@@ -146,6 +150,10 @@ async fn failed_multidex_compaction_allows_new_user_context() -> Result<()> {
     .expect("MultiDex provider should normalize");
     let mut provider = providers.remove(MULTIDEX_PROVIDER_ID).unwrap();
     provider.stream_max_retries = Some(0);
+    provider
+        .capabilities
+        .get_or_insert_with(Default::default)
+        .remote_compaction = Some(codex_model_provider_info::RemoteCompactionSupport::Unsupported);
     let test = test_codex()
         .with_model_info_override("DS v4.1 Flash 1017", |info| {
             info.context_window = Some(100_000);
@@ -243,6 +251,10 @@ async fn failed_multidex_compaction_retries_on_next_user_prompt() -> Result<()> 
         .remove(MULTIDEX_PROVIDER_ID)
         .expect("MultiDex provider should be configured");
     provider.stream_max_retries = Some(0);
+    provider
+        .capabilities
+        .get_or_insert_with(Default::default)
+        .remote_compaction = Some(codex_model_provider_info::RemoteCompactionSupport::Unsupported);
     let test = test_codex()
         .with_model_info_override("DS v4.1 Flash 1017", |info| {
             info.context_window = Some(200_000);
