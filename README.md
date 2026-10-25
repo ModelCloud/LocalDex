@@ -124,6 +124,26 @@ stops the request without retrying or switching compaction models. Increase the
 inference server's output-token limit or request a shorter response before
 trying again; increasing connection retries will not raise the output budget.
 
+### Switching models and providers
+
+The model picker routes the bundled OpenAI, LocalDex, OpenRouter, and Lithos
+models to their providers without discarding conversation history. The selected
+model's context budget applies to the next turn. Moving to a smaller window can
+require compaction before sampling; moving to a larger window does not by itself
+require compaction. A model's compaction-compatibility hash can independently
+require a fresh summary.
+
+After a cold resume, an endpoint transition without verified previous-provider
+state uses the current model/provider for required compaction instead of sending
+the previous endpoint's model ID to the new provider.
+
+To check routing, credentials, retained history, and runtime context changes with
+fake keys and loopback endpoints:
+
+```sh
+python3 scripts/test_lithos_provider_handoff.py --binary /path/to/localdex
+```
+
 ### Model at capacity (`server_is_overloaded`)
 
 When the provider reports the selected model is at capacity ("Selected model is
