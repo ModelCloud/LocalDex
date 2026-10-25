@@ -606,6 +606,7 @@ pub(crate) struct App {
     feedback_audience: FeedbackAudience,
     environment_manager: Arc<EnvironmentManager>,
     app_server_target: AppServerTarget,
+    skip_resume_goal_prompt: bool,
     reconnect: reconnect::ReconnectState,
     pending_right_click_paste: Option<right_click_paste::PendingPaste>,
     right_click_paste_environment: right_click_paste::PasteEnvironment,

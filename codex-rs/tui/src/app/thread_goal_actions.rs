@@ -56,6 +56,16 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
+        // Orchestrators need the composer visible; interactive remote users
+        // still get the normal resume choice unless they explicitly opt out.
+        if self.skip_resume_goal_prompt
+            && matches!(
+                self.app_server_target,
+                crate::AppServerTarget::Remote { .. }
+            )
+        {
+            return;
+        }
         if self.chat_widget.has_misalignment_policy_violation() {
             return;
         }

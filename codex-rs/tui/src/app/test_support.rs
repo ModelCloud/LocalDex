@@ -73,6 +73,7 @@ pub(crate) async fn make_test_app() -> Box<App> {
         feedback_audience: FeedbackAudience::External,
         environment_manager: Arc::new(EnvironmentManager::default_for_tests()),
         app_server_target: crate::AppServerTarget::Embedded,
+        skip_resume_goal_prompt: false,
         pending_right_click_paste: None,
         right_click_paste_environment: super::right_click_paste::PasteEnvironment {
             primary: false,

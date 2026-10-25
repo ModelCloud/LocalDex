@@ -463,3 +463,74 @@ async fn unsupported_legacy_permissions_are_shown_without_exiting() -> Result<()
     app_server.shutdown().await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn only_opted_in_remote_attach_suppresses_goal_resume_prompt() -> Result<()> {
+    for status in [
+        ThreadGoalStatus::Paused,
+        ThreadGoalStatus::Blocked,
+        ThreadGoalStatus::UsageLimited,
+    ] {
+        let (mut app, _app_event_rx, mut op_rx) = make_test_app_with_channels().await;
+        let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
+        let started = app_server.start_thread(&app.config).await?;
+        let thread_id = started.session.thread_id;
+        app.enqueue_primary_thread_session(started.session, started.turns)
+            .await?;
+        app_server
+            .thread_goal_set(
+                thread_id,
+                Some("Paused goal work".to_string()),
+                Some(status),
+                /*token_budget*/ None,
+            )
+            .await?;
+
+        let endpoint = crate::resolve_remote_addr("ws://127.0.0.1:9")?;
+        for target in [
+            crate::AppServerTarget::Remote {
+                endpoint: endpoint.clone(),
+            },
+            crate::AppServerTarget::Embedded,
+            crate::AppServerTarget::LocalDaemon {
+                endpoint,
+                allow_embedded_fallback: false,
+            },
+        ] {
+            for opt_out in [false, true] {
+                app.app_server_target = target.clone();
+                app.skip_resume_goal_prompt = opt_out;
+                let suppressed = opt_out && matches!(target, crate::AppServerTarget::Remote { .. });
+                app.maybe_prompt_resume_paused_goal_after_resume(&mut app_server, thread_id)
+                    .await;
+                assert_eq!(
+                    render_bottom_popup(&app.chat_widget, /*width*/ 80)
+                        .contains("Resume paused goal"),
+                    !suppressed,
+                    "status={status:?}, target={target:?}, opt_out={opt_out}",
+                );
+                if suppressed {
+                    app.chat_widget
+                        .restore_user_message_to_composer(UserMessage::from("new prompt"));
+                    app.chat_widget
+                        .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+                    next_user_turn_op(&mut op_rx);
+                } else {
+                    app.chat_widget
+                        .handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+                }
+            }
+        }
+        assert_eq!(
+            app_server
+                .thread_goal_get(thread_id)
+                .await?
+                .goal
+                .unwrap()
+                .status,
+            status,
+        );
+        app_server.shutdown().await?;
+    }
+    Ok(())
+}
