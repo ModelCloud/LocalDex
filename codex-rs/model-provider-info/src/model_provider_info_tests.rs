@@ -1040,7 +1040,7 @@ fn test_built_in_model_providers_include_openrouter() {
     assert_eq!(provider.name, "OpenRouter");
     assert_eq!(
         provider.base_url.as_deref(),
-        Some("https://openrouter.ai/api/v1")
+        Some("https://us.openrouter.ai/api/v1")
     );
     assert_eq!(provider.env_key.as_deref(), Some("OPENROUTER_API_KEY"));
     assert_eq!(provider.wire_api, WireApi::Responses);
@@ -1056,7 +1056,7 @@ fn test_deserialize_openrouter_provider_routing_toml() {
     let provider: ModelProviderInfo = toml::from_str(
         r#"
 name = "OpenRouter"
-base_url = "https://openrouter.ai/api/v1"
+base_url = "https://us.openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 
 [provider]
@@ -1079,7 +1079,7 @@ fn test_openrouter_routing_rejects_unknown_fields() {
     let err = toml::from_str::<ModelProviderInfo>(
         r#"
 name = "OpenRouter"
-base_url = "https://openrouter.ai/api/v1"
+base_url = "https://us.openrouter.ai/api/v1"
 
 [provider]
 oonly = ["wafer/mxfp4"]
@@ -1111,7 +1111,7 @@ allow_fallbacks = false
     assert_eq!(provider.name, "OpenRouter");
     assert_eq!(
         provider.base_url.as_deref(),
-        Some("https://openrouter.ai/api/v1")
+        Some("https://us.openrouter.ai/api/v1")
     );
     assert_eq!(provider.env_key.as_deref(), Some("OPENROUTER_API_KEY"));
     let routing = provider.provider.as_ref().expect("provider routing merged");
