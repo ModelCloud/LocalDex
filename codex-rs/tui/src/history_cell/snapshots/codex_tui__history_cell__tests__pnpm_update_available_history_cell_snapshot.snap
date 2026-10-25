@@ -1,10 +1,10 @@
 ---
 source: tui/src/history_cell/tests.rs
-assertion_line: 1375
+assertion_line: 1397
 expression: rendered
 ---
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ ✨ Update available! 0.155.1 -> 9.9.9                                                                      │
+│ ✨ Update available! 0.164.0 -> 9.9.9                                                                      │
 │ Run sh -c 'curl -fsSL                                                                                      │
 │ https://raw.githubusercontent.com/ModelCloud/MultiDex/main/scripts/install/install-multidex.sh | sh' to    │
 │ update.                                                                                                    │
