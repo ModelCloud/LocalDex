@@ -2,4 +2,4 @@
 
 set -eu
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-exec "$script_dir/install-localdex.sh" "$@"
+exec "$script_dir/install-multidex.sh" "$@"

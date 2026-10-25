@@ -10,7 +10,7 @@ import tempfile
 import unittest
 
 
-INSTALLER = Path(__file__).with_name("install-localdex.sh")
+INSTALLER = Path(__file__).with_name("install-multidex.sh")
 INSTALLER_MACHINE = subprocess.check_output(["uname", "-m"], text=True).strip()
 INSTALLER_ARCH = {"amd64": "x86_64", "arm64": "aarch64"}.get(
     INSTALLER_MACHINE, INSTALLER_MACHINE
@@ -35,14 +35,14 @@ def make_archive(root: Path, version: str, target: str = INSTALLER_TARGET) -> Pa
         "layoutVersion": 1,
         "version": version,
         "target": target,
-        "variant": "localdex",
-        "entrypoint": "bin/localdex",
+        "variant": "multidex",
+        "entrypoint": "bin/multidex",
         "resourcesDir": "codex-resources",
         "pathDir": "codex-path",
     }
     (package / "codex-package.json").write_text(json.dumps(manifest), encoding="utf-8")
     for name, label in (
-        ("localdex", "localdex"),
+        ("multidex", "multidex"),
         ("codex-code-mode-host", "code-mode-host"),
     ):
         executable = package / "bin" / name
@@ -51,7 +51,7 @@ def make_archive(root: Path, version: str, target: str = INSTALLER_TARGET) -> Pa
         )
         executable.chmod(0o755)
     (package / "codex-path" / "rg").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    archive = root / f"localdex-{version}.tar.gz"
+    archive = root / f"multidex-{version}.tar.gz"
     with tarfile.open(archive, "w:gz") as output:
         for path in package.rglob("*"):
             if path.is_file():
@@ -63,7 +63,7 @@ def make_archive(root: Path, version: str, target: str = INSTALLER_TARGET) -> Pa
     return archive
 
 
-class LocalDexInstallerTest(InstallerTestCase):
+class MultiDexInstallerTest(InstallerTestCase):
     def test_installer_does_not_require_gnu_mv(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -100,8 +100,8 @@ class LocalDexInstallerTest(InstallerTestCase):
                     **os.environ,
                     "HOME": str(root),
                     "CODEX_HOME": str(codex_home),
-                    "LOCALDEX_INSTALL_DIR": str(root / "bin"),
-                    "LOCALDEX_ARCHIVE": str(archive),
+                    "MULTIDEX_INSTALL_DIR": str(root / "bin"),
+                    "MULTIDEX_ARCHIVE": str(archive),
                     "PATH": f"{fake_bin}:{os.environ['PATH']}",
                 },
             )
@@ -112,7 +112,7 @@ class LocalDexInstallerTest(InstallerTestCase):
                 (
                     standalone
                     / "releases"
-                    / f"0.155.1-localdex-{INSTALLER_TARGET}"
+                    / f"0.155.1-multidex-{INSTALLER_TARGET}"
                 ).resolve(),
             )
 
@@ -120,7 +120,7 @@ class LocalDexInstallerTest(InstallerTestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             target = "aarch64-apple-darwin"
-            asset = f"localdex-package-{target}.tar.gz"
+            asset = f"multidex-package-{target}.tar.gz"
             archive = make_archive(root, "0.155.5", target)
             fake_bin = root / "fake-bin"
             fake_bin.mkdir()
@@ -141,13 +141,13 @@ class LocalDexInstallerTest(InstallerTestCase):
             releases = json.dumps(
                 [
                     {
-                        "tag_name": "localdex-build-0.155.5-darwin",
+                        "tag_name": "multidex-build-0.155.5-darwin",
                         "prerelease": False,
                         "assets": [
                             {"name": asset},
                             {
                                 "name": (
-                                    "localdex-package-aarch64-unknown-linux-gnu"
+                                    "multidex-package-aarch64-unknown-linux-gnu"
                                     ".tar.gz"
                                 )
                             },
@@ -166,9 +166,9 @@ class LocalDexInstallerTest(InstallerTestCase):
                 f"{releases}\n"
                 "RELEASES\n"
                 "    ;;\n"
-                f"  *'/localdex-build-0.155.5-darwin/{asset}.sha256') cp "
+                f"  *'/multidex-build-0.155.5-darwin/{asset}.sha256') cp "
                 f"'{archive}.sha256' \"$output\" ;;\n"
-                f"  *'/localdex-build-0.155.5-darwin/{asset}') cp "
+                f"  *'/multidex-build-0.155.5-darwin/{asset}') cp "
                 f"'{archive}' \"$output\" ;;\n"
                 "  *) exit 9 ;;\n"
                 "esac\n",
@@ -185,7 +185,7 @@ class LocalDexInstallerTest(InstallerTestCase):
                     **os.environ,
                     "HOME": str(root),
                     "CODEX_HOME": str(root / "codex-home"),
-                    "LOCALDEX_INSTALL_DIR": str(root / "bin"),
+                    "MULTIDEX_INSTALL_DIR": str(root / "bin"),
                     "PATH": f"{fake_bin}:{os.environ['PATH']}",
                 },
             )
@@ -193,13 +193,13 @@ class LocalDexInstallerTest(InstallerTestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             requested = urls.read_text(encoding="utf-8")
             self.assertIn(
-                "/localdex-build-0.155.5-darwin/"
-                "localdex-package-aarch64-apple-darwin.tar.gz",
+                "/multidex-build-0.155.5-darwin/"
+                "multidex-package-aarch64-apple-darwin.tar.gz",
                 requested,
             )
             self.assertNotIn("aarch64-unknown-linux-gnu", requested)
 
-    def test_install_uses_localdex_codex_and_preserves_codex_home(self) -> None:
+    def test_install_uses_multidex_codex_and_preserves_codex_home(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             home = root / "home"
@@ -248,8 +248,8 @@ class LocalDexInstallerTest(InstallerTestCase):
                     **os.environ,
                     "HOME": str(home),
                     "CODEX_HOME": str(codex_home),
-                    "LOCALDEX_INSTALL_DIR": str(bin_dir),
-                    "LOCALDEX_ARCHIVE": str(archive),
+                    "MULTIDEX_INSTALL_DIR": str(bin_dir),
+                    "MULTIDEX_ARCHIVE": str(archive),
                     "PATH": f"{bin_dir}:{os.environ['PATH']}",
                 },
             )
@@ -268,7 +268,7 @@ class LocalDexInstallerTest(InstallerTestCase):
                 os.readlink(bin_dir / "codex"), str(current / "bin" / "codex")
             )
             self.assertEqual(
-                os.readlink(bin_dir / "localdex"), str(current / "bin" / "localdex")
+                os.readlink(bin_dir / "multidex"), str(current / "bin" / "multidex")
             )
             self.assertEqual(
                 os.readlink(bin_dir / "codex-code-mode-host"),
@@ -281,7 +281,7 @@ class LocalDexInstallerTest(InstallerTestCase):
                 text=True,
                 env={"PATH": f"{bin_dir}:{os.environ['PATH']}"},
             )
-            self.assertEqual(resolved.stdout.strip(), "localdex --version")
+            self.assertEqual(resolved.stdout.strip(), "multidex --version")
             self.assertTrue(official_release.is_dir())
             current.unlink()
             current.symlink_to(official_release)
@@ -293,7 +293,7 @@ class LocalDexInstallerTest(InstallerTestCase):
                 env={"PATH": f"{bin_dir}:{os.environ['PATH']}"},
             )
             self.assertEqual(rolled_back.stdout.strip(), "official codex --version")
-            self.assertTrue(list(bin_dir.glob("codex-code-mode-host.pre-localdex.*")))
+            self.assertTrue(list(bin_dir.glob("codex-code-mode-host.pre-multidex.*")))
 
             second_archive = make_archive(root, "0.155.3")
             updated = subprocess.run(
@@ -305,8 +305,8 @@ class LocalDexInstallerTest(InstallerTestCase):
                     **os.environ,
                     "HOME": str(home),
                     "CODEX_HOME": str(codex_home),
-                    "LOCALDEX_INSTALL_DIR": str(bin_dir),
-                    "LOCALDEX_ARCHIVE": str(second_archive),
+                    "MULTIDEX_INSTALL_DIR": str(bin_dir),
+                    "MULTIDEX_ARCHIVE": str(second_archive),
                 },
             )
             self.assertEqual(updated.returncode, 0, updated.stderr)
@@ -317,7 +317,7 @@ class LocalDexInstallerTest(InstallerTestCase):
                     / "packages"
                     / "standalone"
                     / "releases"
-                    / f"0.155.3-localdex-{INSTALLER_TARGET}"
+                    / f"0.155.3-multidex-{INSTALLER_TARGET}"
                 ),
             )
             self.assertTrue(
@@ -326,7 +326,7 @@ class LocalDexInstallerTest(InstallerTestCase):
                     / "packages"
                     / "standalone"
                     / "releases"
-                    / f"0.155.1-localdex-{INSTALLER_TARGET}"
+                    / f"0.155.1-multidex-{INSTALLER_TARGET}"
                 ).is_dir()
             )
 
@@ -343,8 +343,8 @@ class LocalDexInstallerTest(InstallerTestCase):
                     **os.environ,
                     "HOME": str(root),
                     "CODEX_HOME": str(root / "codex-home"),
-                    "LOCALDEX_INSTALL_DIR": str(root / "bin"),
-                    "LOCALDEX_ARCHIVE": str(archive),
+                    "MULTIDEX_INSTALL_DIR": str(root / "bin"),
+                    "MULTIDEX_ARCHIVE": str(archive),
                 },
             )
             self.assertNotEqual(result.returncode, 0)
@@ -359,7 +359,7 @@ class LocalDexInstallerTest(InstallerTestCase):
             fake_bin = root / "fake-bin"
             fake_bin.mkdir()
             urls = root / "requested-urls"
-            asset = f"localdex-package-{INSTALLER_TARGET}.tar.gz"
+            asset = f"multidex-package-{INSTALLER_TARGET}.tar.gz"
 
             def release(tag: str, prerelease: bool, assets: list) -> dict:
                 return {
@@ -369,7 +369,7 @@ class LocalDexInstallerTest(InstallerTestCase):
                         {
                             "name": name,
                             "browser_download_url": (
-                                "https://github.com/ModelCloud/LocalDex/"
+                                "https://github.com/ModelCloud/MultiDex/"
                                 f"releases/download/{tag}/{name}"
                             ),
                         }
@@ -385,17 +385,17 @@ class LocalDexInstallerTest(InstallerTestCase):
                         [f"codex-package-{INSTALLER_TARGET}.tar.gz"],
                     ),
                     release(
-                        "localdex-build-0.155.6-darwin-only",
+                        "multidex-build-0.155.6-darwin-only",
                         False,
-                        ["localdex-package-aarch64-apple-darwin.tar.gz"],
+                        ["multidex-package-aarch64-apple-darwin.tar.gz"],
                     ),
                     release(
-                        "localdex-build-0.155.5-beta",
+                        "multidex-build-0.155.5-beta",
                         True,
                         [asset],
                     ),
                     release(
-                        "localdex-build-0.154.9",
+                        "multidex-build-0.154.9",
                         False,
                         [asset],
                     ),
@@ -413,9 +413,9 @@ class LocalDexInstallerTest(InstallerTestCase):
                 f"{releases}\n"
                 "RELEASES\n"
                 "    ;;\n"
-                f"  *'localdex-build-0.154.9/{asset}.sha256') cp "
+                f"  *'multidex-build-0.154.9/{asset}.sha256') cp "
                 f"'{archive}.sha256' \"$output\" ;;\n"
-                f"  *'localdex-build-0.154.9/{asset}') cp "
+                f"  *'multidex-build-0.154.9/{asset}') cp "
                 f"'{archive}' \"$output\" ;;\n"
                 "  *) exit 9 ;;\n"
                 "esac\n",
@@ -432,7 +432,7 @@ class LocalDexInstallerTest(InstallerTestCase):
                     **os.environ,
                     "HOME": str(root),
                     "CODEX_HOME": str(root / "codex-home"),
-                    "LOCALDEX_INSTALL_DIR": str(root / "bin"),
+                    "MULTIDEX_INSTALL_DIR": str(root / "bin"),
                     "PATH": f"{fake_bin}:{os.environ['PATH']}",
                 },
             )
@@ -440,10 +440,10 @@ class LocalDexInstallerTest(InstallerTestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             requested = urls.read_text(encoding="utf-8")
             self.assertIn("/releases?per_page=50", requested)
-            self.assertIn("/releases/download/localdex-build-0.154.9/", requested)
+            self.assertIn("/releases/download/multidex-build-0.154.9/", requested)
             self.assertNotIn("rust-v9.9.9", requested)
-            self.assertNotIn("localdex-build-0.155.6-darwin-only", requested)
-            self.assertNotIn("localdex-build-0.155.5-beta", requested)
+            self.assertNotIn("multidex-build-0.155.6-darwin-only", requested)
+            self.assertNotIn("multidex-build-0.155.5-beta", requested)
 
     def test_release_argument_accepts_version_and_release_tag(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -478,21 +478,21 @@ class LocalDexInstallerTest(InstallerTestCase):
                         **os.environ,
                         "HOME": str(root / home),
                         "CODEX_HOME": str(root / home / "codex-home"),
-                        "LOCALDEX_INSTALL_DIR": str(root / home / "bin"),
+                        "MULTIDEX_INSTALL_DIR": str(root / home / "bin"),
                         "PATH": f"{fake_bin}:{os.environ['PATH']}",
                     },
                 )
 
-            tagged = install("localdex-build-0.157.1-18dbfada9", "tagged")
+            tagged = install("multidex-build-0.157.1-18dbfada9", "tagged")
             self.assertEqual(tagged.returncode, 0, tagged.stderr)
             versioned = install("0.155.4", "versioned")
             self.assertEqual(versioned.returncode, 0, versioned.stderr)
 
             requested = urls.read_text(encoding="utf-8")
             self.assertIn(
-                "/releases/download/localdex-build-0.157.1-18dbfada9/", requested
+                "/releases/download/multidex-build-0.157.1-18dbfada9/", requested
             )
-            self.assertIn("/releases/download/localdex-v0.155.4/", requested)
+            self.assertIn("/releases/download/multidex-v0.155.4/", requested)
             self.assertNotIn("?per_page=50", requested)
 
     def test_install_accepts_local_archive_without_endpoint_access(self) -> None:
@@ -510,8 +510,8 @@ class LocalDexInstallerTest(InstallerTestCase):
                     **os.environ,
                     "HOME": str(root),
                     "CODEX_HOME": str(codex_home),
-                    "LOCALDEX_INSTALL_DIR": str(bin_dir),
-                    "LOCALDEX_ARCHIVE": str(archive),
+                    "MULTIDEX_INSTALL_DIR": str(bin_dir),
+                    "MULTIDEX_ARCHIVE": str(archive),
                 },
             )
             self.assertEqual(result.returncode, 0, result.stderr)

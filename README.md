@@ -1,4 +1,4 @@
-<p align="center"><strong>LocalDex</strong> is a Codex-compatible coding agent that runs locally on your computer.
+<p align="center"><strong>MultiDex</strong> is a Codex-compatible coding agent that runs locally on your computer.
 <p align="center">
   <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
 </p>
@@ -11,7 +11,7 @@ If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="http
 
 ## Quickstart
 
-### Installing and running LocalDex
+### Installing and running MultiDex
 
 Linux x86_64 and ARM64 (including NVIDIA GB10 Spark), plus macOS ARM64,
 releases are supported. The installer selects the package for the current
@@ -20,7 +20,7 @@ companion, and leaves the existing `CODEX_HOME` auth, configuration, and
 session files in place:
 
 ```shell
-curl -fsSL https://github.com/ModelCloud/LocalDex/releases/latest/download/install-localdex.sh | sh
+curl -fsSL https://github.com/ModelCloud/MultiDex/releases/latest/download/install-multidex.sh | sh
 ```
 
 To pin a release, pass `--release VERSION` to the downloaded installer. Each
@@ -40,11 +40,11 @@ ln -sfn "$CODEX_HOME_DIR/packages/standalone/releases/<previous-release>" \
 ### Configure named OpenAI-compatible providers
 
 OpenRouter is built in: set `OPENROUTER_API_KEY` locally and select
-`deepseek/deepseek-v4.1-flash-1017`. See [OpenRouter configuration](docs/config.md#localdex-providers)
+`deepseek/deepseek-v4.1-flash-1017`. See [OpenRouter configuration](docs/config.md#multidex-providers)
 for Wafer-only routing. Both the local and OpenRouter DS v4.1 Flash entries
-default to Max reasoning and use the DeepSeek Harness prompt adapted to LocalDex's tools.
+default to Max reasoning and use the DeepSeek Harness prompt adapted to MultiDex's tools.
 
-LocalDex keeps the built-in `openai` provider and its normal ChatGPT/API-key
+MultiDex keeps the built-in `openai` provider and its normal ChatGPT/API-key
 authentication. Add custom providers by name in `CODEX_HOME/config.toml`; each
 provider has its own endpoint and bearer-token environment variable:
 
@@ -64,21 +64,21 @@ model = "DS v4.1 Flash 1017"
 model_provider = "dsv41"
 ```
 
-Set `DSV41_BEARER_TOKEN` in the environment before launching LocalDex, then
+Set `DSV41_BEARER_TOKEN` in the environment before launching MultiDex, then
 select the `dsv41` profile with `codex --profile dsv41`. The bearer value stays
-out of TOML, command-line arguments, and LocalDex logs. Repeat the provider and
+out of TOML, command-line arguments, and MultiDex logs. Repeat the provider and
 profile sections with distinct names for additional endpoints. Do not set a
 global `openai_base_url` when you need official OpenAI models and custom models
 to share the same session.
 
 For Omnigent, put provider definitions in
-`~/.local/share/localdex/config.toml` and model-to-provider mappings in
-`~/.local/share/localdex/models.toml`. This keeps the registrations out of
-Omnigent's global provider catalog while letting one LocalDex harness offer
+`~/.local/share/multidex/config.toml` and model-to-provider mappings in
+`~/.local/share/multidex/models.toml`. This keeps the registrations out of
+Omnigent's global provider catalog while letting one MultiDex harness offer
 official and custom models together:
 
 ```toml
-# ~/.local/share/localdex/config.toml
+# ~/.local/share/multidex/config.toml
 [model_providers.dsv41]
 name = "DSV4.1 endpoint"
 base_url = "http://10.0.13.33:2120/v1"
@@ -95,7 +95,7 @@ requires_openai_auth = false
 ```
 
 ```toml
-# ~/.local/share/localdex/models.toml
+# ~/.local/share/multidex/models.toml
 [models."DS v4.1 Flash 1017"]
 provider = "dsv41"
 display_name = "DS v4.1 Flash 1017"
@@ -113,13 +113,13 @@ continue to use the normal ChatGPT login and OpenAI endpoints. Installation and
 upgrade never contact or validate a model endpoint.
 
 An orchestrator attaching a TUI with `--remote` can set
-`LOCALDEX_SKIP_RESUME_GOAL_PROMPT=1` to keep the composer available when resuming
+`MULTIDEX_SKIP_RESUME_GOAL_PROMPT=1` to keep the composer available when resuming
 a paused, blocked, or usage-limited goal. This only hides the resume-choice
 modal; it does not resume the goal. Interactive remote connections still prompt
 by default, and local sessions ignore this flag.
 
 If an endpoint returns `response.incomplete` with reason `max_output_tokens`,
-it has reached its output budget. LocalDex reports that reason immediately and
+it has reached its output budget. MultiDex reports that reason immediately and
 stops the request without retrying or switching compaction models. Increase the
 inference server's output-token limit or request a shorter response before
 trying again; increasing connection retries will not raise the output budget.
@@ -127,7 +127,7 @@ trying again; increasing connection retries will not raise the output budget.
 ### Model at capacity (`server_is_overloaded`)
 
 When the provider reports the selected model is at capacity ("Selected model is
-at capacity. Please try a different model."), LocalDex waits and resumes the
+at capacity. Please try a different model."), MultiDex waits and resumes the
 request automatically — no user interaction and no retry budget is consumed;
 the request retries indefinitely until capacity frees up. A `Retry-After` hint
 from the provider is honored; otherwise the delay defaults to 1 second and is

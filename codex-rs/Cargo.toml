@@ -168,7 +168,7 @@ resolver = "2"
 
 [workspace.package]
 # Keep source builds recognizable to integrations that enforce a minimum
-# LocalDex tracks the current published Codex CLI release.
+# MultiDex tracks the current published Codex CLI release.
 version = "0.164.0"
 # Track the edition for all workspace crates in one place. Individual
 # crates can still override this value, but keeping it here means new
@@ -653,12 +653,12 @@ strip = false
 # Favor build throughput on high-core agent hosts over marginal binary-size savings.
 codegen-units = 64
 
-# LocalDex packages run inference remotely, so link-time optimization and full
+# MultiDex packages run inference remotely, so link-time optimization and full
 # release debug information do not materially improve their steady-state work.
 # This profile is intentionally optimized for a repeatable, fast AMD64 package
 # build: it keeps normal optimizations while allowing sccache to make rebuilds
 # cheap.
-[profile.localdex-release]
+[profile.multidex-release]
 inherits = "release"
 opt-level = 2
 lto = false

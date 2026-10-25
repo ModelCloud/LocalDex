@@ -1,15 +1,15 @@
 ---
-name: localdex-build-acceleration
-description: Speed up LocalDex Rust builds and test runs by installing the sccache compiler cache and mold linker before building. Use before release packaging or repeated cargo/just iteration when builds are slow.
+name: multidex-build-acceleration
+description: Speed up MultiDex Rust builds and test runs by installing the sccache compiler cache and mold linker before building. Use before release packaging or repeated cargo/just iteration when builds are slow.
 ---
 
-# Accelerate LocalDex Rust builds
+# Accelerate MultiDex Rust builds
 
 `sccache` and `mold` are not Rust dependencies, so nothing in the workspace requires them — but the
-LocalDex build scripts only use them when they resolve on `PATH` and otherwise skip both silently.
+MultiDex build scripts only use them when they resolve on `PATH` and otherwise skip both silently.
 Install them before any significant build, release packaging, or repeated test iteration.
 
-Without them a full rebuild is link- and I/O-bound rather than CPU-bound: the `localdex-release`
+Without them a full rebuild is link- and I/O-bound rather than CPU-bound: the `multidex-release`
 profile sets `codegen-units = 256`, so many cores stay busy while the default `ld` serializes the
 link. The tell is `sys` time far exceeding `user` time. Adding both turns an ~8 minute full rebuild
 into seconds for subsequent incremental builds.
@@ -29,7 +29,7 @@ command -v sccache mold clang
 
 ## How the build picks them up
 
-`scripts/build_localdex_linux_amd64.sh` and `scripts/build_localdex_linux_aarch64.sh` detect both
+`scripts/build_multidex_linux_amd64.sh` and `scripts/build_multidex_linux_aarch64.sh` detect both
 tools and configure them automatically:
 
 - `sccache` becomes `RUSTC_WRAPPER`, caching under `<repo>/.cache/sccache` (30G default), and the

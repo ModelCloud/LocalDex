@@ -36,7 +36,7 @@ fn capability_overrides_preserve_unspecified_provider_defaults() {
 
 #[test]
 fn generic_provider_preserves_upstream_capabilities_without_openai_auth() {
-    for name in ["custom", "Azure", "LocalDex display name only"] {
+    for name in ["custom", "Azure", "MultiDex display name only"] {
         let info = ModelProviderInfo {
             name: name.to_string(),
             requires_openai_auth: false,
@@ -58,15 +58,15 @@ fn generic_provider_preserves_upstream_capabilities_without_openai_auth() {
 }
 
 #[test]
-fn localdex_provider_enables_v2_remote_compaction() {
+fn multidex_provider_enables_v2_remote_compaction() {
     let info = ModelProviderInfo {
-        localdex_compatibility: true,
+        multidex_compatibility: true,
         requires_openai_auth: false,
         ..Default::default()
     };
     let capabilities = create_model_provider(info, /*auth_manager*/ None).capabilities();
     assert_eq!(capabilities.remote_compaction, RemoteCompactionSupport::V2);
-    // LocalDex keeps the portable tool surface; unrelated defaults stay put.
+    // MultiDex keeps the portable tool surface; unrelated defaults stay put.
     assert!(!capabilities.namespace_tools);
     assert_eq!(
         capabilities,
@@ -83,9 +83,9 @@ fn localdex_provider_enables_v2_remote_compaction() {
 }
 
 #[test]
-fn localdex_remote_compaction_override_wins() {
+fn multidex_remote_compaction_override_wins() {
     let info = ModelProviderInfo {
-        localdex_compatibility: true,
+        multidex_compatibility: true,
         capabilities: Some(ModelProviderCapabilities {
             remote_compaction: Some(RemoteCompactionSupport::Unsupported),
             ..Default::default()

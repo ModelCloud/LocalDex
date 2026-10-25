@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Build a distributable LocalDex package for Linux x86_64 with fast, reusable
-# compiler and linker settings. The output contains localdex and its required
+# Build a distributable MultiDex package for Linux x86_64 with fast, reusable
+# compiler and linker settings. The output contains multidex and its required
 # codex-code-mode-host companion binary.
 set -euo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 target="x86_64-unknown-linux-gnu"
-target_dir="${CARGO_TARGET_DIR:-${repo_root}/codex-rs/target-localdex-release}"
-dist_dir="${LOCALDEX_DIST_DIR:-${repo_root}/dist/localdex-${target}}"
-package_version="${LOCALDEX_PACKAGE_VERSION:-$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["workspace"]["package"]["version"])' "${repo_root}/codex-rs/Cargo.toml")}"
+target_dir="${CARGO_TARGET_DIR:-${repo_root}/codex-rs/target-multidex-release}"
+dist_dir="${MULTIDEX_DIST_DIR:-${repo_root}/dist/multidex-${target}}"
+package_version="${MULTIDEX_PACKAGE_VERSION:-$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["workspace"]["package"]["version"])' "${repo_root}/codex-rs/Cargo.toml")}"
 
 export CARGO_TARGET_DIR="${target_dir}"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$(nproc)}"
@@ -30,11 +30,11 @@ fi
 mkdir -p "${dist_dir}"
 CODEX_REPO_ROOT="${repo_root}" python3 "${repo_root}/scripts/build_codex_package.py" \
     --target "${target}" \
-    --variant localdex \
-    --cargo-profile localdex-release \
+    --variant multidex \
+    --cargo-profile multidex-release \
     --package-version "${package_version}" \
     --package-dir "${dist_dir}/package" \
-    --archive-output "${dist_dir}/localdex-${package_version}-${target}.tar.gz" \
+    --archive-output "${dist_dir}/multidex-${package_version}-${target}.tar.gz" \
     --force
 
-printf 'LocalDex package: %s\n' "${dist_dir}/localdex-${package_version}-${target}.tar.gz"
+printf 'MultiDex package: %s\n' "${dist_dir}/multidex-${package_version}-${target}.tar.gz"

@@ -57,14 +57,14 @@ PACKAGE_VARIANTS: dict[str, PackageVariant] = {
         cargo_bin="codex",
         executable_stem="codex",
     ),
-    # LocalDex is the full Codex runtime with an additional local provider, not
+    # MultiDex is the full Codex runtime with an additional local provider, not
     # a reduced local-only CLI.  Keep the upstream `codex` Rust binary, but
     # package it under a distinct entrypoint so it can coexist with official
     # Codex while retaining every companion binary (notably Code Mode).
-    "localdex": PackageVariant(
-        name="localdex",
+    "multidex": PackageVariant(
+        name="multidex",
         cargo_bin="codex",
-        executable_stem="localdex",
+        executable_stem="multidex",
     ),
     "codex-app-server": PackageVariant(
         name="codex-app-server",

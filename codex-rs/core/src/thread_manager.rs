@@ -481,19 +481,19 @@ pub fn build_models_manager(
     );
     // Built-in endpoint entries augment discovery; only a user catalog replaces it.
     if config.model_catalog.is_none()
-        && let Some(catalog) = localdex_model_catalog_for_config(config)
+        && let Some(catalog) = multidex_model_catalog_for_config(config)
     {
         let additional_models = catalog
             .models
             .into_iter()
             .filter(|model| {
-                codex_model_provider_info::is_localdex_model(&model.slug)
+                codex_model_provider_info::is_multidex_model(&model.slug)
                     || codex_model_provider_info::is_openrouter_model(&model.slug)
                     || codex_model_provider_info::is_lithos_model(&model.slug)
             })
             .collect();
         let default_model =
-            if codex_model_provider_info::is_localdex_provider_id(&config.model_provider_id) {
+            if codex_model_provider_info::is_multidex_provider_id(&config.model_provider_id) {
                 Some("DS v4.1 Flash 1017".to_string())
             } else if config.model_provider_id == codex_model_provider_info::OPENROUTER_PROVIDER_ID
             {
@@ -515,28 +515,28 @@ pub fn build_models_manager(
     manager
 }
 
-fn localdex_model_catalog_for_config(
+fn multidex_model_catalog_for_config(
     config: &Config,
 ) -> Option<codex_protocol::openai_models::ModelsResponse> {
     config.model_catalog.clone().or_else(|| {
         // Expose registered endpoint models even while OpenAI is selected so
         // the app-server picker can switch providers without restarting.
-        let has_localdex =
-            codex_model_provider_info::is_localdex_provider_id(&config.model_provider_id)
+        let has_multidex =
+            codex_model_provider_info::is_multidex_provider_id(&config.model_provider_id)
                 || config
                     .model_providers
                     .keys()
-                    .any(|key| codex_model_provider_info::is_localdex_provider_id(key));
+                    .any(|key| codex_model_provider_info::is_multidex_provider_id(key));
         let has_openrouter = config
             .model_providers
             .contains_key(codex_model_provider_info::OPENROUTER_PROVIDER_ID);
         let has_lithos = config
             .model_providers
             .contains_key(codex_model_provider_info::LITHOS_PROVIDER_ID);
-        (has_localdex || has_openrouter || has_lithos).then(|| {
-            let mut catalog = codex_models_manager::model_info::localdex_model_catalog();
+        (has_multidex || has_openrouter || has_lithos).then(|| {
+            let mut catalog = codex_models_manager::model_info::multidex_model_catalog();
             catalog.models.retain(|model| {
-                (has_localdex || !codex_model_provider_info::is_localdex_model(&model.slug))
+                (has_multidex || !codex_model_provider_info::is_multidex_model(&model.slug))
                     && (has_openrouter
                         || !codex_model_provider_info::is_openrouter_model(&model.slug))
                     && (has_lithos || !codex_model_provider_info::is_lithos_model(&model.slug))

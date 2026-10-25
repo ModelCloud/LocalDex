@@ -112,7 +112,7 @@ const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
 fn local_reasoning_at_compacted_handoff_is_not_sent_to_official_model() -> anyhow::Result<()> {
     let original = test_model_client(SessionSource::Cli);
     let mut local_provider = original.provider_info().clone();
-    local_provider.localdex_compatibility = true;
+    local_provider.multidex_compatibility = true;
     let local = original.with_provider(create_model_provider(
         local_provider,
         /*auth_manager*/ None,
@@ -189,7 +189,7 @@ fn local_reasoning_at_compacted_handoff_is_not_sent_to_official_model() -> anyho
 fn local_plaintext_compaction_is_sent_as_text_after_provider_switch() -> anyhow::Result<()> {
     let original = test_model_client(SessionSource::Cli);
     let mut local_provider = original.provider_info().clone();
-    local_provider.localdex_compatibility = true;
+    local_provider.multidex_compatibility = true;
     let local = original.with_provider(create_model_provider(local_provider, None));
     let official = original.with_provider(create_model_provider(
         ModelProviderInfo::create_openai_provider(None),

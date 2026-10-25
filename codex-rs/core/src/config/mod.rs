@@ -92,13 +92,13 @@ use codex_mcp::ResolvedMcpCatalog;
 use codex_model_provider::ProviderCapabilities;
 use codex_model_provider_info::GCP_PROVIDER_ID;
 use codex_model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
-use codex_model_provider_info::LOCALDEX_PROVIDER_ID;
+use codex_model_provider_info::MULTIDEX_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
 use codex_model_provider_info::OPENROUTER_PROVIDER_ID;
 use codex_model_provider_info::built_in_model_providers;
-use codex_model_provider_info::is_localdex_model;
-use codex_model_provider_info::is_localdex_provider_id;
+use codex_model_provider_info::is_multidex_model;
+use codex_model_provider_info::is_multidex_provider_id;
 use codex_model_provider_info::is_openrouter_model;
 use codex_model_provider_info::merge_configured_model_providers;
 use codex_model_provider_info::{LITHOS_PROVIDER_ID, is_lithos_model};
@@ -4013,17 +4013,17 @@ impl Config {
             .or(model_provider)
             .or(cfg.model_provider)
             .unwrap_or_else(|| "openai".to_string());
-        // The LocalDex model must never be sent to the OpenAI/ChatGPT provider. CLI
+        // The MultiDex model must never be sent to the OpenAI/ChatGPT provider. CLI
         // --model and app-server launches both pass through this config load.
         let selected_model = model.as_deref().or(cfg.model.as_deref());
-        let model_provider_id = if selected_model.is_some_and(is_localdex_model) {
-            if required_model_provider.is_some_and(|provider| provider != LOCALDEX_PROVIDER_ID) {
+        let model_provider_id = if selected_model.is_some_and(is_multidex_model) {
+            if required_model_provider.is_some_and(|provider| provider != MULTIDEX_PROVIDER_ID) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    "the LocalDex model requires the localdex provider, but a different provider is required by managed configuration",
+                    "the MultiDex model requires the multidex provider, but a different provider is required by managed configuration",
                 ));
             }
-            LOCALDEX_PROVIDER_ID.to_string()
+            MULTIDEX_PROVIDER_ID.to_string()
         } else if selected_model.is_some_and(is_lithos_model) {
             if required_model_provider.is_some_and(|provider| provider != LITHOS_PROVIDER_ID) {
                 return Err(std::io::Error::new(
@@ -4041,7 +4041,7 @@ impl Config {
             }
             OPENROUTER_PROVIDER_ID.to_string()
         } else if selected_model.is_some()
-            && (is_localdex_provider_id(&requested_model_provider_id)
+            && (is_multidex_provider_id(&requested_model_provider_id)
                 || (matches!(requested_model_provider_id.as_str(), OPENROUTER_PROVIDER_ID | LITHOS_PROVIDER_ID)
                     && selected_model.is_some_and(
                         codex_models_manager::model_info::is_bundled_openai_model,
@@ -4050,7 +4050,7 @@ impl Config {
             if required_model_provider.is_some() {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    "an OpenAI model cannot use a required LocalDex or OpenRouter provider",
+                    "an OpenAI model cannot use a required MultiDex or OpenRouter provider",
                 ));
             }
             codex_model_provider_info::OPENAI_PROVIDER_ID.to_string()

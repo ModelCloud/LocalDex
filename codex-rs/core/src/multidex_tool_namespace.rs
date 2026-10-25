@@ -1,4 +1,4 @@
-//! Translate namespaces only at the LocalDex provider boundary. Logical requests,
+//! Translate namespaces only at the MultiDex provider boundary. Logical requests,
 //! tool dispatch, and persisted history continue to use upstream tool identities.
 use codex_api::ResponsesApiRequest;
 use codex_extension_api::ModelResponseInterceptor;
@@ -24,11 +24,11 @@ pub(crate) struct WireRequest {
 /// Inspect the *full* logical request, even when only a bounded continuation delta
 /// is going on the wire. Never replace the caller's continuation baseline.
 pub(crate) fn prepare(
-    localdex_compatibility: bool,
+    multidex_compatibility: bool,
     full_request: &ResponsesApiRequest,
     input: &[ResponseItem],
 ) -> Result<Option<(WireRequest, Box<dyn ModelResponseInterceptor>)>> {
-    if !localdex_compatibility {
+    if !multidex_compatibility {
         return Ok(None);
     }
     let mut names = Names::default();
@@ -125,7 +125,7 @@ impl Names {
                 // Reassigning would invalidate names in stored server responses. Fail
                 // explicitly, including when a plain tool reserves a generated alias.
                 return Err(CodexErr::InvalidRequest(format!(
-                    "LocalDex tool namespace alias collision: {alias}"
+                    "MultiDex tool namespace alias collision: {alias}"
                 )));
             }
         } else {
@@ -139,10 +139,10 @@ impl Names {
         for mut tool in tools {
             if tool.get("type").and_then(Value::as_str) == Some("namespace") {
                 let namespace = tool.get("name").and_then(Value::as_str).ok_or_else(|| {
-                    CodexErr::InvalidRequest("LocalDex tool namespace has no name".into())
+                    CodexErr::InvalidRequest("MultiDex tool namespace has no name".into())
                 })?;
                 let children = tool.get("tools").and_then(Value::as_array).ok_or_else(|| {
-                    CodexErr::InvalidRequest("LocalDex tool namespace has no tools array".into())
+                    CodexErr::InvalidRequest("MultiDex tool namespace has no tools array".into())
                 })?;
                 let guidance = tool
                     .get("description")
@@ -155,7 +155,7 @@ impl Names {
                         Some("function" | "custom")
                     ) {
                         return Err(CodexErr::InvalidRequest(
-                            "LocalDex tool namespace contains an unsupported tool definition"
+                            "MultiDex tool namespace contains an unsupported tool definition"
                                 .into(),
                         ));
                     }
@@ -188,7 +188,7 @@ impl Names {
 
     fn rename_definition(&mut self, tool: &mut Value, namespace: Option<&str>) -> Result<()> {
         let name = tool.get("name").and_then(Value::as_str).ok_or_else(|| {
-            CodexErr::InvalidRequest("LocalDex tool definition has no name".into())
+            CodexErr::InvalidRequest("MultiDex tool definition has no name".into())
         })?;
         let alias = self.register(ToolName::new(namespace.map(str::to_string), name))?;
         tool["name"] = Value::String(alias);
@@ -287,5 +287,5 @@ impl ModelResponseInterceptor for Names {
 }
 
 #[cfg(test)]
-#[path = "localdex_tool_namespace_tests.rs"]
+#[path = "multidex_tool_namespace_tests.rs"]
 mod tests;

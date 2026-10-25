@@ -205,9 +205,9 @@ pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration =
 
 fn sanitize_reasoning_for_official_provider(
     input: &mut Vec<ResponseItem>,
-    localdex_compatibility: bool,
+    multidex_compatibility: bool,
 ) {
-    if localdex_compatibility {
+    if multidex_compatibility {
         return;
     }
     // Plaintext reasoning from a local endpoint has no encrypted payload that
@@ -230,9 +230,9 @@ fn sanitize_reasoning_for_official_provider(
 
 fn sanitize_plaintext_compaction_for_official_provider(
     input: &mut [ResponseItem],
-    localdex_compatibility: bool,
+    multidex_compatibility: bool,
 ) {
-    if localdex_compatibility {
+    if multidex_compatibility {
         return;
     }
     for item in input {
@@ -422,7 +422,7 @@ struct HttpSession {
     /// The last *stored* response and the request that produced it, captured
     /// before the in-flight request replaced them.
     ///
-    /// A LocalDex steer preempts the live request before the provider stores
+    /// A MultiDex steer preempts the live request before the provider stores
     /// its response, so the replacement request must be able to resume from
     /// the last stored point instead of resending the whole conversation.
     resume_point: Option<HttpResumePoint>,
@@ -1257,11 +1257,11 @@ impl ModelClient {
         // Responses models reject reasoning items with nonempty `content`.
         sanitize_reasoning_for_official_provider(
             &mut input,
-            self.state.provider.info().localdex_compatibility,
+            self.state.provider.info().multidex_compatibility,
         );
         sanitize_plaintext_compaction_for_official_provider(
             &mut input,
-            self.state.provider.info().localdex_compatibility,
+            self.state.provider.info().multidex_compatibility,
         );
         let is_openai = self.state.provider.info().is_openai();
         // These prompt-only items are rebuilt on every request. Hash their visible payloads
@@ -2391,8 +2391,8 @@ impl ResponsesHttpExecutor<'_> {
                 }
                 request.input = input;
             }
-            if let Some((wire, interceptor)) = crate::localdex_tool_namespace::prepare(
-                self.client.provider_info().localdex_compatibility,
+            if let Some((wire, interceptor)) = crate::multidex_tool_namespace::prepare(
+                self.client.provider_info().multidex_compatibility,
                 &full_request,
                 &request.input,
             )? {
@@ -2796,8 +2796,8 @@ impl ModelClientSession {
                 payload.input = input;
             }
             let ResponsesWsRequest::ResponseCreate(payload) = &mut ws_request;
-            let (namespace_wire, namespace_interceptor) = crate::localdex_tool_namespace::prepare(
-                self.client.provider_info().localdex_compatibility,
+            let (namespace_wire, namespace_interceptor) = crate::multidex_tool_namespace::prepare(
+                self.client.provider_info().multidex_compatibility,
                 &request,
                 payload.input,
             )?

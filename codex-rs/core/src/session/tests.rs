@@ -5278,23 +5278,23 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
 }
 
 #[tokio::test]
-async fn session_switches_between_omnigent_localdex_and_openai() {
+async fn session_switches_between_omnigent_multidex_and_openai() {
     let mut session = make_session_configuration_for_tests().await;
     let mut config = (*session.original_config_do_not_use).clone();
     let mut local_provider = config.model_providers["openai"].clone();
-    local_provider.name = "Omnigent LocalDex".to_string();
+    local_provider.name = "Omnigent MultiDex".to_string();
     local_provider.base_url = Some("http://127.0.0.1:2120/v1".to_string());
     local_provider.requires_openai_auth = false;
     config.model_providers = codex_model_provider_info::merge_configured_model_providers(
         config.model_providers,
         std::collections::HashMap::from([
-            ("localdex".to_string(), local_provider.clone()),
-            ("omnigent-localdex-test".to_string(), local_provider),
+            ("multidex".to_string(), local_provider.clone()),
+            ("omnigent-multidex-test".to_string(), local_provider),
         ]),
     )
-    .expect("LocalDex providers should normalize");
-    config.model_provider_id = "omnigent-localdex-test".to_string();
-    config.model_provider = config.model_providers["omnigent-localdex-test"].clone();
+    .expect("MultiDex providers should normalize");
+    config.model_provider_id = "omnigent-multidex-test".to_string();
+    config.model_provider = config.model_providers["omnigent-multidex-test"].clone();
     session.original_config_do_not_use = Arc::new(config);
     let mut step_settings = (*session.step_settings).clone();
     step_settings.collaboration_mode.settings.model = "DS v4.1 Flash 1017".to_string();
@@ -5307,7 +5307,7 @@ async fn session_switches_between_omnigent_localdex_and_openai() {
                     model: Some("gpt-6-sol".to_string()),
                     ..Default::default()
                 },
-                model_provider: Some("omnigent-localdex-test".to_string()),
+                model_provider: Some("omnigent-multidex-test".to_string()),
                 ..Default::default()
             },
             &[],
@@ -5331,7 +5331,7 @@ async fn session_switches_between_omnigent_localdex_and_openai() {
                     model: Some("gpt-6-sol".to_string()),
                     ..Default::default()
                 },
-                model_provider: Some("omnigent-localdex-test".to_string()),
+                model_provider: Some("omnigent-multidex-test".to_string()),
                 ..Default::default()
             },
             &[],
@@ -5355,10 +5355,10 @@ async fn session_switches_between_omnigent_localdex_and_openai() {
             },
             &[],
         )
-        .expect("switch back to LocalDex");
+        .expect("switch back to MultiDex");
     assert_eq!(
         local.original_config_do_not_use.model_provider_id,
-        "localdex"
+        "multidex"
     );
     assert_eq!(
         local.provider.info(),
@@ -5401,23 +5401,23 @@ async fn session_switches_between_omnigent_localdex_and_openai() {
             },
             &[],
         )
-        .expect("collaboration-mode switch to LocalDex");
+        .expect("collaboration-mode switch to MultiDex");
     assert_eq!(
         local_from_mode.original_config_do_not_use.model_provider_id,
-        "localdex"
+        "multidex"
     );
 }
 
 #[tokio::test]
-async fn session_switches_between_openrouter_localdex_and_openai() {
+async fn session_switches_between_openrouter_multidex_and_openai() {
     let mut session = make_session_configuration_for_tests().await;
     let mut config = (*session.original_config_do_not_use).clone();
     config.model_providers.insert(
-        "localdex".to_string(),
+        "multidex".to_string(),
         ModelProviderInfo {
-            name: "LocalDex".to_string(),
+            name: "MultiDex".to_string(),
             base_url: Some("http://127.0.0.1:2120/v1".to_string()),
-            localdex_compatibility: true,
+            multidex_compatibility: true,
             ..Default::default()
         },
     );
@@ -5425,10 +5425,10 @@ async fn session_switches_between_openrouter_localdex_and_openai() {
     for (model, explicit_provider, expected_provider) in [
         ("deepseek/deepseek-v4.1-flash-1017", None, "openrouter"),
         ("gpt-5.6-sol", None, "openai"),
-        ("DS v4.1 Flash 1017", None, "localdex"),
+        ("DS v4.1 Flash 1017", None, "multidex"),
         (
             "deepseek/deepseek-v4.1-flash-1017",
-            Some("omnigent-localdex-test"),
+            Some("omnigent-multidex-test"),
             "openrouter",
         ),
         ("another-vendor/model", None, "openrouter"),
@@ -12382,7 +12382,7 @@ async fn interrupting_compaction_fallback_retains_last_known_step_context(with_p
             Some((turn.config.model_provider_id.clone(), turn.provider.clone()));
     } else {
         assert!(session.state.lock().await.previous_turn_provider.is_none());
-        assert!(!turn.provider.info().localdex_compatibility);
+        assert!(!turn.provider.info().multidex_compatibility);
     }
     session
         .record_conversation_items(

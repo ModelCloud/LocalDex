@@ -1142,29 +1142,29 @@ env_http_headers = { "x-openai-internal-codex-residency" = "CODEX_TEST_UNSET_RES
 }
 
 #[tokio::test]
-async fn qb_model_selects_localdex_without_changing_official_model_routing() -> std::io::Result<()>
+async fn qb_model_selects_multidex_without_changing_official_model_routing() -> std::io::Result<()>
 {
     let cfg = toml::from_str::<ConfigToml>(
         r#"
 model = "DS v4.1 Flash 1017"
-model_provider = "omnigent-localdex-test"
+model_provider = "omnigent-multidex-test"
 
-[model_providers.localdex]
-name = "LocalDex"
+[model_providers.multidex]
+name = "MultiDex"
 base_url = "http://127.0.0.1:2120/v1"
 env_key = "CODEX_LOCAL_OPENAI_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 
-[model_providers.omnigent-localdex-test]
-name = "Omnigent LocalDex"
+[model_providers.omnigent-multidex-test]
+name = "Omnigent MultiDex"
 base_url = "http://127.0.0.1:2120/v1"
 env_key = "CODEX_LOCAL_OPENAI_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 "#,
     )
-    .expect("valid LocalDex provider config");
+    .expect("valid MultiDex provider config");
     let stack = ConfigLayerStack::new(
         Vec::new(),
         ConfigRequirements::default(),
@@ -1178,7 +1178,7 @@ requires_openai_auth = false
         stack,
     )
     .await?;
-    assert_eq!(local.model_provider_id, "localdex");
+    assert_eq!(local.model_provider_id, "multidex");
 
     let stack = ConfigLayerStack::new(
         Vec::new(),
@@ -1238,28 +1238,28 @@ async fn openrouter_model_selects_its_provider_and_preserves_other_routes() -> s
         ),
         (
             "deepseek-ai/DeepSeek-V4.1-Flash-ultra",
-            "localdex",
+            "multidex",
             "lithos",
         ),
         ("gpt-5.6-sol", "lithos", "openai"),
-        ("DS v4.1 Flash 1017", "lithos", "localdex"),
+        ("DS v4.1 Flash 1017", "lithos", "multidex"),
         ("deepseek/deepseek-v4.1-flash-1017", "openai", "openrouter"),
         (
             "deepseek/deepseek-v4.1-flash-1017",
-            "localdex",
+            "multidex",
             "openrouter",
         ),
         ("gpt-5.6-sol", "openrouter", "openai"),
         ("another-vendor/model", "openrouter", "openrouter"),
-        ("DS v4.1 Flash 1017", "openrouter", "localdex"),
+        ("DS v4.1 Flash 1017", "openrouter", "multidex"),
     ] {
         let cfg = toml::from_str::<ConfigToml>(&format!(
             r#"
 model = "{model}"
 model_provider = "{requested_provider}"
 
-[model_providers.localdex]
-name = "LocalDex"
+[model_providers.multidex]
+name = "MultiDex"
 base_url = "http://127.0.0.1:2120/v1"
 
 [model_providers.openrouter.provider]

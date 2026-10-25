@@ -55,8 +55,8 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
     })
 }
 
-const LOCALDEX_RELEASES_URL: &str =
-    "https://api.github.com/repos/ModelCloud/LocalDex/releases?per_page=100";
+const MULTIDEX_RELEASES_URL: &str =
+    "https://api.github.com/repos/ModelCloud/MultiDex/releases?per_page=100";
 
 #[derive(Deserialize, Debug, Clone)]
 struct ReleaseInfo {
@@ -112,7 +112,7 @@ async fn fetch_latest_github_release_version(
     client_pool: &RouteAwareClientPool,
 ) -> anyhow::Result<String> {
     let releases = client_pool
-        .get(LOCALDEX_RELEASES_URL)
+        .get(MULTIDEX_RELEASES_URL)
         .headers(default_headers())
         .send()
         .await?
@@ -123,7 +123,7 @@ async fn fetch_latest_github_release_version(
         .into_iter()
         .filter(|release| !release.draft && !release.prerelease)
         .find_map(|release| extract_version_from_latest_tag(&release.tag_name).ok())
-        .ok_or_else(|| anyhow::anyhow!("No stable LocalDex release was found"))
+        .ok_or_else(|| anyhow::anyhow!("No stable MultiDex release was found"))
 }
 
 /// Returns the latest version to show in a popup, if it should be shown.

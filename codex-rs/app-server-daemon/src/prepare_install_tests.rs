@@ -160,29 +160,29 @@ async fn seeds_full_package() {
 }
 
 #[tokio::test]
-async fn seeds_localdex_package_using_manifest_entrypoint() {
+async fn seeds_multidex_package_using_manifest_entrypoint() {
     let temp = tempfile::TempDir::new().expect("temp");
     let home = temp.path().join("home");
     let daemon = daemon(&home);
-    let source = temp.path().join("localdex-package");
-    let localdex_bin = package_with_entrypoint(&source, "0.163.0", "bin/localdex");
+    let source = temp.path().join("multidex-package");
+    let multidex_bin = package_with_entrypoint(&source, "0.163.0", "bin/multidex");
 
     prepare_from_package(
         &daemon,
         &DaemonSettings::default(),
         InstallMode::Missing,
         Some(&source),
-        &localdex_bin,
+        &multidex_bin,
         |_| Ok(true),
     )
     .await
-    .expect("seed LocalDex package");
+    .expect("seed MultiDex package");
 
     let selected = std::fs::canonicalize(home.join("packages/app-server-daemon/current"))
-        .expect("selected LocalDex release");
+        .expect("selected MultiDex release");
     assert_eq!(
         managed_codex_bin(&home),
-        home.join("packages/app-server-daemon/current/bin/localdex")
+        home.join("packages/app-server-daemon/current/bin/multidex")
     );
     assert_eq!(
         std::fs::read_to_string(selected.join("codex-package.json")).expect("manifest"),
@@ -190,9 +190,9 @@ async fn seeds_localdex_package_using_manifest_entrypoint() {
     );
     assert_eq!(
         std::fs::read_link(selected.join("codex")).expect("Codex alias"),
-        Path::new("bin/localdex")
+        Path::new("bin/multidex")
     );
-    assert!(validate_package(&selected, "bin/localdex").is_ok());
+    assert!(validate_package(&selected, "bin/multidex").is_ok());
 }
 
 #[tokio::test]

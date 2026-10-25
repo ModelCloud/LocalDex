@@ -241,7 +241,7 @@ fn unknown_model_uses_builtin_instruction_template() {
 }
 
 #[test]
-fn localdex_dsv41_flash_uses_native_metadata() {
+fn multidex_dsv41_flash_uses_native_metadata() {
     let model = model_info_from_slug("DS v4.1 Flash 1017");
 
     assert_eq!(model.display_name, "DeepSeek v4.1 Flash (Local)");
@@ -277,13 +277,13 @@ fn localdex_dsv41_flash_uses_native_metadata() {
 }
 
 #[test]
-fn localdex_catalog_makes_the_local_model_selectable_without_replacing_codex_models() {
-    let catalog = localdex_model_catalog();
+fn multidex_catalog_makes_the_local_model_selectable_without_replacing_codex_models() {
+    let catalog = multidex_model_catalog();
     let model = catalog
         .models
         .iter()
-        .find(|model| model.slug == LOCALDEX_DSV41_FLASH)
-        .expect("LocalDex model is included in the picker catalog");
+        .find(|model| model.slug == MULTIDEX_DSV41_FLASH)
+        .expect("MultiDex model is included in the picker catalog");
 
     assert_eq!(model.visibility, ModelVisibility::List);
     assert!(model.service_tiers.is_empty());
@@ -291,13 +291,13 @@ fn localdex_catalog_makes_the_local_model_selectable_without_replacing_codex_mod
         catalog
             .models
             .iter()
-            .any(|model| model.slug != LOCALDEX_DSV41_FLASH)
+            .any(|model| model.slug != MULTIDEX_DSV41_FLASH)
     );
 }
 
 #[test]
 fn dsv41_flash_uses_deepseek_harness_prompt() {
-    let local = model_info_from_slug(LOCALDEX_DSV41_FLASH);
+    let local = model_info_from_slug(MULTIDEX_DSV41_FLASH);
     let openrouter = model_info_from_slug(OPENROUTER_DSV41_FLASH);
 
     for model in [&local, &openrouter] {
@@ -318,7 +318,7 @@ fn dsv41_flash_uses_deepseek_harness_prompt() {
     assert!(openrouter.supports_reasoning_summary_parameter);
     assert_eq!(openrouter.visibility, ModelVisibility::List);
     assert!(
-        localdex_model_catalog()
+        multidex_model_catalog()
             .models
             .iter()
             .any(|model| model.slug == OPENROUTER_DSV41_FLASH)
@@ -328,7 +328,7 @@ fn dsv41_flash_uses_deepseek_harness_prompt() {
 #[test]
 fn bundled_openai_models_exclude_endpoint_specific_models() {
     assert!(is_bundled_openai_model("gpt-5.6-sol"));
-    assert!(!is_bundled_openai_model(LOCALDEX_DSV41_FLASH));
+    assert!(!is_bundled_openai_model(MULTIDEX_DSV41_FLASH));
     assert!(!is_bundled_openai_model(OPENROUTER_DSV41_FLASH));
     assert!(!is_bundled_openai_model("openai/gpt-5.6-sol"));
 }
@@ -349,23 +349,23 @@ fn lithos_variants_use_1017_instructions_without_fallback_metadata() {
 }
 
 #[test]
-fn localdex_runtime_capability_uses_only_matching_positive_context_window() {
+fn multidex_runtime_capability_uses_only_matching_positive_context_window() {
     assert_eq!(
-        super::localdex_runtime_context_window(
+        super::multidex_runtime_context_window(
             r#"{"model":"DS v4.1 Flash 1017","context_window":262144}"#,
             "DS v4.1 Flash 1017",
         ),
         Some(262_144)
     );
     assert_eq!(
-        super::localdex_runtime_context_window(
+        super::multidex_runtime_context_window(
             r#"{"model":"other","context_window":262144}"#,
             "DS v4.1 Flash 1017",
         ),
         None
     );
     assert_eq!(
-        super::localdex_runtime_context_window(
+        super::multidex_runtime_context_window(
             r#"{"model":"DS v4.1 Flash 1017","context_window":0}"#,
             "DS v4.1 Flash 1017",
         ),

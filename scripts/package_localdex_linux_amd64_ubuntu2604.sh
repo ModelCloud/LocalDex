@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Add an isolated OpenSSL runtime to a Linux x86_64 LocalDex package built on
+# Add an isolated OpenSSL runtime to a Linux x86_64 MultiDex package built on
 # Ubuntu 26.04. Run this with an OpenSSL 3.5+ runtime that supports the binary.
 set -euo pipefail
 
@@ -28,13 +28,13 @@ manifest_target="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]
 [[ "${manifest_target}" == "${target}" ]] || { echo "Wrong package target" >&2; exit 1; }
 
 cp "${openssl_dir}/libssl.so.3" "${openssl_dir}/libcrypto.so.3" "${work_dir}/package/lib/"
-for binary in "${work_dir}/package/bin/localdex" "${work_dir}/package/bin/codex-code-mode-host"; do
+for binary in "${work_dir}/package/bin/multidex" "${work_dir}/package/bin/codex-code-mode-host"; do
     [[ -x "${binary}" ]] || { echo "Missing ${binary}" >&2; exit 1; }
     patchelf --set-rpath '$ORIGIN/../lib' "${binary}"
     [[ "$(patchelf --print-rpath "${binary}")" == '$ORIGIN/../lib' ]] || exit 1
 done
 
-asset="${output_dir}/localdex-package-${target}-ubuntu26.04.tar.gz"
+asset="${output_dir}/multidex-package-${target}-ubuntu26.04.tar.gz"
 tar -C "${work_dir}/package" -czf "${asset}" .
 (cd "${output_dir}" && sha256sum "$(basename "${asset}")" > "$(basename "${asset}").sha256")
-printf 'Ubuntu 26.04 package: %s (LocalDex %s)\n' "${asset}" "${version}"
+printf 'Ubuntu 26.04 package: %s (MultiDex %s)\n' "${asset}" "${version}"

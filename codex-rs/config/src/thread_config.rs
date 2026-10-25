@@ -318,7 +318,7 @@ mod tests {
             requires_openai_auth: false,
             supports_websockets: true,
             supports_responses_continuation: false,
-            localdex_compatibility: false,
+            multidex_compatibility: false,
             supports_standalone_web_search: true,
             capabilities: None,
             project_id: None,

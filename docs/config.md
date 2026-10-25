@@ -14,9 +14,9 @@ still allowing managed hooks from requirements and managed config layers. This
 setting is only supported in `requirements.toml`; putting it in `config.toml`
 does not enable managed-hooks-only mode.
 
-## LocalDex providers
+## MultiDex providers
 
-LocalDex registers an `openrouter` provider by default: it points at
+MultiDex registers an `openrouter` provider by default: it points at
 `https://openrouter.ai/api/v1` and reads its credential from the
 `OPENROUTER_API_KEY` environment variable (or `env_key_fallbacks`/`auth.json`,
 like every other `env_key` provider). No keys are stored in the repo.
@@ -46,7 +46,7 @@ Managed provider restrictions still apply.
 Both DS entries default to Max reasoning and use the same prompt adapted from
 DeepSeek Harness's `snapshots/session/worktree/system-prompt.expected.md`.
 The adaptation replaces Harness-only file, background-job, goal, and delegation
-tools with LocalDex equivalents; it is not a byte-for-byte copy. Explicit
+tools with MultiDex equivalents; it is not a byte-for-byte copy. Explicit
 user-configured instructions can still override the model's default prompt.
 
 ### Lithos
@@ -54,7 +54,7 @@ user-configured instructions can still override the model's default prompt.
 The built-in provider ID is `lithos`. Set `LITHOS_API_KEY` privately in the
 environment; do not put keys in source files. It uses a native transport adapter
 for `https://api.lithosai.cloud/v1/chat/completions`, without a local proxy.
-LocalDex keeps upstream conversation construction and converts only the HTTP
+MultiDex keeps upstream conversation construction and converts only the HTTP
 request and streamed response at the provider boundary.
 
 ```toml

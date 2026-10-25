@@ -2107,7 +2107,7 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
-        localdex_compatibility: false,
+        multidex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
         project_id: None,
@@ -2365,7 +2365,7 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
         base_url: Some(format!("{}/v1", server.uri())),
         supports_websockets: false,
         supports_responses_continuation: false,
-        localdex_compatibility: false,
+        multidex_compatibility: false,
         ..built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone()
     };
 
@@ -3621,7 +3621,7 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
-        localdex_compatibility: false,
+        multidex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
         project_id: None,
@@ -3813,7 +3813,7 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
     let input = body["input"].as_array().expect("request input");
     assert_eq!(input[0]["role"], "developer");
     let input = &input[1..];
-    // LocalDex drops plaintext reasoning items for official providers because the
+    // MultiDex drops plaintext reasoning items for official providers because the
     // service cannot verify or replay them from a stored response.
     assert_eq!(input.len(), 9);
     assert_eq!(input[0]["id"].as_str(), Some("msg_message-id"));
@@ -4205,17 +4205,17 @@ async fn incomplete_response_emits_content_filter_error_message() -> anyhow::Res
 
 #[test_case::test_case(false, false, json!({"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}); "sse_usage")]
 #[test_case::test_case(true, false, json!({"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}); "websocket_usage")]
-#[test_case::test_case(false, true, json!({"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}); "localdex_sse_usage")]
+#[test_case::test_case(false, true, json!({"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}); "multidex_sse_usage")]
 #[test_case::test_case(false, false, serde_json::Value::Null; "sse_missing_usage")]
 #[test_case::test_case(true, false, serde_json::Value::Null; "websocket_missing_usage")]
-#[test_case::test_case(false, true, serde_json::Value::Null; "localdex_sse_missing_usage")]
+#[test_case::test_case(false, true, serde_json::Value::Null; "multidex_sse_missing_usage")]
 #[test_case::test_case(false, false, json!({"malformed": true}); "sse_malformed_usage")]
 #[test_case::test_case(true, false, json!({"malformed": true}); "websocket_malformed_usage")]
-#[test_case::test_case(false, true, json!({"malformed": true}); "localdex_sse_malformed_usage")]
+#[test_case::test_case(false, true, json!({"malformed": true}); "multidex_sse_malformed_usage")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn incomplete_response_is_terminal(
     use_websocket: bool,
-    localdex: bool,
+    multidex: bool,
     reported_usage: serde_json::Value,
 ) -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
@@ -4248,7 +4248,7 @@ async fn incomplete_response_is_terminal(
     } else {
         None
     };
-    let model = if localdex {
+    let model = if multidex {
         "DS v4.1 Flash 1017"
     } else {
         "gpt-5.4"
@@ -4256,16 +4256,16 @@ async fn incomplete_response_is_terminal(
     let mut builder = test_codex().with_model(model).with_config(move |config| {
         config.model_provider.stream_max_retries = Some(2);
         config.model_provider.request_max_retries = Some(0);
-        if localdex {
-            config.model_provider_id = "localdex".to_string();
-            config.model_provider.localdex_compatibility = true;
+        if multidex {
+            config.model_provider_id = "multidex".to_string();
+            config.model_provider.multidex_compatibility = true;
             config.model_provider.supports_responses_continuation = true;
             config
                 .model_providers
-                .insert("localdex".to_string(), config.model_provider.clone());
+                .insert("multidex".to_string(), config.model_provider.clone());
         }
     });
-    if !localdex {
+    if !multidex {
         builder = builder.with_model_info_override(model, |_| {});
     }
     let test = if let Some(server) = &websocket_server {
@@ -4496,7 +4496,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
-        localdex_compatibility: false,
+        multidex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
         project_id: None,
@@ -4590,7 +4590,7 @@ async fn env_var_overrides_loaded_auth() {
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
-        localdex_compatibility: false,
+        multidex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
         project_id: None,

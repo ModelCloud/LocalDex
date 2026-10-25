@@ -33,11 +33,11 @@ use super::network;
 const MAX_VERSION_RESPONSE_BYTES: usize = 1024 * 1024;
 
 const VERSION_FILE_NAME: &str = "version.json";
-const GITHUB_LOCALDEX_RELEASES_URL: &str =
-    "https://api.github.com/repos/ModelCloud/LocalDex/releases?per_page=100";
+const GITHUB_MULTIDEX_RELEASES_URL: &str =
+    "https://api.github.com/repos/ModelCloud/MultiDex/releases?per_page=100";
 
 #[derive(Deserialize)]
-struct LocalDexReleaseInfo {
+struct MultiDexReleaseInfo {
     tag_name: String,
     draft: bool,
     prerelease: bool,
@@ -402,7 +402,7 @@ fn update_action_label(context: &InstallContext) -> &'static str {
         | InstallMethod::VitePlus
         | InstallMethod::Pnpm
         | InstallMethod::Brew
-        | InstallMethod::Standalone { .. } => "ModelCloud LocalDex release installer",
+        | InstallMethod::Standalone { .. } => "ModelCloud MultiDex release installer",
         InstallMethod::Other => "manual or unknown",
     }
 }
@@ -426,12 +426,12 @@ async fn fetch_latest_github_release_version(
     client: &RouteAwareClientPool,
 ) -> Result<String, String> {
     let releases =
-        http_get_json::<Vec<LocalDexReleaseInfo>>(client, GITHUB_LOCALDEX_RELEASES_URL).await?;
-    latest_stable_localdex_release_version(releases)
+        http_get_json::<Vec<MultiDexReleaseInfo>>(client, GITHUB_MULTIDEX_RELEASES_URL).await?;
+    latest_stable_multidex_release_version(releases)
 }
 
-fn latest_stable_localdex_release_version(
-    releases: Vec<LocalDexReleaseInfo>,
+fn latest_stable_multidex_release_version(
+    releases: Vec<MultiDexReleaseInfo>,
 ) -> Result<String, String> {
     releases
         .into_iter()
@@ -439,10 +439,10 @@ fn latest_stable_localdex_release_version(
         .find_map(|release| {
             release
                 .tag_name
-                .strip_prefix("localdex-v")
+                .strip_prefix("multidex-v")
                 .map(str::to_string)
         })
-        .ok_or_else(|| "no stable LocalDex release was found".to_string())
+        .ok_or_else(|| "no stable MultiDex release was found".to_string())
 }
 
 async fn http_get_json<T>(client: &RouteAwareClientPool, url: &str) -> Result<T, String>
@@ -696,14 +696,14 @@ mod tests {
                 method: InstallMethod::Npm,
                 package_layout: None,
             }),
-            "ModelCloud LocalDex release installer"
+            "ModelCloud MultiDex release installer"
         );
         assert_eq!(
             update_action_label(&InstallContext {
                 method: InstallMethod::Pnpm,
                 package_layout: None,
             }),
-            "ModelCloud LocalDex release installer"
+            "ModelCloud MultiDex release installer"
         );
         assert_eq!(
             update_action_label(&InstallContext {
@@ -717,24 +717,24 @@ mod tests {
     #[test]
     fn latest_release_probe_ignores_drafts_prereleases_and_upstream_tags() {
         assert_eq!(
-            latest_stable_localdex_release_version(vec![
-                LocalDexReleaseInfo {
-                    tag_name: "localdex-v9.0.0-beta.1".to_string(),
+            latest_stable_multidex_release_version(vec![
+                MultiDexReleaseInfo {
+                    tag_name: "multidex-v9.0.0-beta.1".to_string(),
                     draft: false,
                     prerelease: true,
                 },
-                LocalDexReleaseInfo {
+                MultiDexReleaseInfo {
                     tag_name: "rust-v99.0.0".to_string(),
                     draft: false,
                     prerelease: false,
                 },
-                LocalDexReleaseInfo {
-                    tag_name: "localdex-v2.3.4".to_string(),
+                MultiDexReleaseInfo {
+                    tag_name: "multidex-v2.3.4".to_string(),
                     draft: false,
                     prerelease: false,
                 },
-                LocalDexReleaseInfo {
-                    tag_name: "localdex-v3.0.0".to_string(),
+                MultiDexReleaseInfo {
+                    tag_name: "multidex-v3.0.0".to_string(),
                     draft: true,
                     prerelease: false,
                 },

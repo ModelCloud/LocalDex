@@ -72,10 +72,10 @@ const RESTART_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 const INSTALLER_STDERR_TAIL_BYTES: usize = 2 * 1024;
 const INSTALLER_STDERR_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 #[cfg(unix)]
-const INSTALL_URL: &str = "https://raw.githubusercontent.com/ModelCloud/LocalDex/main/scripts/install/install-localdex.sh";
+const INSTALL_URL: &str = "https://raw.githubusercontent.com/ModelCloud/MultiDex/main/scripts/install/install-multidex.sh";
 #[cfg(windows)]
 const INSTALL_URL: &str =
-    "https://raw.githubusercontent.com/ModelCloud/LocalDex/main/scripts/install/install.ps1";
+    "https://raw.githubusercontent.com/ModelCloud/MultiDex/main/scripts/install/install.ps1";
 
 pub(crate) async fn run(
     http_client_factory: HttpClientFactory,

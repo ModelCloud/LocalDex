@@ -9,7 +9,7 @@ mod apply_patch;
 mod apps;
 mod client;
 mod client_common;
-mod localdex_tool_namespace;
+mod multidex_tool_namespace;
 mod model_request;
 mod realtime_context;
 mod realtime_conversation;

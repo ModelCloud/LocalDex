@@ -6,9 +6,9 @@ expression: rendered
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ ✨ Update available! 0.155.1 -> 9.9.9                                                                      │
 │ Run sh -c 'curl -fsSL                                                                                      │
-│ https://raw.githubusercontent.com/ModelCloud/LocalDex/main/scripts/install/install-localdex.sh | sh' to    │
+│ https://raw.githubusercontent.com/ModelCloud/MultiDex/main/scripts/install/install-multidex.sh | sh' to    │
 │ update.                                                                                                    │
 │                                                                                                            │
 │ See full release notes:                                                                                    │
-│ https://github.com/ModelCloud/LocalDex/releases                                                            │
+│ https://github.com/ModelCloud/MultiDex/releases                                                            │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

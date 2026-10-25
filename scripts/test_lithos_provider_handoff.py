@@ -23,7 +23,7 @@ def main() -> None:
     parser.add_argument("--binary", required=True)
     args = parser.parse_args()
     requests: list[tuple[str, dict]] = []
-    tokens = {"openai": "test-only-openai", "localdex": "test-only-local", "lithos": "test-only-lithos"}
+    tokens = {"openai": "test-only-openai", "multidex": "test-only-local", "lithos": "test-only-lithos"}
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -74,10 +74,10 @@ def main() -> None:
         home.mkdir()
         (home / "config.toml").write_text(f'''openai_base_url = "{base}/openai/v1"
 service_tier = "default"
-[model_providers.localdex]
-name = "LocalDex"
-base_url = "{base}/localdex/v1"
-env_key = "LOCALDEX_API_KEY"
+[model_providers.multidex]
+name = "MultiDex"
+base_url = "{base}/multidex/v1"
+env_key = "MULTIDEX_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 [model_providers.lithos]
@@ -86,7 +86,7 @@ env_key = "LITHOS_API_KEY"
 ''')
         (home / "auth.json").write_text(json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": tokens["openai"]}))
         (home / "auth.json").chmod(0o600)
-        env = {**os.environ, "CODEX_HOME": str(home), "CODEX_DISABLE_CLOUD_CONFIG": "1", "OPENAI_API_KEY": tokens["openai"], "CODEX_API_KEY": tokens["openai"], "LOCALDEX_API_KEY": tokens["localdex"], "LITHOS_API_KEY": tokens["lithos"]}
+        env = {**os.environ, "CODEX_HOME": str(home), "CODEX_DISABLE_CLOUD_CONFIG": "1", "OPENAI_API_KEY": tokens["openai"], "CODEX_API_KEY": tokens["openai"], "MULTIDEX_API_KEY": tokens["multidex"], "LITHOS_API_KEY": tokens["lithos"]}
         with (root / "stderr.log").open("w") as stderr:
             process = subprocess.Popen([args.binary, "app-server", "--stdio"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr, text=True, env=env)
             events: queue.Queue = queue.Queue()
@@ -131,7 +131,7 @@ env_key = "LITHOS_API_KEY"
                 for provider, model, prompt in [
                     ("openai", "gpt-5.6-sol", "The original secret word is ORCHID. Acknowledge only."),
                     ("lithos", "deepseek-ai/DeepSeek-V4.1-Flash", "What was the original secret word? Reply only that word."),
-                    ("localdex", "DS v4.1 Flash 1017", "Keep the original secret word. Acknowledge only."),
+                    ("multidex", "DS v4.1 Flash 1017", "Keep the original secret word. Acknowledge only."),
                     ("lithos", "deepseek-ai/DeepSeek-V4.1-Flash-ultra", "What was the original secret word? Reply only that word."),
                     ("openai", "gpt-5.6-sol", "Keep the original secret word. Acknowledge only."),
                 ]:

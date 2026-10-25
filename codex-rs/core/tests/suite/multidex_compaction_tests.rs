@@ -1,6 +1,6 @@
 //! Local compatibility compaction compares history estimates, not server usage.
 use super::*;
-use codex_model_provider_info::LOCALDEX_PROVIDER_ID;
+use codex_model_provider_info::MULTIDEX_PROVIDER_ID;
 use codex_model_provider_info::WireApi;
 use codex_model_provider_info::create_oss_provider_with_base_url;
 use codex_model_provider_info::merge_configured_model_providers;
@@ -9,7 +9,7 @@ use pretty_assertions::assert_eq;
 #[test_case::test_case(false; "shrinking_history_with_larger_estimate_than_server_usage")]
 #[test_case::test_case(true; "growing_history_stops_with_warning")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn localdex_post_turn_compaction_measures_history_progress(growing: bool) -> Result<()> {
+async fn multidex_post_turn_compaction_measures_history_progress(growing: bool) -> Result<()> {
     let server = MockServer::start().await;
     let answer = "Detailed original answer. ".repeat(4_000);
     let summary = if growing {
@@ -34,22 +34,22 @@ async fn localdex_post_turn_compaction_measures_history_progress(growing: bool) 
     let mut providers = merge_configured_model_providers(
         Default::default(),
         std::collections::HashMap::from([(
-            LOCALDEX_PROVIDER_ID.to_string(),
+            MULTIDEX_PROVIDER_ID.to_string(),
             create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), WireApi::Responses),
         )]),
     )
-    .expect("LocalDex provider should normalize");
-    let provider = providers.remove(LOCALDEX_PROVIDER_ID).unwrap();
+    .expect("MultiDex provider should normalize");
+    let provider = providers.remove(MULTIDEX_PROVIDER_ID).unwrap();
     let test = test_codex()
         .with_model_info_override("DS v4.1 Flash 1017", |info| {
             info.context_window = Some(100_000);
             info.max_context_window = None;
         })
         .with_config(move |config| {
-            config.model_provider_id = LOCALDEX_PROVIDER_ID.to_string();
+            config.model_provider_id = MULTIDEX_PROVIDER_ID.to_string();
             config
                 .model_providers
-                .insert(LOCALDEX_PROVIDER_ID.to_string(), provider.clone());
+                .insert(MULTIDEX_PROVIDER_ID.to_string(), provider.clone());
             config.model_provider = provider;
             config.model_auto_compact_token_limit = Some(100_000);
             config.model_post_turn_compact_threshold_percent = 1;
@@ -110,7 +110,7 @@ async fn localdex_post_turn_compaction_measures_history_progress(growing: bool) 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn failed_localdex_compaction_allows_new_user_context() -> Result<()> {
+async fn failed_multidex_compaction_allows_new_user_context() -> Result<()> {
     let server = MockServer::start().await;
     let answer = "A long answer. ".repeat(4_000);
     let mock = mount_sse_sequence(
@@ -139,12 +139,12 @@ async fn failed_localdex_compaction_allows_new_user_context() -> Result<()> {
     let mut providers = merge_configured_model_providers(
         Default::default(),
         std::collections::HashMap::from([(
-            LOCALDEX_PROVIDER_ID.to_string(),
+            MULTIDEX_PROVIDER_ID.to_string(),
             create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), WireApi::Responses),
         )]),
     )
-    .expect("LocalDex provider should normalize");
-    let mut provider = providers.remove(LOCALDEX_PROVIDER_ID).unwrap();
+    .expect("MultiDex provider should normalize");
+    let mut provider = providers.remove(MULTIDEX_PROVIDER_ID).unwrap();
     provider.stream_max_retries = Some(0);
     let test = test_codex()
         .with_model_info_override("DS v4.1 Flash 1017", |info| {
@@ -152,10 +152,10 @@ async fn failed_localdex_compaction_allows_new_user_context() -> Result<()> {
             info.max_context_window = None;
         })
         .with_config(move |config| {
-            config.model_provider_id = LOCALDEX_PROVIDER_ID.to_string();
+            config.model_provider_id = MULTIDEX_PROVIDER_ID.to_string();
             config
                 .model_providers
-                .insert(LOCALDEX_PROVIDER_ID.to_string(), provider.clone());
+                .insert(MULTIDEX_PROVIDER_ID.to_string(), provider.clone());
             config.model_provider = provider;
             config.model_auto_compact_token_limit = Some(100_000);
             config.model_post_turn_compact_threshold_percent = 1;
@@ -205,7 +205,7 @@ async fn failed_localdex_compaction_allows_new_user_context() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn failed_localdex_compaction_retries_on_next_user_prompt() -> Result<()> {
+async fn failed_multidex_compaction_retries_on_next_user_prompt() -> Result<()> {
     let server = MockServer::start().await;
     let answer = "A long answer. ".repeat(4_000);
     let mock = mount_sse_sequence(
@@ -234,14 +234,14 @@ async fn failed_localdex_compaction_retries_on_next_user_prompt() -> Result<()> 
     let mut providers = merge_configured_model_providers(
         Default::default(),
         std::collections::HashMap::from([(
-            LOCALDEX_PROVIDER_ID.to_string(),
+            MULTIDEX_PROVIDER_ID.to_string(),
             create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), WireApi::Responses),
         )]),
     )
-    .expect("LocalDex provider should normalize");
+    .expect("MultiDex provider should normalize");
     let mut provider = providers
-        .remove(LOCALDEX_PROVIDER_ID)
-        .expect("LocalDex provider should be configured");
+        .remove(MULTIDEX_PROVIDER_ID)
+        .expect("MultiDex provider should be configured");
     provider.stream_max_retries = Some(0);
     let test = test_codex()
         .with_model_info_override("DS v4.1 Flash 1017", |info| {
@@ -249,10 +249,10 @@ async fn failed_localdex_compaction_retries_on_next_user_prompt() -> Result<()> 
             info.max_context_window = None;
         })
         .with_config(move |config| {
-            config.model_provider_id = LOCALDEX_PROVIDER_ID.to_string();
+            config.model_provider_id = MULTIDEX_PROVIDER_ID.to_string();
             config
                 .model_providers
-                .insert(LOCALDEX_PROVIDER_ID.to_string(), provider.clone());
+                .insert(MULTIDEX_PROVIDER_ID.to_string(), provider.clone());
             config.model_provider = provider;
             config.model_auto_compact_token_limit = Some(100_000);
             config.model_post_turn_compact_threshold_percent = 1;
@@ -321,10 +321,10 @@ async fn failed_localdex_compaction_retries_on_next_user_prompt() -> Result<()> 
     Ok(())
 }
 
-#[test_case::test_case("openai", "localdex", "gpt-5.5", "DS v4.1 Flash 1017"; "openai_to_localdex")]
-#[test_case::test_case("localdex", "openai", "DS v4.1 Flash 1017", "gpt-5.5"; "localdex_to_openai")]
-#[test_case::test_case("omnigent-localdex-test", "openai", "DS v4.1 Flash 1017", "gpt-5.5"; "namespaced_localdex_to_openai")]
-#[test_case::test_case("custom", "localdex", "custom/old", "DS v4.1 Flash 1017"; "custom_to_localdex")]
+#[test_case::test_case("openai", "multidex", "gpt-5.5", "DS v4.1 Flash 1017"; "openai_to_multidex")]
+#[test_case::test_case("multidex", "openai", "DS v4.1 Flash 1017", "gpt-5.5"; "multidex_to_openai")]
+#[test_case::test_case("omnigent-multidex-test", "openai", "DS v4.1 Flash 1017", "gpt-5.5"; "namespaced_multidex_to_openai")]
+#[test_case::test_case("custom", "multidex", "custom/old", "DS v4.1 Flash 1017"; "custom_to_multidex")]
 #[test_case::test_case("openai", "custom", "gpt-5.5", "custom/next"; "openai_to_custom")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn previous_model_compaction_keeps_its_provider(
@@ -346,11 +346,11 @@ async fn previous_model_compaction_keeps_its_provider(
         provider.supports_websockets = false;
         provider
     };
-    // The unused literal LocalDex endpoint catches loss of a namespaced provider ID.
+    // The unused literal MultiDex endpoint catches loss of a namespaced provider ID.
     let mut configured = std::collections::HashMap::from([
         (
-            LOCALDEX_PROVIDER_ID.to_string(),
-            make_provider(LOCALDEX_PROVIDER_ID, &decoy_server),
+            MULTIDEX_PROVIDER_ID.to_string(),
+            make_provider(MULTIDEX_PROVIDER_ID, &decoy_server),
         ),
         ("openai".to_string(), make_provider("openai", &decoy_server)),
     ]);
@@ -446,12 +446,12 @@ async fn previous_model_compaction_keeps_its_provider(
     }
     assert_eq!(next_requests[0].body_json()["model"], next_model);
     for (id, requests) in [(old_id, &old_requests), (next_id, &next_requests)] {
-        if codex_model_provider_info::is_localdex_provider_id(id) {
+        if codex_model_provider_info::is_multidex_provider_id(id) {
             assert!(
                 requests
                     .iter()
                     .all(|request| request.header("authorization").is_none()),
-                "cached ChatGPT credentials must not reach LocalDex"
+                "cached ChatGPT credentials must not reach MultiDex"
             );
         } else if id == "openai" {
             assert!(
@@ -494,15 +494,15 @@ async fn cold_resume_hash_change_compacts_with_current_provider_below_budget() -
     let mut providers = merge_configured_model_providers(
         Default::default(),
         std::collections::HashMap::from([(
-            LOCALDEX_PROVIDER_ID.to_string(),
+            MULTIDEX_PROVIDER_ID.to_string(),
             create_oss_provider_with_base_url(
                 &format!("{}/v1", current_server.uri()),
                 WireApi::Responses,
             ),
         )]),
     )
-    .expect("LocalDex normalization");
-    let local_provider = providers.remove(LOCALDEX_PROVIDER_ID).unwrap();
+    .expect("MultiDex normalization");
+    let local_provider = providers.remove(MULTIDEX_PROVIDER_ID).unwrap();
     let mut initial_builder = test_codex()
         .with_model_info_override("gpt-5.5", |info| {
             info.comp_hash = Some("old-hash".to_string());
@@ -528,11 +528,11 @@ async fn cold_resume_hash_change_compacts_with_current_provider_below_budget() -
             .with_model("DS v4.1 Flash 1017")
             .with_config(move |config| {
                 config.model_catalog = catalog;
-                config.model_provider_id = LOCALDEX_PROVIDER_ID.to_string();
+                config.model_provider_id = MULTIDEX_PROVIDER_ID.to_string();
                 config.model_provider = local_provider.clone();
                 config
                     .model_providers
-                    .insert(LOCALDEX_PROVIDER_ID.to_string(), local_provider);
+                    .insert(MULTIDEX_PROVIDER_ID.to_string(), local_provider);
                 config.model_post_turn_compact_threshold_percent = 0;
                 config.model_auto_compact_token_limit = Some(100_000);
                 let _ = config.features.disable(Feature::TokenBudget);

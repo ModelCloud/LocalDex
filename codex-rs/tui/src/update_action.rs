@@ -10,19 +10,19 @@ use codex_install_context::StandalonePlatform;
 pub enum UpdateAction {
     /// Replace the local daemon after restoring the terminal.
     Daemon(DaemonUpdateSource),
-    /// Update the LocalDex distribution, regardless of the legacy package manager.
+    /// Update the MultiDex distribution, regardless of the legacy package manager.
     NpmGlobalLatest,
-    /// Update the LocalDex distribution, regardless of the legacy package manager.
+    /// Update the MultiDex distribution, regardless of the legacy package manager.
     BunGlobalLatest,
-    /// Update the LocalDex distribution, regardless of the legacy package manager.
+    /// Update the MultiDex distribution, regardless of the legacy package manager.
     VitePlusGlobalLatest,
-    /// Update the LocalDex distribution, regardless of the legacy package manager.
+    /// Update the MultiDex distribution, regardless of the legacy package manager.
     PnpmGlobalLatest,
-    /// Update the LocalDex distribution, regardless of the legacy package manager.
+    /// Update the MultiDex distribution, regardless of the legacy package manager.
     BrewUpgrade,
-    /// Update via the ModelCloud LocalDex release installer.
+    /// Update via the ModelCloud MultiDex release installer.
     StandaloneUnix,
-    /// LocalDex does not publish a Windows installer yet.
+    /// MultiDex does not publish a Windows installer yet.
     StandaloneWindows,
 }
 
@@ -56,7 +56,7 @@ impl UpdateAction {
                 "sh",
                 &[
                     "-c",
-                    "curl -fsSL https://raw.githubusercontent.com/ModelCloud/LocalDex/main/scripts/install/install-localdex.sh | sh",
+                    "curl -fsSL https://raw.githubusercontent.com/ModelCloud/MultiDex/main/scripts/install/install-multidex.sh | sh",
                 ],
             ),
             UpdateAction::StandaloneWindows => (
@@ -64,7 +64,7 @@ impl UpdateAction {
                 &[
                     "-NoProfile",
                     "-Command",
-                    "throw 'LocalDex releases currently support Linux x86_64 only.'",
+                    "throw 'MultiDex releases currently support Linux x86_64 only.'",
                 ],
             ),
         }
@@ -155,14 +155,14 @@ mod tests {
     }
 
     #[test]
-    fn update_commands_use_the_localdex_distribution() {
+    fn update_commands_use_the_multidex_distribution() {
         assert_eq!(
             UpdateAction::StandaloneUnix.command_args(),
             (
                 "sh",
                 &[
                     "-c",
-                    "curl -fsSL https://raw.githubusercontent.com/ModelCloud/LocalDex/main/scripts/install/install-localdex.sh | sh"
+                    "curl -fsSL https://raw.githubusercontent.com/ModelCloud/MultiDex/main/scripts/install/install-multidex.sh | sh"
                 ][..],
             )
         );
@@ -173,7 +173,7 @@ mod tests {
                 &[
                     "-NoProfile",
                     "-Command",
-                    "throw 'LocalDex releases currently support Linux x86_64 only.'"
+                    "throw 'MultiDex releases currently support Linux x86_64 only.'"
                 ][..],
             )
         );

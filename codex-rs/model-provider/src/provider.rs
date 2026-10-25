@@ -670,7 +670,7 @@ mod tests {
             requires_openai_auth: false,
             supports_websockets: false,
             supports_responses_continuation: false,
-            localdex_compatibility: false,
+            multidex_compatibility: false,
             supports_standalone_web_search: false,
             capabilities: None,
             project_id: None,
@@ -782,18 +782,18 @@ mod tests {
     }
 
     #[test]
-    fn localdex_provider_omits_openai_only_tools() {
+    fn multidex_provider_omits_openai_only_tools() {
         let mut providers = codex_model_provider_info::merge_configured_model_providers(
             Default::default(),
             std::collections::HashMap::from([(
-                codex_model_provider_info::LOCALDEX_PROVIDER_ID.to_string(),
+                codex_model_provider_info::MULTIDEX_PROVIDER_ID.to_string(),
                 provider_for("https://example.test/v1".to_string()),
             )]),
         )
-        .expect("LocalDex provider should normalize");
+        .expect("MultiDex provider should normalize");
         let provider = create_model_provider(
             providers
-                .remove(codex_model_provider_info::LOCALDEX_PROVIDER_ID)
+                .remove(codex_model_provider_info::MULTIDEX_PROVIDER_ID)
                 .unwrap(),
             /*auth_manager*/ None,
         );
@@ -1419,7 +1419,7 @@ printf '%s\n' '{"AccessKeyId":"exported","SecretAccessKey":"secret"}'
             codex_login::default_client::RESIDENCY_HEADER_NAME.to_string(),
             "us".into(),
         )]));
-        for provider_id in ["custom", "localdex", "omnigent-localdex-test"] {
+        for provider_id in ["custom", "multidex", "omnigent-multidex-test"] {
             let mut providers = codex_model_provider_info::merge_configured_model_providers(
                 Default::default(),
                 std::collections::HashMap::from([(provider_id.to_string(), provider_info.clone())]),
