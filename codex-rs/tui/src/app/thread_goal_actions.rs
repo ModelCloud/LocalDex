@@ -56,9 +56,14 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
-        // A remote attach is driven by an external orchestrator with no one to
-        // answer this modal, and hiding the composer blocks its readiness check.
-        if matches!(self.app_server_target, crate::AppServerTarget::Remote { .. }) {
+        // Orchestrators need the composer visible; interactive remote users
+        // still get the normal resume choice unless they explicitly opt out.
+        if self.skip_resume_goal_prompt
+            && matches!(
+                self.app_server_target,
+                crate::AppServerTarget::Remote { .. }
+            )
+        {
             return;
         }
         if self.chat_widget.has_misalignment_policy_violation() {

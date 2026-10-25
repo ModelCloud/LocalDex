@@ -107,6 +107,12 @@ routable; selecting one routes to its named provider. Official Codex models
 continue to use the normal ChatGPT login and OpenAI endpoints. Installation and
 upgrade never contact or validate a model endpoint.
 
+An orchestrator attaching a TUI with `--remote` can set
+`LOCALDEX_SKIP_RESUME_GOAL_PROMPT=1` to keep the composer available when resuming
+a paused, blocked, or usage-limited goal. This only hides the resume-choice
+modal; it does not resume the goal. Interactive remote connections still prompt
+by default, and local sessions ignore this flag.
+
 If an endpoint returns `response.incomplete` with reason `max_output_tokens`,
 it has reached its output budget. LocalDex reports that reason immediately and
 stops the request without retrying or switching compaction models. Increase the
