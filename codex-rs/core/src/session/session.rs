@@ -423,14 +423,19 @@ impl SessionConfiguration {
         let current_model = self.step_settings.collaboration_mode.model();
         let openrouter_to_openai = next_model
             .is_some_and(codex_models_manager::model_info::is_bundled_openai_model)
-            && updates
-                .model_provider
-                .as_deref()
-                .unwrap_or(&self.original_config_do_not_use.model_provider_id)
-                == codex_model_provider_info::OPENROUTER_PROVIDER_ID;
+            && matches!(
+                updates
+                    .model_provider
+                    .as_deref()
+                    .unwrap_or(&self.original_config_do_not_use.model_provider_id),
+                codex_model_provider_info::OPENROUTER_PROVIDER_ID
+                    | codex_model_provider_info::LITHOS_PROVIDER_ID
+            );
         let requested_model_provider =
             if next_model.is_some_and(codex_model_provider_info::is_localdex_model) {
                 Some(codex_model_provider_info::LOCALDEX_PROVIDER_ID)
+            } else if next_model.is_some_and(codex_model_provider_info::is_lithos_model) {
+                Some(codex_model_provider_info::LITHOS_PROVIDER_ID)
             } else if next_model.is_some_and(codex_model_provider_info::is_openrouter_model) {
                 Some(codex_model_provider_info::OPENROUTER_PROVIDER_ID)
             } else if openrouter_to_openai {

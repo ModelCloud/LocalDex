@@ -1052,6 +1052,40 @@ fn test_built_in_model_providers_include_openrouter() {
 }
 
 #[test]
+fn lithos_uses_its_own_key_and_does_not_replay_failed_generations() {
+    let provider = ModelProviderInfo::create_lithos_provider();
+    assert_eq!(provider.name, "Lithos");
+    assert_eq!(
+        provider.base_url.as_deref(),
+        Some("https://api.lithosai.cloud/v1")
+    );
+    assert_eq!(provider.env_key.as_deref(), Some("LITHOS_API_KEY"));
+    assert!(!provider.requires_openai_auth);
+    assert!(!provider.supports_websockets);
+    assert!(!provider.supports_responses_continuation);
+    assert!(provider.localdex_compatibility);
+    assert_eq!(provider.stream_max_retries, Some(0));
+    assert_eq!(provider.request_max_retries, Some(0));
+    assert!(is_lithos_model("deepseek-ai/DeepSeek-V4.1-Flash-ultra"));
+    assert!(!is_lithos_model("gpt-6-sol"));
+}
+
+#[test]
+fn lithos_auth_override_preserves_native_transport_identity() {
+    let configured: ModelProviderInfo =
+        toml::from_str("env_key = \"PRIVATE_LITHOS_KEY\"\n").expect("valid provider");
+    let merged = merge_configured_model_providers(
+        built_in_model_providers(None),
+        HashMap::from([(LITHOS_PROVIDER_ID.to_string(), configured)]),
+    )
+    .expect("override merges");
+    let provider = &merged[LITHOS_PROVIDER_ID];
+    assert!(provider.is_lithos());
+    assert!(provider.localdex_compatibility);
+    assert_eq!(provider.env_key.as_deref(), Some("PRIVATE_LITHOS_KEY"));
+}
+
+#[test]
 fn test_deserialize_openrouter_provider_routing_toml() {
     let provider: ModelProviderInfo = toml::from_str(
         r#"

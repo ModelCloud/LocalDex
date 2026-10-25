@@ -489,6 +489,7 @@ pub fn build_models_manager(
             .filter(|model| {
                 codex_model_provider_info::is_localdex_model(&model.slug)
                     || codex_model_provider_info::is_openrouter_model(&model.slug)
+                    || codex_model_provider_info::is_lithos_model(&model.slug)
             })
             .collect();
         let default_model =
@@ -497,6 +498,8 @@ pub fn build_models_manager(
             } else if config.model_provider_id == codex_model_provider_info::OPENROUTER_PROVIDER_ID
             {
                 Some(codex_model_provider_info::OPENROUTER_DSV41_FLASH_MODEL_ID.to_string())
+            } else if config.model_provider_id == codex_model_provider_info::LITHOS_PROVIDER_ID {
+                Some(codex_model_provider_info::LITHOS_MODEL_IDS[0].to_string())
             } else {
                 None
             };
@@ -527,12 +530,16 @@ fn localdex_model_catalog_for_config(
         let has_openrouter = config
             .model_providers
             .contains_key(codex_model_provider_info::OPENROUTER_PROVIDER_ID);
-        (has_localdex || has_openrouter).then(|| {
+        let has_lithos = config
+            .model_providers
+            .contains_key(codex_model_provider_info::LITHOS_PROVIDER_ID);
+        (has_localdex || has_openrouter || has_lithos).then(|| {
             let mut catalog = codex_models_manager::model_info::localdex_model_catalog();
             catalog.models.retain(|model| {
                 (has_localdex || !codex_model_provider_info::is_localdex_model(&model.slug))
                     && (has_openrouter
                         || !codex_model_provider_info::is_openrouter_model(&model.slug))
+                    && (has_lithos || !codex_model_provider_info::is_lithos_model(&model.slug))
             });
             catalog
         })

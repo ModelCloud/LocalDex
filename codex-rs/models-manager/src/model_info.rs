@@ -30,6 +30,11 @@ const PERSONALITY_SECTION_HEADER: &str = "# Personality";
 const LOCALDEX_DSV41_FLASH: &str = "DS v4.1 Flash 1017";
 /// The same DS v4.1 Flash model routed through OpenRouter's aggregate API.
 const OPENROUTER_DSV41_FLASH: &str = "deepseek/deepseek-v4.1-flash-1017";
+const LITHOS_DSV41_FLASH: [&str; 3] = [
+    "deepseek-ai/DeepSeek-V4.1-Flash",
+    "deepseek-ai/DeepSeek-V4.1-Flash-fast",
+    "deepseek-ai/DeepSeek-V4.1-Flash-ultra",
+];
 const LOCALDEX_DSV41_FLASH_CONTEXT_WINDOW: i64 = 262_144;
 const LOCALDEX_DSV41_FLASH_COMPACTION_HEADROOM: i64 = 4_196;
 const LOCALDEX_DSV41_FLASH_AUTO_COMPACT_TOKEN_LIMIT: i64 =
@@ -159,6 +164,9 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
     if slug == OPENROUTER_DSV41_FLASH {
         return openrouter_dsv41_flash_model_info();
     }
+    if LITHOS_DSV41_FLASH.contains(&slug) {
+        return lithos_dsv41_flash_model_info(slug);
+    }
     warn!("Unknown model {slug} is used. This will use fallback model metadata.");
     ModelInfo {
         slug: slug.to_string(),
@@ -219,13 +227,18 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
 /// configured one explicitly.
 pub fn localdex_model_catalog() -> ModelsResponse {
     let mut catalog = crate::bundled_models_response().unwrap_or_default();
-    catalog
-        .models
-        .retain(|model| model.slug != LOCALDEX_DSV41_FLASH && model.slug != OPENROUTER_DSV41_FLASH);
+    catalog.models.retain(|model| {
+        model.slug != LOCALDEX_DSV41_FLASH
+            && model.slug != OPENROUTER_DSV41_FLASH
+            && !LITHOS_DSV41_FLASH.contains(&model.slug.as_str())
+    });
     catalog.models.push(apply_localdex_runtime_capabilities(
         localdex_dsv41_flash_model_info(),
     ));
     catalog.models.push(openrouter_dsv41_flash_model_info());
+    catalog
+        .models
+        .extend(LITHOS_DSV41_FLASH.map(lithos_dsv41_flash_model_info));
     catalog
 }
 
@@ -244,8 +257,8 @@ pub fn is_bundled_openai_model(model: &str) -> bool {
 fn localdex_dsv41_flash_model_info() -> ModelInfo {
     dsv41_flash_model_info(
         LOCALDEX_DSV41_FLASH,
-        LOCALDEX_DSV41_FLASH,
-        "Local DS v4.1 Flash 1017 coding model.",
+        "DeepSeek v4.1 Flash (Local)",
+        "DeepSeek v4.1 Flash 1017 served by the local endpoint.",
         /*default_reasoning_level*/ ReasoningEffort::Max,
         /*supports_reasoning_summary_parameter*/ false,
         /*default_reasoning_summary*/ ReasoningSummary::None,
@@ -257,7 +270,7 @@ fn localdex_dsv41_flash_model_info() -> ModelInfo {
 fn openrouter_dsv41_flash_model_info() -> ModelInfo {
     dsv41_flash_model_info(
         OPENROUTER_DSV41_FLASH,
-        "DS v4.1 Flash 1017 (OpenRouter)",
+        "DeepSeek v4.1 Flash (OpenRouter)",
         "DS v4.1 Flash 1017 coding model served through OpenRouter.",
         // Matches the LocalDex Lite entry's default reasoning effort.
         /*default_reasoning_level*/
@@ -269,6 +282,28 @@ fn openrouter_dsv41_flash_model_info() -> ModelInfo {
         /*default_reasoning_summary*/ ReasoningSummary::Auto,
         /*priority*/ 1,
     )
+}
+
+fn lithos_dsv41_flash_model_info(slug: &str) -> ModelInfo {
+    let variant = match slug {
+        "deepseek-ai/DeepSeek-V4.1-Flash-fast" => "Fast",
+        "deepseek-ai/DeepSeek-V4.1-Flash-ultra" => "Ultra",
+        _ => "Regular",
+    };
+    let mut model = dsv41_flash_model_info(
+        slug,
+        &format!("DeepSeek v4.1 Flash (Lithos {variant})"),
+        "DeepSeek v4.1 Flash 1017 served by Lithos.",
+        ReasoningEffort::Max,
+        false,
+        ReasoningSummary::None,
+        2,
+    );
+    // Lithos publishes a 1M-token context; keep a conservative decimal fallback.
+    model.context_window = Some(1_000_000);
+    // Hosted Chat Completions follows upstream's compaction admission policy.
+    model.auto_compact_token_limit = None;
+    model
 }
 
 #[allow(clippy::too_many_arguments)]

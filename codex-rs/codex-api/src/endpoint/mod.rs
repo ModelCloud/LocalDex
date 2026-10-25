@@ -1,4 +1,5 @@
 pub(crate) mod images;
+pub(crate) mod lithos;
 pub(crate) mod memories;
 pub(crate) mod models;
 pub(crate) mod realtime_call;
