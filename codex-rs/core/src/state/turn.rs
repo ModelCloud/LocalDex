@@ -99,7 +99,7 @@ pub(crate) struct TurnState {
     pub(crate) has_memory_citation: bool,
     pub(crate) token_usage_at_turn_start: TokenUsage,
     pub(crate) token_usage_by_model: TurnTokenUsage,
-    /// Armed only while a LocalDex provider request is streaming. A same-turn
+    /// Armed only while a MultiDex provider request is streaming. A same-turn
     /// steer cancels this token instead of aborting the whole task, allowing the
     /// next request to include the newly injected input.
     pub(crate) sampling_preemption: Option<CancellationToken>,

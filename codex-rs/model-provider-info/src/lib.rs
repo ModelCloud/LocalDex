@@ -88,26 +88,26 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 const OPENAI_ACTOR_AUTHORIZATION_HEADER: &str = "x-openai-actor-authorization";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
-/// The additive local provider bundled by the LocalDex distribution.
+/// The additive local provider bundled by the MultiDex distribution.
 ///
 /// A configured provider with this ID targets ModelCloud's Responses endpoint,
 /// which supports stored-response continuation. Keep this provider-specific so
 /// arbitrary OpenAI-compatible endpoints retain the conservative stateless
 /// default.
-pub const LOCALDEX_PROVIDER_ID: &str = "localdex";
-/// The canonical model ID served by the bundled LocalDex endpoint.
-pub const LOCALDEX_MODEL_ID: &str = "DS v4.1 Flash 1017";
-/// LocalDex may spend several minutes prefilling a very large prompt before it
+pub const MULTIDEX_PROVIDER_ID: &str = "multidex";
+/// The canonical model ID served by the bundled MultiDex endpoint.
+pub const MULTIDEX_MODEL_ID: &str = "DS v4.1 Flash 1017";
+/// MultiDex may spend several minutes prefilling a very large prompt before it
 /// emits the next SSE event. Keep the stream alive for up to 15 minutes so the
 /// client does not treat a valid cold prefill as a dead connection.
-const LOCALDEX_STREAM_IDLE_TIMEOUT_MS: u64 = 900_000;
-/// Omnigent creates a session-private provider ID for a LocalDex endpoint.
-pub fn is_localdex_provider_id(provider_id: &str) -> bool {
-    provider_id == LOCALDEX_PROVIDER_ID || provider_id.starts_with("omnigent-localdex-")
+const MULTIDEX_STREAM_IDLE_TIMEOUT_MS: u64 = 900_000;
+/// Omnigent creates a session-private provider ID for a MultiDex endpoint.
+pub fn is_multidex_provider_id(provider_id: &str) -> bool {
+    provider_id == MULTIDEX_PROVIDER_ID || provider_id.starts_with("omnigent-multidex-")
 }
-/// ModelCloud model IDs served by the configured LocalDex endpoint.
-pub fn is_localdex_model(model: &str) -> bool {
-    model == LOCALDEX_MODEL_ID
+/// ModelCloud model IDs served by the configured MultiDex endpoint.
+pub fn is_multidex_model(model: &str) -> bool {
+    model == MULTIDEX_MODEL_ID
 }
 /// The built-in OpenRouter provider: OpenRouter's aggregate Responses
 /// endpoint with its `provider` routing extensions.
@@ -275,11 +275,11 @@ pub struct ModelProviderInfo {
     #[serde(skip)]
     #[schemars(skip)]
     pub include_internal_metadata: bool,
-    /// Runtime-only LocalDex compatibility, assigned from the configured provider ID.
+    /// Runtime-only MultiDex compatibility, assigned from the configured provider ID.
     /// Generic Responses providers retain upstream authentication and capability defaults.
     #[serde(skip)]
     #[schemars(skip)]
-    pub localdex_compatibility: bool,
+    pub multidex_compatibility: bool,
     /// OpenRouter provider-routing preferences, forwarded verbatim as the
     /// request's top-level `provider` object. Only meaningful for providers
     /// that implement OpenRouter's extended Responses API.
@@ -656,7 +656,7 @@ other non-default provider fields are not supported"
             requires_openai_auth: true,
             supports_websockets: true,
             supports_responses_continuation: false,
-            localdex_compatibility: false,
+            multidex_compatibility: false,
             supports_standalone_web_search: true,
             capabilities: None,
             project_id: None,
@@ -702,7 +702,7 @@ other non-default provider fields are not supported"
             requires_openai_auth: false,
             supports_websockets: false,
             supports_responses_continuation: false,
-            localdex_compatibility: false,
+            multidex_compatibility: false,
             supports_standalone_web_search: false,
             capabilities: None,
             project_id: None,
@@ -745,7 +745,7 @@ other non-default provider fields are not supported"
             requires_openai_auth: false,
             supports_websockets: false,
             supports_responses_continuation: false,
-            localdex_compatibility: false,
+            multidex_compatibility: false,
             supports_standalone_web_search: false,
             project_id: None,
             location: None,
@@ -786,7 +786,7 @@ other non-default provider fields are not supported"
             requires_openai_auth: false,
             supports_websockets: false,
             supports_responses_continuation: false,
-            localdex_compatibility: false,
+            multidex_compatibility: false,
             supports_standalone_web_search: false,
             project_id: None,
             location: None,
@@ -845,10 +845,10 @@ other non-default provider fields are not supported"
         provider.base_url = Some("https://api.lithosai.cloud/v1".into());
         provider.env_key = Some("LITHOS_API_KEY".into());
         provider.env_key_instructions = Some("Set LITHOS_API_KEY to your Lithos API key.".into());
-        provider.localdex_compatibility = true;
+        provider.multidex_compatibility = true;
         provider.stream_max_retries = Some(0);
         provider.request_max_retries = Some(0);
-        provider.stream_idle_timeout_ms = Some(LOCALDEX_STREAM_IDLE_TIMEOUT_MS);
+        provider.stream_idle_timeout_ms = Some(MULTIDEX_STREAM_IDLE_TIMEOUT_MS);
         provider.capabilities = Some(ModelProviderCapabilities {
             external_web_access: Some(false),
             remote_compaction: Some(RemoteCompactionSupport::Unsupported),
@@ -921,20 +921,20 @@ pub fn merge_configured_model_providers(
     configured_model_providers: HashMap<String, ModelProviderInfo>,
 ) -> Result<HashMap<String, ModelProviderInfo>, String> {
     for (key, mut provider) in configured_model_providers {
-        // LocalDex owns this provider ID and its endpoint implements stored
-        // Responses continuation. Existing LocalDex configurations predate the
+        // MultiDex owns this provider ID and its endpoint implements stored
+        // Responses continuation. Existing MultiDex configurations predate the
         // capability flag, so make the supported behavior available without a
         // per-host configuration migration. All other configured providers
         // remain opt-in because `store=true` changes retention semantics.
-        provider.localdex_compatibility = is_localdex_provider_id(&key);
-        if provider.localdex_compatibility {
+        provider.multidex_compatibility = is_multidex_provider_id(&key);
+        if provider.multidex_compatibility {
             provider.supports_responses_continuation = true;
-            // Do not automatically replay large LocalDex prompts on either
+            // Do not automatically replay large MultiDex prompts on either
             // request or stream errors. Surface failures instead of silently
             // consuming minutes of prefill on repeated attempts.
             provider.request_max_retries = Some(0);
             provider.stream_max_retries = Some(0);
-            provider.stream_idle_timeout_ms = Some(LOCALDEX_STREAM_IDLE_TIMEOUT_MS);
+            provider.stream_idle_timeout_ms = Some(MULTIDEX_STREAM_IDLE_TIMEOUT_MS);
         }
         if matches!(
             key.as_str(),
@@ -1075,7 +1075,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
-        localdex_compatibility: false,
+        multidex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
         project_id: None,

@@ -135,7 +135,7 @@ fn http_continuation_retains_pending_completion_and_checks_reuse_boundaries(
     Ok(())
 }
 
-/// A LocalDex steer preempts the live HTTP response before the provider stores
+/// A MultiDex steer preempts the live HTTP response before the provider stores
 /// it. The replacement request must resume from the last stored response
 /// instead of resending the whole conversation, and must replay the assistant
 /// text that was already streamed to the client.

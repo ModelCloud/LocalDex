@@ -432,8 +432,8 @@ impl SessionConfiguration {
                     | codex_model_provider_info::LITHOS_PROVIDER_ID
             );
         let requested_model_provider =
-            if next_model.is_some_and(codex_model_provider_info::is_localdex_model) {
-                Some(codex_model_provider_info::LOCALDEX_PROVIDER_ID)
+            if next_model.is_some_and(codex_model_provider_info::is_multidex_model) {
+                Some(codex_model_provider_info::MULTIDEX_PROVIDER_ID)
             } else if next_model.is_some_and(codex_model_provider_info::is_lithos_model) {
                 Some(codex_model_provider_info::LITHOS_PROVIDER_ID)
             } else if next_model.is_some_and(codex_model_provider_info::is_openrouter_model) {
@@ -441,16 +441,16 @@ impl SessionConfiguration {
             } else if openrouter_to_openai {
                 Some(codex_model_provider_info::OPENAI_PROVIDER_ID)
             } else if let Some(model_provider) = updates.model_provider.as_deref()
-                && !codex_model_provider_info::is_localdex_provider_id(model_provider)
+                && !codex_model_provider_info::is_multidex_provider_id(model_provider)
             {
                 Some(model_provider)
             } else if next_model.is_some()
                 && (updates
                     .model_provider
                     .as_deref()
-                    .is_some_and(codex_model_provider_info::is_localdex_provider_id)
-                    || codex_model_provider_info::is_localdex_model(current_model)
-                    || codex_model_provider_info::is_localdex_provider_id(
+                    .is_some_and(codex_model_provider_info::is_multidex_provider_id)
+                    || codex_model_provider_info::is_multidex_model(current_model)
+                    || codex_model_provider_info::is_multidex_provider_id(
                         &self.original_config_do_not_use.model_provider_id,
                     ))
             {
@@ -767,15 +767,15 @@ impl Session {
             return client.clone();
         }
 
-        // A LocalDex provider intentionally has no cached OpenAI auth. When a
+        // A MultiDex provider intentionally has no cached OpenAI auth. When a
         // thread started there, recover the session-owned auth for its next
         // upstream provider rather than inheriting that empty provider scope.
         let provider = if self
             .services
             .model_client
             .provider_info()
-            .localdex_compatibility
-            && !provider.info().localdex_compatibility
+            .multidex_compatibility
+            && !provider.info().multidex_compatibility
         {
             codex_model_provider::create_model_provider(
                 provider.info().clone(),

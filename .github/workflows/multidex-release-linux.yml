@@ -1,20 +1,20 @@
-name: LocalDex Linux release
+name: MultiDex Linux release
 
 on:
   push:
     tags:
-      - "localdex-v*.*.*"
+      - "multidex-v*.*.*"
 
 permissions:
   contents: write
 
 concurrency:
-  group: localdex-release-${{ github.ref }}
+  group: multidex-release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   build:
-    name: Build LocalDex Linux ${{ matrix.arch }} package
+    name: Build MultiDex Linux ${{ matrix.arch }} package
     strategy:
       fail-fast: false
       matrix:
@@ -22,11 +22,11 @@ jobs:
           - arch: x86_64
             target: x86_64-unknown-linux-gnu
             runner: ubuntu-24.04
-            build_script: scripts/build_localdex_linux_amd64.sh
+            build_script: scripts/build_multidex_linux_amd64.sh
           - arch: aarch64
             target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
-            build_script: scripts/build_localdex_linux_aarch64.sh
+            build_script: scripts/build_multidex_linux_aarch64.sh
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     steps:
@@ -45,62 +45,62 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#localdex-v}"
+          version="${GITHUB_REF_NAME#multidex-v}"
           cargo_version="$(python3 -c 'import tomllib; print(tomllib.load(open("codex-rs/Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
           [[ "$version" == "$cargo_version" ]] || {
             echo "Release tag version $version does not match workspace $cargo_version" >&2
             exit 1
           }
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Build the LocalDex package
+      - name: Build the MultiDex package
         env:
-          LOCALDEX_PACKAGE_VERSION: ${{ steps.version.outputs.version }}
-          LOCALDEX_DIST_DIR: dist/localdex
+          MULTIDEX_PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+          MULTIDEX_DIST_DIR: dist/multidex
         run: ${{ matrix.build_script }}
       - name: Stage package and checksum
         env:
-          LOCALDEX_TARGET: ${{ matrix.target }}
-          LOCALDEX_VERSION: ${{ steps.version.outputs.version }}
+          MULTIDEX_TARGET: ${{ matrix.target }}
+          MULTIDEX_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          built="dist/localdex/localdex-${LOCALDEX_VERSION}-${LOCALDEX_TARGET}.tar.gz"
-          archive="dist/localdex/localdex-package-${LOCALDEX_TARGET}.tar.gz"
+          built="dist/multidex/multidex-${MULTIDEX_VERSION}-${MULTIDEX_TARGET}.tar.gz"
+          archive="dist/multidex/multidex-package-${MULTIDEX_TARGET}.tar.gz"
           test -f "$built"
           cp "$built" "$archive"
           sha256sum "$archive" > "$archive.sha256"
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: localdex-release-${{ matrix.arch }}
-          path: dist/localdex/localdex-package-${{ matrix.target }}.tar.gz*
+          name: multidex-release-${{ matrix.arch }}
+          path: dist/multidex/multidex-package-${{ matrix.target }}.tar.gz*
           if-no-files-found: error
           retention-days: 30
 
   publish:
-    name: Publish LocalDex Linux release
+    name: Publish MultiDex Linux release
     needs: build
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: localdex-release-*
+          pattern: multidex-release-*
           merge-multiple: true
-          path: dist/localdex
+          path: dist/multidex
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          version="${RELEASE_VERSION#localdex-v}"
-          tag="localdex-v${version}"
-          cp scripts/install/install-localdex.sh dist/localdex/install-localdex.sh
+          version="${RELEASE_VERSION#multidex-v}"
+          tag="multidex-v${version}"
+          cp scripts/install/install-multidex.sh dist/multidex/install-multidex.sh
           gh release create "$tag" \
-            "dist/localdex/localdex-package-x86_64-unknown-linux-gnu.tar.gz" \
-            "dist/localdex/localdex-package-x86_64-unknown-linux-gnu.tar.gz.sha256" \
-            "dist/localdex/localdex-package-aarch64-unknown-linux-gnu.tar.gz" \
-            "dist/localdex/localdex-package-aarch64-unknown-linux-gnu.tar.gz.sha256" \
-            "dist/localdex/install-localdex.sh" \
-            --title "LocalDex ${version}" \
-            --notes "LocalDex Codex-compatible CLI for Linux x86_64 and ARM64. Each package includes the CLI and codex-code-mode-host companion." \
+            "dist/multidex/multidex-package-x86_64-unknown-linux-gnu.tar.gz" \
+            "dist/multidex/multidex-package-x86_64-unknown-linux-gnu.tar.gz.sha256" \
+            "dist/multidex/multidex-package-aarch64-unknown-linux-gnu.tar.gz" \
+            "dist/multidex/multidex-package-aarch64-unknown-linux-gnu.tar.gz.sha256" \
+            "dist/multidex/install-multidex.sh" \
+            --title "MultiDex ${version}" \
+            --notes "MultiDex Codex-compatible CLI for Linux x86_64 and ARM64. Each package includes the CLI and codex-code-mode-host companion." \
             --verify-tag

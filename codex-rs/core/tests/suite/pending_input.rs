@@ -2009,7 +2009,7 @@ fn call_output_text(body: &Value, output_type: &str, call_id: &str) -> Option<St
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn localdex_steer_reconnects_websocket_and_sends_full_history() -> anyhow::Result<()> {
+async fn multidex_steer_reconnects_websocket_and_sends_full_history() -> anyhow::Result<()> {
     core_test_support::skip_if_no_network!(Ok(()));
 
     let server = responses::start_websocket_server(vec![
@@ -2034,13 +2034,13 @@ async fn localdex_steer_reconnects_websocket_and_sends_full_history() -> anyhow:
             let providers = codex_model_provider_info::merge_configured_model_providers(
                 Default::default(),
                 std::collections::HashMap::from([(
-                    "localdex".to_string(),
+                    "multidex".to_string(),
                     config.model_provider.clone(),
                 )]),
             )
-            .expect("LocalDex websocket provider should normalize");
-            config.model_provider_id = "localdex".to_string();
-            config.model_provider = providers["localdex"].clone();
+            .expect("MultiDex websocket provider should normalize");
+            config.model_provider_id = "multidex".to_string();
+            config.model_provider = providers["multidex"].clone();
             config.model_providers.extend(providers);
             config
                 .features

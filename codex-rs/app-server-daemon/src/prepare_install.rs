@@ -158,8 +158,8 @@ async fn prepare_from_package(
     let target = platform_target()?;
     let mut metadata: serde_json::Value = serde_json::from_slice(&manifest_bytes)?;
     let entrypoint = match metadata["entrypoint"].as_str() {
-        Some("bin/localdex") if cfg!(unix) => "bin/localdex",
-        Some("bin/localdex.exe") if cfg!(windows) => "bin/localdex.exe",
+        Some("bin/multidex") if cfg!(unix) => "bin/multidex",
+        Some("bin/multidex.exe") if cfg!(windows) => "bin/multidex.exe",
         _ if cfg!(windows) => "bin/codex.exe",
         _ => "bin/codex",
     };
@@ -443,7 +443,7 @@ fn package_tree(
         // The Unix installer adds this alias outside the package layout.
         if cfg!(unix) && relative == Path::new("codex") {
             let is_codex_alias = std::fs::read_link(&path).ok().is_some_and(|target| {
-                matches!(target.to_str(), Some("bin/codex" | "bin/localdex"))
+                matches!(target.to_str(), Some("bin/codex" | "bin/multidex"))
             });
             if is_codex_alias {
                 continue;

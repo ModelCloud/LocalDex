@@ -36,9 +36,9 @@ impl Default for ProviderCapabilities {
 
 impl ProviderCapabilities {
     pub(crate) fn from_config(info: &ModelProviderInfo) -> Self {
-        // Only LocalDex endpoints use the portable function-tool compatibility surface.
+        // Only MultiDex endpoints use the portable function-tool compatibility surface.
         // Generic configured providers retain upstream capability defaults.
-        let supports_openai_only_tools = !info.localdex_compatibility;
+        let supports_openai_only_tools = !info.multidex_compatibility;
         let defaults = Self {
             namespace_tools: supports_openai_only_tools,
             reasoning_summaries: supports_openai_only_tools,
@@ -46,7 +46,7 @@ impl ProviderCapabilities {
             web_search: supports_openai_only_tools,
             external_web_access: supports_openai_only_tools,
             remote_compaction: if info.is_openai()
-                || info.localdex_compatibility
+                || info.multidex_compatibility
                 || is_azure_responses_provider(&info.name, info.base_url.as_deref())
             {
                 RemoteCompactionSupport::V2

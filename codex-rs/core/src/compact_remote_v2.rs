@@ -419,7 +419,7 @@ async fn collect_compaction_output(
     mut stream: ResponseStream,
     request_kind: CompactionRequestKind<'_>,
 ) -> CodexResult<RemoteCompactionV2Output> {
-    let localdex_compatibility = turn_context.provider.info().localdex_compatibility;
+    let multidex_compatibility = turn_context.provider.info().multidex_compatibility;
     let mut output_item_count = 0usize;
     let mut compaction_count = 0usize;
     let mut compaction_output = None;
@@ -467,7 +467,7 @@ async fn collect_compaction_output(
                     if compaction_output.is_none() {
                         compaction_output = Some(item);
                     }
-                } else if localdex_compatibility
+                } else if multidex_compatibility
                     && let Some(summary) = lite_compaction_summary(&item)
                 {
                     plain_summary_count += 1;
@@ -513,7 +513,7 @@ async fn collect_compaction_output(
     };
 
     if compaction_count > 1
-        || (compaction_count == 0 && (!localdex_compatibility || plain_summary_count != 1))
+        || (compaction_count == 0 && (!multidex_compatibility || plain_summary_count != 1))
     {
         return Err(CodexErr::Fatal(format!(
             "remote compaction v2 expected exactly one compaction output item or Lite summary message, got {compaction_count} compaction and {plain_summary_count} summary items from {output_item_count} output items"
@@ -522,7 +522,7 @@ async fn collect_compaction_output(
     let compaction_output = match compaction_output {
         Some(ResponseItem::Compaction {
             encrypted_content, ..
-        }) if localdex_compatibility && encrypted_content.chars().any(char::is_whitespace) => {
+        }) if multidex_compatibility && encrypted_content.chars().any(char::is_whitespace) => {
             // Older Lite versions put the readable summary in the encrypted
             // field. Install it as ordinary text so later provider switches work.
             portable_compaction_summary(encrypted_content)
@@ -1437,7 +1437,7 @@ mod tests {
                 crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
                     codex_login::CodexAuth::create_dummy_chatgpt_auth_for_testing(),
                     Vec::new(),
-                    |config| config.model_provider.localdex_compatibility = true,
+                    |config| config.model_provider.multidex_compatibility = true,
                 )
                 .await;
             let output = collect_compaction_output(

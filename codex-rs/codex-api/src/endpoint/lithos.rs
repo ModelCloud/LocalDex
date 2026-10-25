@@ -74,15 +74,20 @@ pub(crate) fn request_body(request: &Value) -> Result<(Value, HashSet<String>), 
             "Lithos Chat Completions cannot extend a stored Responses ID",
         ));
     }
-    let mut definitions = request["tools"].as_array().cloned().unwrap_or_default();
     let input = request["input"]
         .as_array()
         .ok_or_else(|| invalid("Lithos input must be an array"))?;
+    // Input additional_tools come first so incremental tool updates resolve by
+    // recency; the request's own tool list is applied last and stays
+    // authoritative when a definition also survives in replayed history (e.g.
+    // after switching providers mid-thread).
+    let mut definitions = Vec::new();
     for item in input {
         if item["type"] == "additional_tools" {
             definitions.extend(item["tools"].as_array().cloned().unwrap_or_default());
         }
     }
+    definitions.extend(request["tools"].as_array().cloned().unwrap_or_default());
     let mut custom = HashSet::new();
     let mut tools = BTreeMap::new();
     for mut tool in definitions {
@@ -93,6 +98,7 @@ pub(crate) fn request_body(request: &Value) -> Result<(Value, HashSet<String>), 
             .to_owned();
         match kind {
             "function" => {
+                custom.remove(&name);
                 let mut function = json!({"name":name,"parameters":tool["parameters"]});
                 for key in ["description", "strict"] {
                     if let Some(value) = tool.get(key) {
@@ -117,11 +123,8 @@ pub(crate) fn request_body(request: &Value) -> Result<(Value, HashSet<String>), 
             }
         }
         let tool = json!({"type":"function","function":tool});
-        if tools.get(&name).is_some_and(|previous| previous != &tool) {
-            return Err(invalid(format!(
-                "Conflicting Lithos tool definitions for {name}"
-            )));
-        }
+        // The last definition wins: tool updates and provider switches
+        // legitimately redeclare a name with a newer shape.
         tools.insert(name, tool);
     }
     let mut messages = Vec::new();
@@ -512,6 +515,97 @@ mod tests {
         assert_eq!(args["input"], request["input"][1]["input"]);
         assert_eq!(body["messages"][2]["tool_call_id"], "c1");
         assert!(body.get("previous_response_id").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn lithos_duplicate_tool_names_resolve_to_the_latest_definition() -> Result<()> {
+        let request = json!({
+            "model": "test",
+            "tools": [
+                {"type":"function","name":"exec","description":"current","parameters":{"type":"object"}},
+            ],
+            "input": [
+                {"type":"additional_tools","tools":[
+                    {"type":"function","name":"exec","description":"oldest","parameters":{}},
+                    {"type":"function","name":"only_in_history","description":"kept","parameters":{}}
+                ]},
+                {"type":"additional_tools","tools":[
+                    {"type":"function","name":"exec","description":"newer","parameters":{"type":"string"}}
+                ]}
+            ]
+        });
+        let (body, _) = request_body(&request)?;
+        let tools = body["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 2);
+        let exec = tools
+            .iter()
+            .find(|tool| tool["function"]["name"] == "exec")
+            .unwrap();
+        // The request's own tool list wins over replayed history.
+        assert_eq!(exec["function"]["description"], "current");
+        let history_only = tools
+            .iter()
+            .find(|tool| tool["function"]["name"] == "only_in_history")
+            .unwrap();
+        assert_eq!(history_only["function"]["description"], "kept");
+        Ok(())
+    }
+
+    #[test]
+    fn lithos_later_additional_tools_update_earlier_definitions() -> Result<()> {
+        let request = json!({
+            "model": "test",
+            "input": [
+                {"type":"additional_tools","tools":[
+                    {"type":"function","name":"exec","description":"oldest","parameters":{}}
+                ]},
+                {"type":"additional_tools","tools":[
+                    {"type":"function","name":"exec","description":"newer","parameters":{"type":"string"}}
+                ]}
+            ]
+        });
+        let (body, _) = request_body(&request)?;
+        let tools = body["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["function"]["description"], "newer");
+        Ok(())
+    }
+
+    #[test]
+    fn lithos_redefined_tool_kind_controls_response_decoding() -> Result<()> {
+        for (old_kind, new_kind) in [("custom", "function"), ("function", "custom")] {
+            let request = json!({
+                "input": [{"type":"additional_tools","tools":[
+                    {"type":old_kind,"name":"exec","parameters":{"type":"object"}}
+                ]}],
+                "tools": [{"type":new_kind,"name":"exec","parameters":{"type":"object"}}]
+            });
+            let (body, custom) = request_body(&request)?;
+            assert_eq!(body["tools"].as_array().unwrap().len(), 1);
+            assert_eq!(custom.contains("exec"), new_kind == "custom");
+            let arguments = if new_kind == "custom" {
+                r#"{"input":"echo hello"}"#
+            } else {
+                r#"{"command":"echo hello"}"#
+            };
+            let mut state = ChatState::default();
+            state.chunk(json!({"id":"chat","choices":[{
+                "index":0,"delta":{"tool_calls":[{
+                    "index":0,"id":"call_exec","function":{"name":"exec","arguments":arguments}
+                }]},"finish_reason":"tool_calls"
+            }]}))?;
+            let events = state.complete(&custom)?;
+            let expected = if new_kind == "custom" {
+                "custom_tool_call"
+            } else {
+                "function_call"
+            };
+            assert!(events.iter().any(|event| {
+                matches!(event, ResponseEvent::OutputItemDone(item)
+                    if serde_json::to_value(item).unwrap()["type"] == expected)
+            }));
+        }
         Ok(())
     }
 

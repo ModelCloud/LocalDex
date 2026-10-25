@@ -206,7 +206,7 @@ pub(crate) async fn run_turn(
     // non-empty user prompt as an explicit retry of the previous failed
     // compaction so the unchanged-history guard only suppresses automatic loops.
     if auto_compaction_enabled
-        && turn_context.provider.info().localdex_compatibility
+        && turn_context.provider.info().multidex_compatibility
         && input
             .iter()
             .any(|item| matches!(item, TurnInput::UserInput { content, .. } if !content.is_empty()))
@@ -622,7 +622,7 @@ pub(crate) async fn run_turn(
                 context_overflow_compacted = false;
                 let (model_needs_follow_up, sampling_request_last_agent_message) =
                     match sampling_request_output {
-                        // A LocalDex steer interrupted only the live provider
+                        // A MultiDex steer interrupted only the live provider
                         // stream. Keep the turn alive and consume the input that
                         // steer already appended before issuing the replacement
                         // request.
@@ -879,7 +879,7 @@ pub(crate) async fn run_turn(
                                 .await;
                             }
                             warn!(error = %err, "Post-turn compaction failed; preserving the completed turn");
-                            if turn_context.provider.info().localdex_compatibility {
+                            if turn_context.provider.info().multidex_compatibility {
                                 sess.send_event(
                                     &turn_context,
                                     EventMsg::Warning(WarningEvent {
@@ -908,7 +908,7 @@ pub(crate) async fn run_turn(
                             .is_some()) =>
             {
                 // Preserve Guardian's overflow recovery and also retry if a
-                // LocalDex provider lowers its limit after capability refresh.
+                // MultiDex provider lowers its limit after capability refresh.
                 // Only one summarizing compaction is attempted per model step.
                 context_overflow_compacted = true;
                 if sess
@@ -1509,7 +1509,7 @@ async fn maybe_run_previous_model_inline_compact(
         turn_context.model_info().comp_hash.as_deref(),
     );
     let previous_model = previous_turn_settings.model;
-    // A LocalDex deployment can lower its context capacity while this thread
+    // A MultiDex deployment can lower its context capacity while this thread
     // remains alive. Its capability snapshot is refreshed before every host
     // turn, so compact before sampling when the same local model's current
     // budget no longer accommodates the retained history. Upstream providers
@@ -1577,7 +1577,7 @@ async fn maybe_run_previous_model_inline_compact(
     };
 
     // Use actual runtime provenance for switched endpoints, including namespaced
-    // LocalDex and explicit custom providers. Generic cold-resume workflows keep
+    // MultiDex and explicit custom providers. Generic cold-resume workflows keep
     // upstream's same-provider model/program restoration.
     let previous_provider = sess.state.lock().await.previous_turn_provider.clone();
     if let Some((provider_id, provider)) = previous_provider {
@@ -1593,8 +1593,8 @@ async fn maybe_run_previous_model_inline_compact(
         config.model_provider = provider.info().clone();
         previous_model_turn_context.provider = provider;
         previous_model_turn_context.config = Arc::new(config);
-    } else if turn_context.provider.info().localdex_compatibility
-        || codex_model_provider_info::is_localdex_model(&previous_model)
+    } else if turn_context.provider.info().multidex_compatibility
+        || codex_model_provider_info::is_multidex_model(&previous_model)
         || turn_context.provider.info().is_openrouter()
         || codex_model_provider_info::is_openrouter_model(&previous_model)
         || codex_model_provider_info::is_lithos_model(&previous_model)
@@ -1685,10 +1685,10 @@ async fn run_auto_compact(
         conversation.id = %sess.thread_id,
         turn.id = %turn_context.sub_id,
     );
-    let localdex_compaction = turn_context.provider.info().localdex_compatibility;
+    let multidex_compaction = turn_context.provider.info().multidex_compatibility;
     let context_before = sess.auto_compact_context_key().await;
     let tokens_before = context_before.token_count;
-    if localdex_compaction && sess.failed_auto_compact_context().await == Some(context_before) {
+    if multidex_compaction && sess.failed_auto_compact_context().await == Some(context_before) {
         let message = format!(
             "Automatic compaction for this unchanged context already failed or made no progress ({tokens_before} estimated tokens). It was not sent again. Add or edit conversation content before retrying."
         );
@@ -1704,7 +1704,7 @@ async fn run_auto_compact(
 
     // Compare local history estimates on both sides; server usage and local estimates differ.
     // Remote V2 and token-budget resets do not expose comparable rewritten history here.
-    let estimated_tokens_before = if localdex_compaction
+    let estimated_tokens_before = if multidex_compaction
         && matches!(reason, CompactionReason::ContextLimit)
         && !turn_context.config.features.enabled(Feature::TokenBudget)
         && matches!(
@@ -1732,7 +1732,7 @@ async fn run_auto_compact(
         let v2_supported = matches!(
             turn_context.provider.capabilities().remote_compaction,
             RemoteCompactionSupport::V2
-        ) && !(localdex_compaction && sess.remote_compaction_v2_unsupported().await);
+        ) && !(multidex_compaction && sess.remote_compaction_v2_unsupported().await);
         if v2_supported {
             let has_candidate = candidate.is_some();
             if !has_candidate {
@@ -1783,7 +1783,7 @@ async fn run_auto_compact(
                     installed
                 }
                 Err(err)
-                    if localdex_compaction && is_compaction_v2_protocol_mismatch(&err) =>
+                    if multidex_compaction && is_compaction_v2_protocol_mismatch(&err) =>
                 {
                     // The endpoint does not implement the remote-compaction item
                     // protocol. Downgrade to the local summarizer once and stay there
@@ -1839,7 +1839,7 @@ async fn run_auto_compact(
     let installed = match compact_result {
         Ok(installed) => installed,
         Err(err) => {
-            if localdex_compaction
+            if multidex_compaction
                 && !matches!(
                     err.details(),
                     CodexErrorDetails::Interrupted | CodexErrorDetails::TurnAborted
@@ -1872,7 +1872,7 @@ async fn run_auto_compact(
         return Err(CodexErr::Fatal(message));
     }
 
-    if localdex_compaction {
+    if multidex_compaction {
         sess.set_failed_auto_compact_context(None).await;
     }
     Ok(installed)
@@ -2069,7 +2069,7 @@ async fn run_sampling_request(
             &prompt,
             cancellation_token.child_token(),
             &mut draining_for_mailbox,
-            arm_localdex_sampling_preemption(sess.as_ref(), turn_context.as_ref()).await,
+            arm_multidex_sampling_preemption(sess.as_ref(), turn_context.as_ref()).await,
         )
         .await
         {
@@ -2271,11 +2271,11 @@ enum SamplingRequestResult {
     Preempted,
 }
 
-async fn arm_localdex_sampling_preemption(
+async fn arm_multidex_sampling_preemption(
     sess: &Session,
     turn_context: &TurnContext,
 ) -> Option<CancellationToken> {
-    if turn_context.config.model_provider_id != "localdex" {
+    if turn_context.config.model_provider_id != "multidex" {
         return None;
     }
     let turn_state = sess

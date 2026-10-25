@@ -42,7 +42,7 @@ pub(crate) enum ReasoningEffortPin {
     },
 }
 
-/// Identity of the context that an automatic LocalDex compaction attempted.
+/// Identity of the context that an automatic MultiDex compaction attempted.
 /// Usage alone stays unchanged when a new user message is admitted after failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct AutoCompactContextKey {

@@ -22,12 +22,12 @@ use std::path::PathBuf;
 use tracing::warn;
 
 pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
-/// The DeepSeek Harness system prompt, ported to LocalDex's tool surface
+/// The DeepSeek Harness system prompt, ported to MultiDex's tool surface
 /// (exec_command/write_stdin/apply_patch/update_plan/web_search). DS v4.1
 /// Flash is served with this prompt instead of the Codex one.
 pub const DEEPSEEK_INSTRUCTIONS: &str = include_str!("../deepseek_prompt.md");
 const PERSONALITY_SECTION_HEADER: &str = "# Personality";
-const LOCALDEX_DSV41_FLASH: &str = "DS v4.1 Flash 1017";
+const MULTIDEX_DSV41_FLASH: &str = "DS v4.1 Flash 1017";
 /// The same DS v4.1 Flash model routed through OpenRouter's aggregate API.
 const OPENROUTER_DSV41_FLASH: &str = "deepseek/deepseek-v4.1-flash-1017";
 const LITHOS_DSV41_FLASH: [&str; 3] = [
@@ -35,14 +35,14 @@ const LITHOS_DSV41_FLASH: [&str; 3] = [
     "deepseek-ai/DeepSeek-V4.1-Flash-fast",
     "deepseek-ai/DeepSeek-V4.1-Flash-ultra",
 ];
-const LOCALDEX_DSV41_FLASH_CONTEXT_WINDOW: i64 = 262_144;
-const LOCALDEX_DSV41_FLASH_COMPACTION_HEADROOM: i64 = 4_196;
-const LOCALDEX_DSV41_FLASH_AUTO_COMPACT_TOKEN_LIMIT: i64 =
-    LOCALDEX_DSV41_FLASH_CONTEXT_WINDOW - LOCALDEX_DSV41_FLASH_COMPACTION_HEADROOM;
-const LOCALDEX_RUNTIME_CAPABILITIES_FILE: &str = "localdex-runtime-capabilities.json";
+const MULTIDEX_DSV41_FLASH_CONTEXT_WINDOW: i64 = 262_144;
+const MULTIDEX_DSV41_FLASH_COMPACTION_HEADROOM: i64 = 4_196;
+const MULTIDEX_DSV41_FLASH_AUTO_COMPACT_TOKEN_LIMIT: i64 =
+    MULTIDEX_DSV41_FLASH_CONTEXT_WINDOW - MULTIDEX_DSV41_FLASH_COMPACTION_HEADROOM;
+const MULTIDEX_RUNTIME_CAPABILITIES_FILE: &str = "multidex-runtime-capabilities.json";
 
 #[derive(Deserialize)]
-struct LocalDexRuntimeCapabilities {
+struct MultiDexRuntimeCapabilities {
     model: String,
     context_window: i64,
 }
@@ -86,36 +86,36 @@ pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig)
         *instructions_template = strip_personality_section(std::mem::take(instructions_template));
     }
 
-    apply_localdex_runtime_capabilities(model)
+    apply_multidex_runtime_capabilities(model)
 }
 
 /// Apply the session-private endpoint capability snapshot when it is newer
 /// than bundled metadata. Omnigent writes this file immediately before every
-/// LocalDex turn after authenticating to `/v1/models/{id}`. Treat malformed or
+/// MultiDex turn after authenticating to `/v1/models/{id}`. Treat malformed or
 /// missing data as unavailable and retain the conservative bundled fallback.
-fn apply_localdex_runtime_capabilities(mut model: ModelInfo) -> ModelInfo {
-    if model.slug != LOCALDEX_DSV41_FLASH {
+fn apply_multidex_runtime_capabilities(mut model: ModelInfo) -> ModelInfo {
+    if model.slug != MULTIDEX_DSV41_FLASH {
         return model;
     }
     let Some(codex_home) = std::env::var_os("CODEX_HOME") else {
         return model;
     };
-    let path = PathBuf::from(codex_home).join(LOCALDEX_RUNTIME_CAPABILITIES_FILE);
+    let path = PathBuf::from(codex_home).join(MULTIDEX_RUNTIME_CAPABILITIES_FILE);
     let Ok(contents) = std::fs::read_to_string(path) else {
         return model;
     };
-    let Some(context_window) = localdex_runtime_context_window(&contents, &model.slug) else {
+    let Some(context_window) = multidex_runtime_context_window(&contents, &model.slug) else {
         return model;
     };
     model.context_window = Some(context_window);
     model.max_context_window = None;
     model.auto_compact_token_limit =
-        Some(context_window.saturating_sub(LOCALDEX_DSV41_FLASH_COMPACTION_HEADROOM));
+        Some(context_window.saturating_sub(MULTIDEX_DSV41_FLASH_COMPACTION_HEADROOM));
     model
 }
 
-fn localdex_runtime_context_window(contents: &str, model: &str) -> Option<i64> {
-    let capabilities = serde_json::from_str::<LocalDexRuntimeCapabilities>(contents).ok()?;
+fn multidex_runtime_context_window(contents: &str, model: &str) -> Option<i64> {
+    let capabilities = serde_json::from_str::<MultiDexRuntimeCapabilities>(contents).ok()?;
     (capabilities.model == model && capabilities.context_window > 0)
         .then_some(capabilities.context_window)
 }
@@ -158,8 +158,8 @@ fn is_h1_heading(line: &str) -> bool {
 
 /// Build a minimal fallback model descriptor for missing/unknown slugs.
 pub fn model_info_from_slug(slug: &str) -> ModelInfo {
-    if slug == LOCALDEX_DSV41_FLASH {
-        return apply_localdex_runtime_capabilities(localdex_dsv41_flash_model_info());
+    if slug == MULTIDEX_DSV41_FLASH {
+        return apply_multidex_runtime_capabilities(multidex_dsv41_flash_model_info());
     }
     if slug == OPENROUTER_DSV41_FLASH {
         return openrouter_dsv41_flash_model_info();
@@ -219,21 +219,21 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
     }
 }
 
-/// Return the upstream catalog plus the bundled LocalDex model.
+/// Return the upstream catalog plus the bundled MultiDex model.
 ///
-/// A LocalDex provider must expose both its configured local model and the
+/// A MultiDex provider must expose both its configured local model and the
 /// ordinary Codex catalog from one `/model` picker. `model_catalog_json` is an
 /// authoritative replacement, so callers use this only when the user has not
 /// configured one explicitly.
-pub fn localdex_model_catalog() -> ModelsResponse {
+pub fn multidex_model_catalog() -> ModelsResponse {
     let mut catalog = crate::bundled_models_response().unwrap_or_default();
     catalog.models.retain(|model| {
-        model.slug != LOCALDEX_DSV41_FLASH
+        model.slug != MULTIDEX_DSV41_FLASH
             && model.slug != OPENROUTER_DSV41_FLASH
             && !LITHOS_DSV41_FLASH.contains(&model.slug.as_str())
     });
-    catalog.models.push(apply_localdex_runtime_capabilities(
-        localdex_dsv41_flash_model_info(),
+    catalog.models.push(apply_multidex_runtime_capabilities(
+        multidex_dsv41_flash_model_info(),
     ));
     catalog.models.push(openrouter_dsv41_flash_model_info());
     catalog
@@ -247,16 +247,16 @@ pub fn is_bundled_openai_model(model: &str) -> bool {
         .is_ok_and(|catalog| catalog.models.iter().any(|info| info.slug == model))
 }
 
-/// Metadata for the LocalDex provider's bundled DeepSeek endpoint.
+/// Metadata for the MultiDex provider's bundled DeepSeek endpoint.
 ///
-/// This is intentionally part of LocalDex rather than a `model_catalog_json`
+/// This is intentionally part of MultiDex rather than a `model_catalog_json`
 /// overlay: Codex treats that setting as a replacement for its full catalog,
 /// which conflicts with the upstream ChatGPT model catalog and configured
 /// provider routing. The inference server advertises matching capabilities
 /// through its OpenAI-compatible model-discovery endpoint.
-fn localdex_dsv41_flash_model_info() -> ModelInfo {
+fn multidex_dsv41_flash_model_info() -> ModelInfo {
     dsv41_flash_model_info(
-        LOCALDEX_DSV41_FLASH,
+        MULTIDEX_DSV41_FLASH,
         "DeepSeek v4.1 Flash (Local)",
         "DeepSeek v4.1 Flash 1017 served by the local endpoint.",
         /*default_reasoning_level*/ ReasoningEffort::Max,
@@ -272,7 +272,7 @@ fn openrouter_dsv41_flash_model_info() -> ModelInfo {
         OPENROUTER_DSV41_FLASH,
         "DeepSeek v4.1 Flash (OpenRouter)",
         "DS v4.1 Flash 1017 coding model served through OpenRouter.",
-        // Matches the LocalDex Lite entry's default reasoning effort.
+        // Matches the MultiDex Lite entry's default reasoning effort.
         /*default_reasoning_level*/
         ReasoningEffort::Max,
         // OpenRouter normalizes reasoning into a distinct stream rather than
@@ -356,7 +356,7 @@ fn dsv41_flash_model_info(
         availability_nux: None,
         upgrade: None,
         model_messages: Some(dsv41_model_messages()),
-        // LocalDex uses the same skill catalog and bridge as Codex. Include
+        // MultiDex uses the same skill catalog and bridge as Codex. Include
         // the usage protocol so a local model knows to inspect a selected
         // SKILL.md before it acts on that skill.
         include_skills_usage_instructions: true,
@@ -377,11 +377,11 @@ fn dsv41_flash_model_info(
         // The endpoint reserves two tokens for its prompt template, exposing
         // a 262,142-token request budget from a 262,144-token context window.
         // Reserve 4,196 tokens for new input and the compaction request.
-        context_window: Some(LOCALDEX_DSV41_FLASH_CONTEXT_WINDOW),
+        context_window: Some(MULTIDEX_DSV41_FLASH_CONTEXT_WINDOW),
         // A live endpoint capability snapshot may raise or lower this value;
         // do not cap that authoritative result to the bundled fallback.
         max_context_window: None,
-        auto_compact_token_limit: Some(LOCALDEX_DSV41_FLASH_AUTO_COMPACT_TOKEN_LIMIT),
+        auto_compact_token_limit: Some(MULTIDEX_DSV41_FLASH_AUTO_COMPACT_TOKEN_LIMIT),
         comp_hash: None,
         effective_context_window_percent: 100,
         experimental_supported_tools: Vec::new(),

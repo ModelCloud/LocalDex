@@ -77,7 +77,7 @@ fn packaged_entrypoint(package: &Path) -> Option<PathBuf> {
     let entrypoint = metadata["entrypoint"].as_str()?;
     matches!(
         entrypoint,
-        "bin/codex" | "bin/localdex" | "bin/codex.exe" | "bin/localdex.exe"
+        "bin/codex" | "bin/multidex" | "bin/codex.exe" | "bin/multidex.exe"
     )
     .then(|| package.join(entrypoint))
 }

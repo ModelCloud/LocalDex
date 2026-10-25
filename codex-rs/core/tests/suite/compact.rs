@@ -6376,5 +6376,5 @@ async fn remote_v2_compaction_refreshes_instructions_and_preserves_them_on_cold_
 #[path = "compact_program_tests.rs"]
 mod program_tests;
 
-#[path = "localdex_compaction_tests.rs"]
-mod localdex_compaction;
+#[path = "multidex_compaction_tests.rs"]
+mod multidex_compaction;

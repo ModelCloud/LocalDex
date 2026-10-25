@@ -1,6 +1,6 @@
 ---
 source: tui/src/bottom_pane/list_selection_view.rs
-assertion_line: 2890
+assertion_line: 3310
 expression: rendered
 ---
 width 20:
@@ -8,14 +8,16 @@ width 20:
   marks             
                     
                     
-› 1. abｶﾞc  dakuten  
-            descript
-            ion     
+› 1. abｶﾞc           
+            dakute  
+            n       
+            descri  
+            ption   
   2. aﾊﾟc            
-            handakut
-            en      
-            descript
-            ion     
+            handak  
+            uten    
+            descri  
+            ption   
                     
 
 width 24:
@@ -24,6 +26,8 @@ width 24:
                         
                         
 › 1. abｶﾞc  dakuten      
-            description 
+            descriptio  
+            n           
   2. aﾊﾟc   handakuten   
-            description
+            descriptio  
+            n

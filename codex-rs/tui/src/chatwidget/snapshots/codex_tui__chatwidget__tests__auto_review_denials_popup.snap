@@ -1,6 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/guardian.rs
-assertion_line: 210
+assertion_line: 211
 expression: popup
 ---
   Auto-review Denials
@@ -8,11 +8,11 @@ expression: popup
 
 
 
-  Action                    Rationale
-› curl -sS --data-binary @… Would send a
-                            local source
-                            file to an
-                            external
-                            endpoint.
+  Action                  Rationale
+› curl -sS --data-binary… Would send a
+                          local source
+                          file to an
+                          external
+                          endpoint.
 
   enter select · esc back

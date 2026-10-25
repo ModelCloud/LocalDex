@@ -923,12 +923,12 @@ impl Session {
             )
             .await;
 
-        // Upstream `turn/steer` is deliberately queue-only. LocalDex's local
+        // Upstream `turn/steer` is deliberately queue-only. MultiDex's local
         // provider is different: it supports replacing a live HTTP generation
         // with the same turn plus the newly queued input. Limit this behavior to
         // that provider so official Codex/OpenAI steering retains upstream
         // semantics.
-        if active_task.turn_context.config.model_provider_id == "localdex"
+        if active_task.turn_context.config.model_provider_id == "multidex"
             && let Some(sampling_preemption) = active_turn
                 .turn_state
                 .lock()

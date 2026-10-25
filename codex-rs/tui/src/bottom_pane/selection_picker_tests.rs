@@ -210,16 +210,30 @@ fn overflow_arrows_follow_the_painted_picker_surface() {
                         .position(|line| line.starts_with('›'))
                         .expect("focused row") as u16;
                     let selected_background = selection_style().bg.unwrap();
-                    assert_eq!(
-                        (0..buf.area.width)
-                            .map(|x| buf[(x, selected_y)].bg)
-                            .collect::<Vec<_>>(),
-                        vec![selected_background; usize::from(buf.area.width)],
-                    );
                     let background = match surface {
                         PickerSurface::Panel => crate::style::user_message_style().bg.unwrap(),
                         PickerSurface::Terminal => Color::Reset,
                     };
+                    // The highlight spans the painted rows area, which stops
+                    // before the two-cell right inset of the menu surface.
+                    let highlighted_width = buf
+                        .area
+                        .width
+                        .saturating_sub(MENU_SURFACE_HORIZONTAL_INSET / 2);
+                    assert_eq!(
+                        (0..buf.area.width)
+                            .map(|x| buf[(x, selected_y)].bg)
+                            .collect::<Vec<_>>(),
+                        (0..buf.area.width)
+                            .map(|x| {
+                                if x < highlighted_width {
+                                    selected_background
+                                } else {
+                                    background
+                                }
+                            })
+                            .collect::<Vec<_>>(),
+                    );
                     let arrows = (0..buf.area.height)
                         .filter(|&y| matches!(buf[(0, y)].symbol(), "↑" | "↓"))
                         .map(|y| (y, buf[(0, y)].clone(), buf[(1, y)].clone()))

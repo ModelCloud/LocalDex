@@ -58,15 +58,15 @@ use wiremock::MockServer;
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
 
 #[tokio::test]
-async fn localdex_model_is_in_catalog_while_openai_is_selected() {
+async fn multidex_model_is_in_catalog_while_openai_is_selected() {
     let mut config = test_config().await;
     config.model_provider_id = "openai".to_string();
     config
         .model_providers
-        .insert("localdex".to_string(), config.model_provider.clone());
+        .insert("multidex".to_string(), config.model_provider.clone());
 
-    let catalog = super::localdex_model_catalog_for_config(&config)
-        .expect("registered LocalDex provider should add its model catalog");
+    let catalog = super::multidex_model_catalog_for_config(&config)
+        .expect("registered MultiDex provider should add its model catalog");
     assert!(
         catalog
             .models
@@ -97,9 +97,9 @@ async fn openrouter_model_is_in_catalog_without_a_local_endpoint() {
     config.model_provider_id = "openai".to_string();
     config
         .model_providers
-        .retain(|key, _| !codex_model_provider_info::is_localdex_provider_id(key));
-    let catalog = super::localdex_model_catalog_for_config(&config)
-        .expect("built-in OpenRouter should expose its catalog without LocalDex config");
+        .retain(|key, _| !codex_model_provider_info::is_multidex_provider_id(key));
+    let catalog = super::multidex_model_catalog_for_config(&config)
+        .expect("built-in OpenRouter should expose its catalog without MultiDex config");
     assert!(
         catalog.models.iter().any(|model| {
             model.slug == codex_model_provider_info::OPENROUTER_DSV41_FLASH_MODEL_ID
@@ -109,7 +109,7 @@ async fn openrouter_model_is_in_catalog_without_a_local_endpoint() {
         !catalog
             .models
             .iter()
-            .any(|model| { codex_model_provider_info::is_localdex_model(&model.slug) })
+            .any(|model| { codex_model_provider_info::is_multidex_model(&model.slug) })
     );
     let manager = build_models_manager(
         &config,
@@ -124,7 +124,7 @@ async fn openrouter_model_is_in_catalog_without_a_local_endpoint() {
     assert!(
         !models
             .iter()
-            .any(|model| codex_model_provider_info::is_localdex_model(&model.slug))
+            .any(|model| codex_model_provider_info::is_multidex_model(&model.slug))
     );
 }
 

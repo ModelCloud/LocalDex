@@ -1,13 +1,13 @@
 ---
 source: tui/src/history_cell/tests.rs
-assertion_line: 1366
+assertion_line: 1388
 expression: rendered
 ---
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ ✨ Update available! 0.155.1 -> 9.9.9                                                                      │
-│ Run powershell -NoProfile -Command "throw 'LocalDex releases currently support Linux x86_64 only.'" to     │
+│ ✨ Update available! 0.164.0 -> 9.9.9                                                                      │
+│ Run powershell -NoProfile -Command "throw 'MultiDex releases currently support Linux x86_64 only.'" to     │
 │ update.                                                                                                    │
 │                                                                                                            │
 │ See full release notes:                                                                                    │
-│ https://github.com/ModelCloud/LocalDex/releases                                                            │
+│ https://github.com/ModelCloud/MultiDex/releases                                                            │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

@@ -1015,11 +1015,11 @@ async fn steer_only_enforces_expected_turn_id() {
 }
 
 #[tokio::test]
-async fn steer_preempts_only_an_armed_localdex_sampling_request() {
+async fn steer_preempts_only_an_armed_multidex_sampling_request() {
     let (session, turn_context, _rx) = make_session_and_context_with_auth_and_config_and_rx(
         codex_login::CodexAuth::from_api_key("Test API Key"),
         Vec::new(),
-        |config| config.model_provider_id = "localdex".to_string(),
+        |config| config.model_provider_id = "multidex".to_string(),
     )
     .await;
     session
@@ -1060,7 +1060,7 @@ async fn steer_preempts_only_an_armed_localdex_sampling_request() {
     );
     assert!(
         sampling_preemption.is_cancelled(),
-        "a localdex steer must cancel the live sampling request"
+        "a multidex steer must cancel the live sampling request"
     );
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
 }

@@ -8,13 +8,13 @@
 | Git (optional, recommended) | 2.23+ for built-in PR helpers                                   |
 | RAM                         | 4-GB minimum (8-GB recommended)                                 |
 
-### Install the LocalDex release
+### Install the MultiDex release
 
 ```bash
-curl -fsSL https://github.com/ModelCloud/LocalDex/releases/latest/download/install-localdex.sh | sh
+curl -fsSL https://github.com/ModelCloud/MultiDex/releases/latest/download/install-multidex.sh | sh
 ```
 
-The installer adds the LocalDex binary as `codex`, installs
+The installer adds the MultiDex binary as `codex`, installs
 `codex-code-mode-host`, and keeps existing Codex configuration, auth, and
 session history under `CODEX_HOME`. It does not contact configured inference
 endpoints. Releases are versioned; for rollback, point
@@ -25,8 +25,8 @@ endpoints. Releases are versioned; for rollback, point
 
 ```bash
 # Clone the repository and navigate to the root of the Cargo workspace.
-git clone https://github.com/ModelCloud/LocalDex.git
-cd LocalDex/codex-rs
+git clone https://github.com/ModelCloud/MultiDex.git
+cd MultiDex/codex-rs
 
 # Install the Rust toolchain, if necessary.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -40,7 +40,7 @@ cargo install --locked dotslash
 # Install nextest for the `just test` helper.
 cargo install --locked cargo-nextest
 
-# Build LocalDex and its Code Mode companion.
+# Build MultiDex and its Code Mode companion.
 cargo build --bin codex --bin codex-code-mode-host
 
 # Launch the TUI with a sample prompt.

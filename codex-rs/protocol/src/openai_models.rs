@@ -532,7 +532,7 @@ impl ModelInfo {
     }
 
     pub fn auto_compact_token_limit(&self) -> Option<i64> {
-        // LocalDex publishes a fixed headroom budget for this model. Other models
+        // MultiDex publishes a fixed headroom budget for this model. Other models
         // retain upstream's 90% auto-compaction ceiling.
         if self.slug == "DS v4.1 Flash 1017"
             && let Some(config_limit) = self.auto_compact_token_limit
@@ -1971,7 +1971,7 @@ mod tests {
     }
 
     #[test]
-    fn localdex_explicit_auto_compact_limit_can_reserve_fixed_headroom() {
+    fn multidex_explicit_auto_compact_limit_can_reserve_fixed_headroom() {
         let model = ModelInfo {
             slug: "DS v4.1 Flash 1017".to_string(),
             context_window: Some(393_216),

@@ -88,11 +88,11 @@ class SourceBinariesForTargetTest(unittest.TestCase):
             ["codex-code-mode-host"],
         )
 
-    def test_localdex_builds_the_upstream_codex_binary_before_staging(self) -> None:
+    def test_multidex_builds_the_upstream_codex_binary_before_staging(self) -> None:
         self.assertEqual(
             source_binaries_for_target(
                 TARGET_SPECS["x86_64-unknown-linux-gnu"],
-                PACKAGE_VARIANTS["localdex"],
+                PACKAGE_VARIANTS["multidex"],
                 build_entrypoint=True,
                 build_code_mode_host=True,
                 build_bwrap=True,

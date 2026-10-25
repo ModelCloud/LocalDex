@@ -39,7 +39,7 @@ impl HistoryCell for UpdateAvailableHistoryCell {
         } else {
             line![
                 "See ",
-                "https://github.com/ModelCloud/LocalDex/releases"
+                "https://github.com/ModelCloud/MultiDex/releases"
                     .fg(accent_color())
                     .underlined(),
                 " for installation options."
@@ -56,7 +56,7 @@ impl HistoryCell for UpdateAvailableHistoryCell {
             update_instruction,
             "",
             "See full release notes:",
-            "https://github.com/ModelCloud/LocalDex/releases"
+            "https://github.com/ModelCloud/MultiDex/releases"
                 .fg(accent_color())
                 .underlined(),
         ];
@@ -73,7 +73,7 @@ impl HistoryCell for UpdateAvailableHistoryCell {
         let update_instruction = if let Some(update_action) = self.update_action {
             format!("Run {} to update.", update_action.command_str())
         } else {
-            "See https://github.com/ModelCloud/LocalDex/releases for installation options."
+            "See https://github.com/ModelCloud/MultiDex/releases for installation options."
                 .to_string()
         };
         vec![
@@ -82,7 +82,7 @@ impl HistoryCell for UpdateAvailableHistoryCell {
             Line::from(update_instruction),
             Line::from(""),
             Line::from("See full release notes:"),
-            Line::from("https://github.com/ModelCloud/LocalDex/releases"),
+            Line::from("https://github.com/ModelCloud/MultiDex/releases"),
         ]
     }
 

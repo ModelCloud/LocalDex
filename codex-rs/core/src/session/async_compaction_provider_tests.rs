@@ -12,7 +12,7 @@ use pretty_assertions::assert_eq;
 #[test_case::test_case(false; "matching auth owner reuses pending work")]
 #[test_case::test_case(true; "changed auth owner discards pending work")]
 #[tokio::test]
-async fn localdex_base_client_does_not_override_background_turn_provider(change_auth_owner: bool) {
+async fn multidex_base_client_does_not_override_background_turn_provider(change_auth_owner: bool) {
     let local_server = responses::start_mock_server().await;
     let openai_server = responses::start_mock_server().await;
     let mut provider = built_in_model_providers(None)["openai"].clone();
@@ -39,7 +39,7 @@ async fn localdex_base_client_does_not_override_background_turn_provider(change_
         &format!("{}/v1", local_server.uri()),
         WireApi::Responses,
     );
-    local_provider.localdex_compatibility = true;
+    local_provider.multidex_compatibility = true;
     let local_client = sess
         .services
         .model_client

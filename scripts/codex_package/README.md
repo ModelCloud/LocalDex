@@ -38,9 +38,9 @@ artifacts; pass a GNU Linux target explicitly for native glibc local builds. If
 prints its path after the package is built.
 
 The `--variant` flag selects the package entrypoint. Supported variants are
-`codex`, `localdex`, and `codex-app-server`. The LocalDex variant retains the
+`codex`, `multidex`, and `codex-app-server`. The MultiDex variant retains the
 full upstream Codex feature set (including ChatGPT/Codex models and Code Mode)
-and adds LocalDex's configured provider; its entrypoint is `bin/localdex` and
+and adds MultiDex's configured provider; its entrypoint is `bin/multidex` and
 its `bin/codex-code-mode-host` helper remains packaged beside it. The
 `--package-version` flag sets the version in `codex-package.json`; it defaults
 to `[workspace.package].version` in `codex-rs/Cargo.toml`.
@@ -63,8 +63,8 @@ explicit target. Release jobs that already built and signed/notarized the
 entrypoint should pass `--entrypoint-bin` so the package contains that exact
 binary instead of rebuilding it.
 
-For a distributable Linux x86_64 LocalDex package, run
-`scripts/build_localdex_linux_amd64.sh`. It uses the `localdex-release` profile
+For a distributable Linux x86_64 MultiDex package, run
+`scripts/build_multidex_linux_amd64.sh`. It uses the `multidex-release` profile
 and, when installed, `sccache` plus the `mold` linker. This trades Thin LTO and
 debug line tables for much faster repeatable builds while retaining normal
 optimized native binaries and the Code Mode host.

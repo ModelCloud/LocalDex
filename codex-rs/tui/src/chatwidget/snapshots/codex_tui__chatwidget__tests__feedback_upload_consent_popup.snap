@@ -1,5 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/popups_and_settings.rs
+assertion_line: 4351
 expression: popup
 ---
       Upload logs?
@@ -19,8 +20,8 @@ expression: popup
           - HTTPS_PROXY = hello
 
 
-    › 1. Yes  Share the current Codex session logs and diagnostics with the
-              team for troubleshooting
+    › 1. Yes  Share the current Codex session logs and diagnostics with
+              the team for troubleshooting
       2. No
 
       enter select · esc back

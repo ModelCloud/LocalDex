@@ -1012,7 +1012,7 @@ See the Codex keymap documentation for supported actions and examples."
             feedback_audience,
             environment_manager,
             app_server_target,
-            skip_resume_goal_prompt: std::env::var("LOCALDEX_SKIP_RESUME_GOAL_PROMPT")
+            skip_resume_goal_prompt: std::env::var("MULTIDEX_SKIP_RESUME_GOAL_PROMPT")
                 .is_ok_and(|value| value == "1"),
             pending_right_click_paste: None,
             right_click_paste_environment: super::right_click_paste::PasteEnvironment::detect(),

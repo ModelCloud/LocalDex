@@ -39,7 +39,7 @@ use ratatui::widgets::Wrap;
 #[cfg(not(debug_assertions))]
 use tokio_stream::StreamExt;
 
-const RELEASE_NOTES_URL: &str = "https://github.com/ModelCloud/LocalDex/releases";
+const RELEASE_NOTES_URL: &str = "https://github.com/ModelCloud/MultiDex/releases";
 
 #[cfg(not(debug_assertions))]
 pub(crate) enum UpdatePromptOutcome {

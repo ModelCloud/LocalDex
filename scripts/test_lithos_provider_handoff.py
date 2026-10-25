@@ -18,12 +18,24 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
+def declared_tool_names(tools: list[dict], namespace: str = "") -> list[tuple[str, str]]:
+    names = []
+    for tool in tools:
+        if tool.get("type") == "namespace":
+            scope = tool["name"] if tool["name"] != "functions" else ""
+            names.extend(declared_tool_names(tool["tools"], scope))
+        else:
+            name = tool.get("name") or tool.get("function", {}).get("name") or tool["type"]
+            names.append((namespace, name))
+    return names
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True)
     args = parser.parse_args()
     requests: list[tuple[str, dict]] = []
-    tokens = {"openai": "test-only-openai", "localdex": "test-only-local", "lithos": "test-only-lithos", "openrouter": "test-only-openrouter"}
+    tokens = {"openai": "test-only-openai", "multidex": "test-only-local", "lithos": "test-only-lithos", "openrouter": "test-only-openrouter"}
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -39,6 +51,14 @@ def main() -> None:
             provider = self.path.split("/")[1]
             assert self.headers.get("Authorization") == "Bearer " + tokens[provider], "credential crossed providers"
             requests.append((self.path, body))
+            if provider != "openai":
+                names = declared_tool_names(body.get("tools") or [])
+                for item in body.get("input", []):
+                    if item.get("type") == "additional_tools":
+                        names.extend(declared_tool_names(item["tools"]))
+                if len(names) != len(set(names)):
+                    self.send_error(400, "duplicate tool declarations")
+                    return
             rid = f"resp_handoff_{len(requests)}"
             if provider == "lithos":
                 assert self.path.endswith("/chat/completions"), self.path
@@ -77,10 +97,10 @@ def main() -> None:
         home.mkdir()
         (home / "config.toml").write_text(f'''openai_base_url = "{base}/openai/v1"
 service_tier = "default"
-[model_providers.localdex]
-name = "LocalDex"
-base_url = "{base}/localdex/v1"
-env_key = "LOCALDEX_API_KEY"
+[model_providers.multidex]
+name = "MultiDex"
+base_url = "{base}/multidex/v1"
+env_key = "MULTIDEX_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 [model_providers.lithos]
@@ -95,7 +115,7 @@ allow_fallbacks = false
 ''')
         (home / "auth.json").write_text(json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": tokens["openai"]}))
         (home / "auth.json").chmod(0o600)
-        env = {**os.environ, "CODEX_HOME": str(home), "CODEX_DISABLE_CLOUD_CONFIG": "1", "OPENAI_API_KEY": tokens["openai"], "CODEX_API_KEY": tokens["openai"], "LOCALDEX_API_KEY": tokens["localdex"], "LITHOS_API_KEY": tokens["lithos"], "OPENROUTER_API_KEY": tokens["openrouter"]}
+        env = {**os.environ, "CODEX_HOME": str(home), "CODEX_DISABLE_CLOUD_CONFIG": "1", "OPENAI_API_KEY": tokens["openai"], "CODEX_API_KEY": tokens["openai"], "MULTIDEX_API_KEY": tokens["multidex"], "LITHOS_API_KEY": tokens["lithos"], "OPENROUTER_API_KEY": tokens["openrouter"]}
         with (root / "stderr.log").open("w") as stderr:
             process = subprocess.Popen([args.binary, "app-server", "--stdio"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr, text=True, env=env)
             events: queue.Queue = queue.Queue()
@@ -144,18 +164,18 @@ allow_fallbacks = false
                 for provider, model, prompt in [
                     ("openai", "gpt-5.6-sol", "The original secret word is ORCHID. Acknowledge only."),
                     ("lithos", "deepseek-ai/DeepSeek-V4.1-Flash", "What was the original secret word? Reply only that word."),
-                    ("localdex", "DS v4.1 Flash 1017", "Keep the original secret word. Acknowledge only."),
+                    ("multidex", "DS v4.1 Flash 1017", "Keep the original secret word. Acknowledge only."),
                     ("openrouter", "deepseek/deepseek-v4.1-flash-1017", "What was the original secret word? Reply only that word."),
                     ("lithos", "deepseek-ai/DeepSeek-V4.1-Flash-ultra", "What was the original secret word? Reply only that word."),
                     ("openai", "gpt-5.6-sol", "Keep the original secret word. Acknowledge only."),
                     ("openrouter", "deepseek/deepseek-v4.1-flash-1017", "What was the original secret word? Reply only that word."),
-                    ("localdex", "DS v4.1 Flash 1017", "Keep the original secret word. Acknowledge only."),
+                    ("multidex", "DS v4.1 Flash 1017", "Keep the original secret word. Acknowledge only."),
                     ("openai", "gpt-5.6-sol", "Keep the original secret word. Acknowledge only."),
                 ]:
                     expected_window = {"openrouter": 262_144, "lithos": 1_000_000}.get(provider)
-                    if provider == "localdex":
+                    if provider == "multidex":
                         expected_window = next(local_windows)
-                        (home / "localdex-runtime-capabilities.json").write_text(json.dumps({
+                        (home / "multidex-runtime-capabilities.json").write_text(json.dumps({
                             "model": model, "context_window": expected_window,
                             "max_prompt_tokens": expected_window - 2,
                         }))
@@ -178,7 +198,7 @@ allow_fallbacks = false
                 process.terminate()
                 process.wait(timeout=10)
                 server.shutdown()
-    print("PASS: one thread, nine turns, provider credentials/endpoints and history preserved")
+    print("PASS: one thread, nine turns, unique tools and provider credentials/endpoints/history preserved")
 
 
 if __name__ == "__main__":

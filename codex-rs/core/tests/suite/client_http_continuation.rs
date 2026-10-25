@@ -1,5 +1,5 @@
 use codex_core::TurnInputRequest;
-use codex_model_provider_info::LOCALDEX_PROVIDER_ID;
+use codex_model_provider_info::MULTIDEX_PROVIDER_ID;
 use codex_model_provider_info::WireApi;
 use codex_model_provider_info::create_oss_provider_with_base_url;
 use codex_model_provider_info::merge_configured_model_providers;
@@ -75,21 +75,21 @@ async fn responses_http_continuation_survives_user_turns(
     let mut providers = merge_configured_model_providers(
         Default::default(),
         std::collections::HashMap::from([(
-            LOCALDEX_PROVIDER_ID.to_string(),
+            MULTIDEX_PROVIDER_ID.to_string(),
             create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), WireApi::Responses),
         )]),
     )
-    .expect("LocalDex provider should normalize");
-    let provider = providers.remove(LOCALDEX_PROVIDER_ID).unwrap();
+    .expect("MultiDex provider should normalize");
+    let provider = providers.remove(MULTIDEX_PROVIDER_ID).unwrap();
     let test = test_codex()
         .with_model_info_override("DS v4.1 Flash 1017", move |model_info| {
             model_info.use_responses_lite = responses_lite;
         })
         .with_config(move |config| {
-            config.model_provider_id = LOCALDEX_PROVIDER_ID.to_string();
+            config.model_provider_id = MULTIDEX_PROVIDER_ID.to_string();
             config
                 .model_providers
-                .insert(LOCALDEX_PROVIDER_ID.to_string(), provider.clone());
+                .insert(MULTIDEX_PROVIDER_ID.to_string(), provider.clone());
             config.model_provider = provider;
             config.base_instructions = Some("Stable base instructions".to_string());
         })
@@ -114,7 +114,7 @@ async fn responses_http_continuation_survives_user_turns(
             _ => None,
         })
         .await;
-        assert_eq!(completed.error, None, "LocalDex turn {text} failed");
+        assert_eq!(completed.error, None, "MultiDex turn {text} failed");
     }
 
     let requests = response_mock.requests();

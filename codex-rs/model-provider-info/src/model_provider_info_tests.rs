@@ -98,7 +98,7 @@ base_url = "http://localhost:11434/v1"
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
-        localdex_compatibility: false,
+        multidex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
         project_id: None,
@@ -143,7 +143,7 @@ query_params = { api-version = "2025-04-01-preview" }
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
-        localdex_compatibility: false,
+        multidex_compatibility: false,
         supports_standalone_web_search: false,
         capabilities: None,
         project_id: None,
@@ -192,7 +192,7 @@ supports_standalone_web_search = true
         requires_openai_auth: false,
         supports_websockets: false,
         supports_responses_continuation: false,
-        localdex_compatibility: false,
+        multidex_compatibility: false,
         supports_standalone_web_search: true,
         capabilities: None,
         project_id: None,
@@ -414,7 +414,7 @@ fn test_create_amazon_bedrock_provider() {
             requires_openai_auth: false,
             supports_websockets: false,
             supports_responses_continuation: false,
-            localdex_compatibility: false,
+            multidex_compatibility: false,
             supports_standalone_web_search: false,
             capabilities: None,
             project_id: None,
@@ -565,33 +565,33 @@ fn test_merge_configured_model_providers_adds_custom_provider() {
 }
 
 #[test]
-fn test_merge_configured_localdex_provider_enables_responses_continuation() {
-    let localdex_provider = ModelProviderInfo {
-        name: "LocalDex".to_string(),
+fn test_merge_configured_multidex_provider_enables_responses_continuation() {
+    let multidex_provider = ModelProviderInfo {
+        name: "MultiDex".to_string(),
         base_url: Some("http://127.0.0.1:2120/v1".to_string()),
         ..ModelProviderInfo::default()
     };
     let configured_model_providers =
-        std::collections::HashMap::from([(LOCALDEX_PROVIDER_ID.to_string(), localdex_provider)]);
+        std::collections::HashMap::from([(MULTIDEX_PROVIDER_ID.to_string(), multidex_provider)]);
 
     let providers = merge_configured_model_providers(
         built_in_model_providers(/*openai_base_url*/ None),
         configured_model_providers,
     )
-    .expect("LocalDex provider should merge");
+    .expect("MultiDex provider should merge");
 
     assert!(
-        providers[LOCALDEX_PROVIDER_ID].supports_responses_continuation,
-        "LocalDex should enable its supported continuation protocol by default"
+        providers[MULTIDEX_PROVIDER_ID].supports_responses_continuation,
+        "MultiDex should enable its supported continuation protocol by default"
     );
-    assert!(providers[LOCALDEX_PROVIDER_ID].localdex_compatibility);
+    assert!(providers[MULTIDEX_PROVIDER_ID].multidex_compatibility);
 }
 
 #[test]
-fn test_is_localdex_model_uses_only_the_canonical_id() {
-    assert!(is_localdex_model(LOCALDEX_MODEL_ID));
-    assert!(!is_localdex_model("DS v4.1 Flash 1017-preview"));
-    assert!(!is_localdex_model("gpt-5.6"));
+fn test_is_multidex_model_uses_only_the_canonical_id() {
+    assert!(is_multidex_model(MULTIDEX_MODEL_ID));
+    assert!(!is_multidex_model("DS v4.1 Flash 1017-preview"));
+    assert!(!is_multidex_model("gpt-5.6"));
 }
 
 #[test]
@@ -845,7 +845,7 @@ fn test_validate_provider_aws_rejects_conflicting_auth() {
         env_key: Some("AWS_BEARER_TOKEN_BEDROCK".to_string()),
         supports_websockets: false,
         supports_responses_continuation: false,
-        localdex_compatibility: false,
+        multidex_compatibility: false,
         ..ModelProviderInfo::create_openai_provider(/*base_url*/ None)
     };
 
@@ -867,7 +867,7 @@ fn test_validate_provider_aws_rejects_websockets() {
         requires_openai_auth: false,
         supports_websockets: true,
         supports_responses_continuation: false,
-        localdex_compatibility: false,
+        multidex_compatibility: false,
         ..ModelProviderInfo::create_openai_provider(/*base_url*/ None)
     };
 
@@ -1063,7 +1063,7 @@ fn lithos_uses_its_own_key_and_does_not_replay_failed_generations() {
     assert!(!provider.requires_openai_auth);
     assert!(!provider.supports_websockets);
     assert!(!provider.supports_responses_continuation);
-    assert!(provider.localdex_compatibility);
+    assert!(provider.multidex_compatibility);
     assert_eq!(provider.stream_max_retries, Some(0));
     assert_eq!(provider.request_max_retries, Some(0));
     assert!(is_lithos_model("deepseek-ai/DeepSeek-V4.1-Flash-ultra"));
@@ -1081,7 +1081,7 @@ fn lithos_auth_override_preserves_native_transport_identity() {
     .expect("override merges");
     let provider = &merged[LITHOS_PROVIDER_ID];
     assert!(provider.is_lithos());
-    assert!(provider.localdex_compatibility);
+    assert!(provider.multidex_compatibility);
     assert_eq!(provider.env_key.as_deref(), Some("PRIVATE_LITHOS_KEY"));
 }
 

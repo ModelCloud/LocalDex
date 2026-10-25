@@ -2,14 +2,14 @@
 
 set -eu
 
-REPOSITORY="ModelCloud/LocalDex"
+REPOSITORY="ModelCloud/MultiDex"
 os="$(uname -s)"
 machine="$(uname -m)"
 case "$machine" in
   x86_64|amd64) machine="x86_64" ;;
   aarch64|arm64) machine="aarch64" ;;
   *)
-    echo "Unsupported LocalDex architecture: $machine" >&2
+    echo "Unsupported MultiDex architecture: $machine" >&2
     exit 1
     ;;
 esac
@@ -17,17 +17,17 @@ case "$os" in
   Linux) TARGET="$machine-unknown-linux-gnu" ;;
   Darwin) TARGET="$machine-apple-darwin" ;;
   *)
-    echo "Unsupported LocalDex operating system: $os" >&2
+    echo "Unsupported MultiDex operating system: $os" >&2
     exit 1
     ;;
 esac
-RELEASE="${LOCALDEX_RELEASE:-latest}"
+RELEASE="${MULTIDEX_RELEASE:-latest}"
 CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
 STANDALONE_ROOT="$CODEX_HOME_DIR/packages/standalone"
 RELEASES_DIR="$STANDALONE_ROOT/releases"
 CURRENT_LINK="$STANDALONE_ROOT/current"
-BIN_DIR="${LOCALDEX_INSTALL_DIR:-$HOME/.local/bin}"
-LOCAL_ARCHIVE="${LOCALDEX_ARCHIVE:-}"
+BIN_DIR="${MULTIDEX_INSTALL_DIR:-$HOME/.local/bin}"
+LOCAL_ARCHIVE="${MULTIDEX_ARCHIVE:-}"
 TMP_DIR=""
 PREFERRED_ASSET=""
 if [ "$TARGET" = "x86_64-unknown-linux-gnu" ] && [ -f /etc/os-release ]; then
@@ -36,7 +36,7 @@ if [ "$TARGET" = "x86_64-unknown-linux-gnu" ] && [ -f /etc/os-release ]; then
   . /etc/os-release
   case "${ID:-}:${VERSION_ID:-}" in
     ubuntu:24.04|ubuntu:26.04)
-      PREFERRED_ASSET="localdex-package-$TARGET-ubuntu$VERSION_ID.tar.gz"
+      PREFERRED_ASSET="multidex-package-$TARGET-ubuntu$VERSION_ID.tar.gz"
       ;;
   esac
 fi
@@ -50,19 +50,19 @@ trap cleanup EXIT HUP INT TERM
 
 usage() {
   cat <<'EOF'
-Usage: install-localdex.sh [--release VERSION|TAG]
+Usage: install-multidex.sh [--release VERSION|TAG]
 
-Installs the ModelCloud LocalDex Linux or macOS distribution as the `codex`
+Installs the ModelCloud MultiDex Linux or macOS distribution as the `codex`
 command. Existing CODEX_HOME configuration, auth, and session data are kept.
 
 Environment:
-  LOCALDEX_RELEASE      Release version or release tag, or latest (default).
+  MULTIDEX_RELEASE      Release version or release tag, or latest (default).
                         `latest` selects the newest published release that
                         provides a package for this architecture, including
-                        commit-specific `localdex-build-<version>-<sha>` tags.
+                        commit-specific `multidex-build-<version>-<sha>` tags.
   CODEX_HOME            Codex data home (default: ~/.codex).
-  LOCALDEX_INSTALL_DIR  Directory for codex, localdex, and helper links.
-  LOCALDEX_ARCHIVE      Local package archive, for offline installs/tests.
+  MULTIDEX_INSTALL_DIR  Directory for codex, multidex, and helper links.
+  MULTIDEX_ARCHIVE      Local package archive, for offline installs/tests.
 EOF
 }
 
@@ -93,7 +93,7 @@ download() {
   elif command -v wget >/dev/null 2>&1; then
     wget -q -O "$output" "$url"
   else
-    echo "curl or wget is required to download LocalDex" >&2
+    echo "curl or wget is required to download MultiDex" >&2
     return 1
   fi
 }
@@ -105,14 +105,14 @@ sha256_file() {
   elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$file" | awk '{print $1}'
   else
-    echo "sha256sum or shasum is required to verify the LocalDex archive" >&2
+    echo "sha256sum or shasum is required to verify the MultiDex archive" >&2
     return 1
   fi
 }
 
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/localdex-install.XXXXXX")"
-ARCHIVE="$TMP_DIR/localdex.tar.gz"
-CHECKSUM="$TMP_DIR/localdex.tar.gz.sha256"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/multidex-install.XXXXXX")"
+ARCHIVE="$TMP_DIR/multidex.tar.gz"
+CHECKSUM="$TMP_DIR/multidex.tar.gz.sha256"
 
 if [ -n "$LOCAL_ARCHIVE" ]; then
   cp "$LOCAL_ARCHIVE" "$ARCHIVE"
@@ -120,11 +120,11 @@ if [ -n "$LOCAL_ARCHIVE" ]; then
     cp "$LOCAL_ARCHIVE.sha256" "$CHECKSUM"
   fi
 else
-  asset="localdex-package-$TARGET.tar.gz"
+  asset="multidex-package-$TARGET.tar.gz"
   case "$RELEASE" in
     latest)
       # Published packages are commit-specific tags such as
-      # localdex-build-<version>-<sha>, so the version tags cannot identify the
+      # multidex-build-<version>-<sha>, so the version tags cannot identify the
       # newest usable package. Walk the published releases instead, newest
       # first, and take the first one that ships this target. GitHub returns
       # the releases as indented JSON with "tag_name" and "prerelease" ahead of
@@ -140,7 +140,7 @@ else
             prerelease = ""
           }
           /"prerelease"[[:space:]]*:/ && index($0, "true") > 0 { prerelease = "true" }
-          tag ~ /^localdex-/ && prerelease != "true" && index($0, asset) > 0 { print tag; exit }
+          tag ~ /^multidex-/ && prerelease != "true" && index($0, asset) > 0 { print tag; exit }
         ' "$TMP_DIR/releases.json")"
         [ -z "$RELEASE" ] || asset="$PREFERRED_ASSET"
       fi
@@ -154,21 +154,21 @@ else
           prerelease = ""
         }
         /"prerelease"[[:space:]]*:/ && index($0, "true") > 0 { prerelease = "true" }
-        tag ~ /^localdex-/ && prerelease != "true" && index($0, asset) > 0 { print tag; exit }
+        tag ~ /^multidex-/ && prerelease != "true" && index($0, asset) > 0 { print tag; exit }
         ' "$TMP_DIR/releases.json")"
       fi
       [ -n "$RELEASE" ] || {
-        echo "No published LocalDex release provides $asset" >&2
+        echo "No published MultiDex release provides $asset" >&2
         exit 1
       }
       ;;
     *)
       case "$RELEASE" in
-        localdex-*) ;;
-        *) RELEASE="localdex-v$RELEASE" ;;
+        multidex-*) ;;
+        *) RELEASE="multidex-v$RELEASE" ;;
       esac
-      printf '%s\n' "$RELEASE" | grep -Eq '^localdex-[0-9A-Za-z][0-9A-Za-z.-]*$' || {
-        echo "Requested LocalDex release version is invalid" >&2
+      printf '%s\n' "$RELEASE" | grep -Eq '^multidex-[0-9A-Za-z][0-9A-Za-z.-]*$' || {
+        echo "Requested MultiDex release version is invalid" >&2
         exit 1
       }
       ;;
@@ -190,11 +190,11 @@ if [ -f "$CHECKSUM" ]; then
   expected="$(awk 'NR == 1 {print $1}' "$CHECKSUM")"
   actual="$(sha256_file "$ARCHIVE")"
   [ -n "$expected" ] && [ "$expected" = "$actual" ] || {
-    echo "LocalDex archive checksum verification failed" >&2
+    echo "MultiDex archive checksum verification failed" >&2
     exit 1
   }
 elif [ -z "$LOCAL_ARCHIVE" ]; then
-  echo "LocalDex release checksum is missing" >&2
+  echo "MultiDex release checksum is missing" >&2
   exit 1
 fi
 
@@ -202,30 +202,30 @@ PAYLOAD="$TMP_DIR/package"
 mkdir -p "$PAYLOAD"
 tar -xzf "$ARCHIVE" -C "$PAYLOAD"
 MANIFEST="$PAYLOAD/codex-package.json"
-[ -f "$MANIFEST" ] || { echo "LocalDex package manifest is missing" >&2; exit 1; }
+[ -f "$MANIFEST" ] || { echo "MultiDex package manifest is missing" >&2; exit 1; }
 version="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MANIFEST")"
 variant="$(sed -n 's/.*"variant"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MANIFEST")"
 entrypoint="$(sed -n 's/.*"entrypoint"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MANIFEST")"
 target="$(sed -n 's/.*"target"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MANIFEST")"
-[ -n "$version" ] && [ "$target" = "$TARGET" ] && [ "$variant" = "localdex" ] && [ "$entrypoint" = "bin/localdex" ] || {
-  echo "Archive is not a supported LocalDex package" >&2
+[ -n "$version" ] && [ "$target" = "$TARGET" ] && [ "$variant" = "multidex" ] && [ "$entrypoint" = "bin/multidex" ] || {
+  echo "Archive is not a supported MultiDex package" >&2
   exit 1
 }
 printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$' || {
-  echo "LocalDex package version is invalid" >&2
+  echo "MultiDex package version is invalid" >&2
   exit 1
 }
-[ -x "$PAYLOAD/bin/localdex" ] || { echo "LocalDex executable is missing" >&2; exit 1; }
-[ -e "$PAYLOAD/bin/codex" ] || ln -s localdex "$PAYLOAD/bin/codex"
-[ -x "$PAYLOAD/bin/codex" ] || { echo "Codex-compatible LocalDex command is missing" >&2; exit 1; }
+[ -x "$PAYLOAD/bin/multidex" ] || { echo "MultiDex executable is missing" >&2; exit 1; }
+[ -e "$PAYLOAD/bin/codex" ] || ln -s multidex "$PAYLOAD/bin/codex"
+[ -x "$PAYLOAD/bin/codex" ] || { echo "Codex-compatible MultiDex command is missing" >&2; exit 1; }
 [ -x "$PAYLOAD/bin/codex-code-mode-host" ] || {
-  echo "LocalDex code-mode companion is missing" >&2
+  echo "MultiDex code-mode companion is missing" >&2
   exit 1
 }
 
 mkdir -p "$RELEASES_DIR" "$BIN_DIR"
-release_dir="$RELEASES_DIR/$version-localdex-$TARGET"
-staged_release="$RELEASES_DIR/.localdex-staging.$$"
+release_dir="$RELEASES_DIR/$version-multidex-$TARGET"
+staged_release="$RELEASES_DIR/.multidex-staging.$$"
 rm -rf "$staged_release"
 mv "$PAYLOAD" "$staged_release"
 if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
@@ -234,7 +234,7 @@ if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
 fi
 mv "$staged_release" "$release_dir"
 
-temporary_link="$STANDALONE_ROOT/.current-localdex.$$"
+temporary_link="$STANDALONE_ROOT/.current-multidex.$$"
 ln -s "$release_dir" "$temporary_link"
 # `mv -T` is GNU-only; remove the destination symlink first so this works with
 # both GNU and BSD mv (an existing symlink-to-directory must be replaced, not
@@ -248,22 +248,22 @@ backup_existing_link() {
   path="$1"
   if [ -e "$path" ] || [ -L "$path" ]; then
     if [ "$(readlink "$path" 2>/dev/null || true)" = "$CURRENT_LINK/bin/codex" ] \
-      || [ "$(readlink "$path" 2>/dev/null || true)" = "$CURRENT_LINK/bin/localdex" ] \
+      || [ "$(readlink "$path" 2>/dev/null || true)" = "$CURRENT_LINK/bin/multidex" ] \
       || [ "$(readlink "$path" 2>/dev/null || true)" = "$CURRENT_LINK/bin/codex-code-mode-host" ]; then
       rm -f "$path"
       return
     fi
-    backup="$path.pre-localdex.$(date +%s).$$"
+    backup="$path.pre-multidex.$(date +%s).$$"
     mv "$path" "$backup"
     printf 'Preserved previous command at %s\n' "$backup"
   fi
 }
 
 backup_existing_link "$BIN_DIR/codex"
-backup_existing_link "$BIN_DIR/localdex"
+backup_existing_link "$BIN_DIR/multidex"
 backup_existing_link "$BIN_DIR/codex-code-mode-host"
 ln -s "$CURRENT_LINK/bin/codex" "$BIN_DIR/codex"
-ln -s "$CURRENT_LINK/bin/localdex" "$BIN_DIR/localdex"
+ln -s "$CURRENT_LINK/bin/multidex" "$BIN_DIR/multidex"
 ln -s "$CURRENT_LINK/bin/codex-code-mode-host" "$BIN_DIR/codex-code-mode-host"
 
 if [ "$BIN_DIR" = "$HOME/.local/bin" ]; then
@@ -271,7 +271,7 @@ if [ "$BIN_DIR" = "$HOME/.local/bin" ]; then
     zsh) profile="${HOME}/.zprofile" ;;
     *) profile="${HOME}/.profile" ;;
   esac
-  marker="# LocalDex CLI"
+  marker="# MultiDex CLI"
   if ! grep -Fq "$marker" "$profile" 2>/dev/null; then
     {
       printf '\n%s\n' "$marker"
@@ -280,6 +280,6 @@ if [ "$BIN_DIR" = "$HOME/.local/bin" ]; then
   fi
 fi
 
-printf 'Installed LocalDex %s at %s\n' "$version" "$release_dir"
+printf 'Installed MultiDex %s at %s\n' "$version" "$release_dir"
 printf 'The codex command now resolves to %s\n' "$BIN_DIR/codex"
 printf 'Existing Codex auth, configuration, and session data were left in %s\n' "$CODEX_HOME_DIR"

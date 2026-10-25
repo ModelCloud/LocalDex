@@ -6,15 +6,15 @@ import subprocess
 import tempfile
 import unittest
 
-from test_install_localdex import InstallerTestCase
-from test_install_localdex import make_archive
+from test_install_multidex import InstallerTestCase
+from test_install_multidex import make_archive
 
 
 INSTALLER = Path(__file__).with_name("install.sh")
 
 
 class InstallShTest(InstallerTestCase):
-    def test_primary_installer_selects_localdex_and_preserves_data(self) -> None:
+    def test_primary_installer_selects_multidex_and_preserves_data(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             home = root / "home"
@@ -34,8 +34,8 @@ class InstallShTest(InstallerTestCase):
                     **os.environ,
                     "HOME": str(home),
                     "CODEX_HOME": str(codex_home),
-                    "LOCALDEX_INSTALL_DIR": str(bin_dir),
-                    "LOCALDEX_ARCHIVE": str(archive),
+                    "MULTIDEX_INSTALL_DIR": str(bin_dir),
+                    "MULTIDEX_ARCHIVE": str(archive),
                 },
             )
             self.assertEqual(result.returncode, 0, result.stderr)
