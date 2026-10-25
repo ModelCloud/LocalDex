@@ -117,7 +117,7 @@ pub fn is_openrouter_model(model: &str) -> bool {
     model == OPENROUTER_DSV41_FLASH_MODEL_ID
 }
 const OPENROUTER_PROVIDER_NAME: &str = "OpenRouter";
-pub const OPENROUTER_BASE_URL: &str = "https://us.openrouter.ai/api/v1";
+pub const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 pub const OPENROUTER_API_KEY_ENV_VAR: &str = "OPENROUTER_API_KEY";
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
