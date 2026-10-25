@@ -17,9 +17,10 @@ does not enable managed-hooks-only mode.
 ## LocalDex providers
 
 LocalDex registers an `openrouter` provider by default: it points at
-`https://openrouter.ai/api/v1` and reads its credential from the
+`https://us.openrouter.ai/api/v1` and reads its credential from the
 `OPENROUTER_API_KEY` environment variable (or `env_key_fallbacks`/`auth.json`,
 like every other `env_key` provider). No keys are stored in the repo.
+The US regional endpoint requires an OpenRouter Business or Enterprise plan.
 
 OpenRouter provider routing is configured through the `provider` table on the
 provider entry and is forwarded verbatim as the request's top-level `provider`
