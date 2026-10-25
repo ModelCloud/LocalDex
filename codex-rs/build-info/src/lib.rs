@@ -86,7 +86,29 @@ impl BuildInfo {
         } else if self.is_source_build() {
             format!("v{}", self.build_commit)
         } else {
-            format!("v{}", self.version)
+            format!("v{}", self.version_with_commit())
+        }
+    }
+
+    /// Return the package version with the stamped commit appended, e.g.
+    /// `0.164.0+091d9eedf`. Release builds keep the upstream version and expose
+    /// the fork commit as semver build metadata.
+    pub fn version_with_commit(&self) -> String {
+        if self.is_source_build() {
+            self.build_commit.clone()
+        } else if let Some(short_commit) = self.short_commit() {
+            format!("{}+{}", self.version, short_commit)
+        } else {
+            self.version.to_string()
+        }
+    }
+
+    fn short_commit(&self) -> Option<&str> {
+        let commit = self.build_commit.as_str();
+        if commit.len() == 40 && commit.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            Some(&commit[..9])
+        } else {
+            None
         }
     }
 

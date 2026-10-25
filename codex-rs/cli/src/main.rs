@@ -120,7 +120,7 @@ use codex_terminal_detection::TerminalName;
 #[derive(Debug, Parser)]
 #[clap(
     author,
-    version,
+    version = cli_version(),
     // If a sub‑command is given, ignore requirements of the default args.
     subcommand_negates_reqs = true,
     // The executable is sometimes invoked via a platform‑specific name like
@@ -1028,6 +1028,13 @@ enum FeaturesSubcommand {
 struct FeatureSetArgs {
     /// Feature key to update (for example: unified_exec).
     feature: String,
+}
+
+fn cli_version() -> &'static str {
+    static CLI_VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    CLI_VERSION
+        .get_or_init(|| codex_build_info::BuildInfo::get().version_with_commit())
+        .as_str()
 }
 
 fn stage_str(stage: Stage) -> &'static str {
