@@ -244,7 +244,7 @@ fn unknown_model_uses_builtin_instruction_template() {
 fn localdex_dsv41_flash_uses_native_metadata() {
     let model = model_info_from_slug("DS v4.1 Flash 1017");
 
-    assert_eq!(model.display_name, "DS v4.1 Flash 1017");
+    assert_eq!(model.display_name, "DeepSeek v4.1 Flash (Local)");
     assert_eq!(model.context_window, Some(262_144));
     assert_eq!(model.max_context_window, None);
     assert_eq!(model.auto_compact_token_limit(), Some(257_948));
@@ -331,6 +331,21 @@ fn bundled_openai_models_exclude_endpoint_specific_models() {
     assert!(!is_bundled_openai_model(LOCALDEX_DSV41_FLASH));
     assert!(!is_bundled_openai_model(OPENROUTER_DSV41_FLASH));
     assert!(!is_bundled_openai_model("openai/gpt-5.6-sol"));
+}
+
+#[test]
+fn lithos_variants_use_1017_instructions_without_fallback_metadata() {
+    for slug in LITHOS_DSV41_FLASH {
+        let model = model_info_from_slug(slug);
+        assert_eq!(model.slug, slug);
+        assert!(model.display_name.starts_with("DeepSeek v4.1 Flash"));
+        assert!(!model.used_fallback_model_metadata);
+        assert_eq!(render_model_instructions(&model), DEEPSEEK_INSTRUCTIONS);
+        assert_eq!(model.default_reasoning_level, Some(ReasoningEffort::Max));
+        assert_eq!(model.auto_compact_token_limit(), Some(900_000));
+        assert!(!model.supports_reasoning_summary_parameter);
+        assert!(model.service_tiers.is_empty());
+    }
 }
 
 #[test]

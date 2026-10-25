@@ -1230,6 +1230,19 @@ region = "us-west-2"
 #[tokio::test]
 async fn openrouter_model_selects_its_provider_and_preserves_other_routes() -> std::io::Result<()> {
     for (model, requested_provider, expected_provider) in [
+        ("deepseek-ai/DeepSeek-V4.1-Flash", "openai", "lithos"),
+        (
+            "deepseek-ai/DeepSeek-V4.1-Flash-fast",
+            "openrouter",
+            "lithos",
+        ),
+        (
+            "deepseek-ai/DeepSeek-V4.1-Flash-ultra",
+            "localdex",
+            "lithos",
+        ),
+        ("gpt-5.6-sol", "lithos", "openai"),
+        ("DS v4.1 Flash 1017", "lithos", "localdex"),
         ("deepseek/deepseek-v4.1-flash-1017", "openai", "openrouter"),
         (
             "deepseek/deepseek-v4.1-flash-1017",

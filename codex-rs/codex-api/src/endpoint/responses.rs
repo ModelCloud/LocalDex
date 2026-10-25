@@ -28,6 +28,7 @@ use url::Url;
 pub struct ResponsesClient<T: HttpTransport> {
     session: EndpointSession<T>,
     sse_telemetry: Option<Arc<dyn SseTelemetry>>,
+    chat_completions: bool,
 }
 
 #[derive(Default)]
@@ -45,7 +46,14 @@ impl<T: HttpTransport> ResponsesClient<T> {
         Self {
             session: EndpointSession::new(transport, provider, auth),
             sse_telemetry: None,
+            chat_completions: false,
         }
+    }
+
+    /// Opt into the Lithos wire adapter without changing logical Responses history.
+    pub fn with_chat_completions(mut self, enabled: bool) -> Self {
+        self.chat_completions = enabled;
+        self
     }
 
     pub fn with_telemetry(
@@ -56,6 +64,7 @@ impl<T: HttpTransport> ResponsesClient<T> {
         Self {
             session: self.session.with_request_telemetry(request),
             sse_telemetry: sse,
+            chat_completions: self.chat_completions,
         }
     }
 
@@ -132,9 +141,6 @@ impl<T: HttpTransport> ResponsesClient<T> {
             compression,
             turn_state,
         } = options;
-        let body = EncodedJsonBody::encode(&request)
-            .map_err(|e| ApiError::Stream(format!("failed to encode responses request: {e}")))?;
-
         let mut headers = extra_headers;
         if let Some(ref thread_id) = thread_id {
             insert_header(&mut headers, "x-client-request-id", thread_id);
@@ -144,6 +150,11 @@ impl<T: HttpTransport> ResponsesClient<T> {
             insert_header(&mut headers, "x-openai-subagent", &subagent);
         }
 
+        if self.chat_completions {
+            return crate::endpoint::lithos::stream(&self.session, &request, headers).await;
+        }
+        let body = EncodedJsonBody::encode(&request)
+            .map_err(|e| ApiError::Stream(format!("failed to encode responses request: {e}")))?;
         self.stream_encoded(body, headers, compression, turn_state)
             .await
     }

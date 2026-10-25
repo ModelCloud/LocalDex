@@ -119,6 +119,15 @@ pub fn is_openrouter_model(model: &str) -> bool {
 const OPENROUTER_PROVIDER_NAME: &str = "OpenRouter";
 pub const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 pub const OPENROUTER_API_KEY_ENV_VAR: &str = "OPENROUTER_API_KEY";
+pub const LITHOS_PROVIDER_ID: &str = "lithos";
+pub const LITHOS_MODEL_IDS: [&str; 3] = [
+    "deepseek-ai/DeepSeek-V4.1-Flash",
+    "deepseek-ai/DeepSeek-V4.1-Flash-fast",
+    "deepseek-ai/DeepSeek-V4.1-Flash-ultra",
+];
+pub fn is_lithos_model(model: &str) -> bool {
+    LITHOS_MODEL_IDS.contains(&model)
+}
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
 pub const AMAZON_BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
@@ -826,6 +835,27 @@ other non-default provider fields are not supported"
         self.name == OPENROUTER_PROVIDER_NAME
     }
 
+    pub fn is_lithos(&self) -> bool {
+        self.name == "Lithos"
+    }
+
+    pub fn create_lithos_provider() -> ModelProviderInfo {
+        let mut provider = Self::create_openrouter_provider();
+        provider.name = "Lithos".into();
+        provider.base_url = Some("https://api.lithosai.cloud/v1".into());
+        provider.env_key = Some("LITHOS_API_KEY".into());
+        provider.env_key_instructions = Some("Set LITHOS_API_KEY to your Lithos API key.".into());
+        provider.localdex_compatibility = true;
+        provider.stream_max_retries = Some(0);
+        provider.request_max_retries = Some(0);
+        provider.stream_idle_timeout_ms = Some(LOCALDEX_STREAM_IDLE_TIMEOUT_MS);
+        provider.capabilities = Some(ModelProviderCapabilities {
+            external_web_access: Some(false),
+            remote_compaction: Some(RemoteCompactionSupport::Unsupported),
+        });
+        provider
+    }
+
     /// Whether this provider serves a Codex-shaped model catalog for
     /// API-key discovery. Providers that cannot (OpenRouter, OSS endpoints)
     /// always resolve models from bundled or fallback metadata.
@@ -866,6 +896,7 @@ pub fn built_in_model_providers(
             amazon_bedrock_runtime_provider,
         ),
         (OPENROUTER_PROVIDER_ID, P::create_openrouter_provider()),
+        (LITHOS_PROVIDER_ID, P::create_lithos_provider()),
         (
             OLLAMA_OSS_PROVIDER_ID,
             create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::Responses),
@@ -958,7 +989,10 @@ pub fn merge_configured_model_providers(
                         .extend(http_headers_override);
                 }
             }
-        } else if key == OPENROUTER_PROVIDER_ID {
+        } else if key == OPENROUTER_PROVIDER_ID || key == LITHOS_PROVIDER_ID {
+            if key == LITHOS_PROVIDER_ID && provider.provider.is_some() {
+                return Err("Lithos does not support OpenRouter provider routing options".into());
+            }
             let provider_override = provider.provider.take();
             let base_url_override = provider.base_url.take();
             let auth_override = provider.auth.take();
@@ -966,12 +1000,12 @@ pub fn merge_configured_model_providers(
             let env_key_override = provider.env_key.take();
             if provider != ModelProviderInfo::default() {
                 return Err(format!(
-                    "model_providers.{OPENROUTER_PROVIDER_ID} only supports changing \
+                    "model_providers.{key} only supports changing \
 `provider`, `base_url`, `auth`, `http_headers`, and `env_key`; other non-default provider fields are not supported"
                 ));
             }
 
-            if let Some(built_in_provider) = model_providers.get_mut(OPENROUTER_PROVIDER_ID) {
+            if let Some(built_in_provider) = model_providers.get_mut(&key) {
                 if provider_override.is_some() {
                     built_in_provider.provider = provider_override;
                 }

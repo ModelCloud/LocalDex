@@ -101,6 +101,7 @@ use codex_model_provider_info::is_localdex_model;
 use codex_model_provider_info::is_localdex_provider_id;
 use codex_model_provider_info::is_openrouter_model;
 use codex_model_provider_info::merge_configured_model_providers;
+use codex_model_provider_info::{LITHOS_PROVIDER_ID, is_lithos_model};
 use codex_models_manager::ModelsManagerConfig;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::MemoryVersion;
@@ -4023,6 +4024,14 @@ impl Config {
                 ));
             }
             LOCALDEX_PROVIDER_ID.to_string()
+        } else if selected_model.is_some_and(is_lithos_model) {
+            if required_model_provider.is_some_and(|provider| provider != LITHOS_PROVIDER_ID) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "the Lithos model requires the lithos provider, but a different provider is required by managed configuration",
+                ));
+            }
+            LITHOS_PROVIDER_ID.to_string()
         } else if selected_model.is_some_and(is_openrouter_model) {
             if required_model_provider.is_some_and(|provider| provider != OPENROUTER_PROVIDER_ID) {
                 return Err(std::io::Error::new(
@@ -4033,7 +4042,7 @@ impl Config {
             OPENROUTER_PROVIDER_ID.to_string()
         } else if selected_model.is_some()
             && (is_localdex_provider_id(&requested_model_provider_id)
-                || (requested_model_provider_id == OPENROUTER_PROVIDER_ID
+                || (matches!(requested_model_provider_id.as_str(), OPENROUTER_PROVIDER_ID | LITHOS_PROVIDER_ID)
                     && selected_model.is_some_and(
                         codex_models_manager::model_info::is_bundled_openai_model,
                     )))
