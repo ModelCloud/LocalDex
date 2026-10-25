@@ -18,6 +18,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
+def declared_tool_names(tools: list[dict], namespace: str = "") -> list[tuple[str, str]]:
+    names = []
+    for tool in tools:
+        if tool.get("type") == "namespace":
+            scope = tool["name"] if tool["name"] != "functions" else ""
+            names.extend(declared_tool_names(tool["tools"], scope))
+        else:
+            name = tool.get("name") or tool.get("function", {}).get("name") or tool["type"]
+            names.append((namespace, name))
+    return names
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True)
@@ -39,6 +51,14 @@ def main() -> None:
             provider = self.path.split("/")[1]
             assert self.headers.get("Authorization") == "Bearer " + tokens[provider], "credential crossed providers"
             requests.append((self.path, body))
+            if provider != "openai":
+                names = declared_tool_names(body.get("tools") or [])
+                for item in body.get("input", []):
+                    if item.get("type") == "additional_tools":
+                        names.extend(declared_tool_names(item["tools"]))
+                if len(names) != len(set(names)):
+                    self.send_error(400, "duplicate tool declarations")
+                    return
             rid = f"resp_handoff_{len(requests)}"
             if provider == "lithos":
                 assert self.path.endswith("/chat/completions"), self.path
@@ -178,7 +198,7 @@ allow_fallbacks = false
                 process.terminate()
                 process.wait(timeout=10)
                 server.shutdown()
-    print("PASS: one thread, nine turns, provider credentials/endpoints and history preserved")
+    print("PASS: one thread, nine turns, unique tools and provider credentials/endpoints/history preserved")
 
 
 if __name__ == "__main__":

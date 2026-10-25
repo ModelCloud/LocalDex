@@ -27,6 +27,7 @@
 //! fails, normal stream retry/fallback logic handles recovery on the same turn.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::OnceLock;
@@ -103,6 +104,7 @@ use codex_protocol::protocol::W3cTraceContext;
 use codex_rollout_trace::InferenceTraceAttempt;
 use codex_rollout_trace::InferenceTraceContext;
 use codex_tools::ToolSpec;
+use codex_tools::create_tools_json_for_responses_api;
 use codex_tools::create_tools_json_for_responses_lite;
 use codex_tools::create_tools_raw_json_for_responses_api;
 use eventsource_stream::Event;
@@ -259,6 +261,67 @@ fn sanitize_plaintext_compaction_for_official_provider(
             };
         }
     }
+}
+
+fn sanitize_tool_redeclarations(
+    input: &mut Vec<ResponseItem>,
+    current_tools: &mut Vec<serde_json::Value>,
+) {
+    fn retain_latest(
+        tools: &mut Vec<serde_json::Value>,
+        namespace: Option<&str>,
+        seen: &mut HashSet<(Option<String>, String)>,
+    ) {
+        tools.reverse();
+        tools.retain_mut(|tool| {
+            if tool["type"] == "namespace" {
+                let Some(namespace) = tool["name"].as_str().map(str::to_string) else {
+                    return true;
+                };
+                let Some(children) = tool
+                    .get_mut("tools")
+                    .and_then(serde_json::Value::as_array_mut)
+                else {
+                    return true;
+                };
+                retain_latest(children, Some(&namespace), seen);
+                return !children.is_empty();
+            }
+            let (namespace, name) = if matches!(tool["type"].as_str(), Some("function" | "custom"))
+            {
+                (
+                    Some(
+                        namespace
+                            .filter(|name| !name.is_empty())
+                            .unwrap_or(codex_protocol::DEFAULT_FUNCTION_NAMESPACE),
+                    ),
+                    tool["name"].as_str(),
+                )
+            } else {
+                (
+                    None,
+                    tool["name"].as_str().or_else(|| tool["type"].as_str()),
+                )
+            };
+            name.is_none_or(|name| seen.insert((namespace.map(str::to_string), name.to_string())))
+        });
+        tools.reverse();
+    }
+
+    // Current declarations override history; otherwise the latest declaration wins.
+    // Work only on the request copy, including its shared immutable tool arrays.
+    let mut seen = HashSet::new();
+    retain_latest(current_tools, None, &mut seen);
+    for item in input.iter_mut().rev() {
+        if let ResponseItem::AdditionalTools { tools, .. } = item {
+            let mut declarations = tools.to_vec();
+            retain_latest(&mut declarations, None, &mut seen);
+            *tools = declarations.into();
+        }
+    }
+    input.retain(
+        |item| !matches!(item, ResponseItem::AdditionalTools { tools, .. } if tools.is_empty()),
+    );
 }
 
 fn session_telemetry_for_request(
@@ -1272,8 +1335,11 @@ impl ModelClient {
         );
         let mut prefix = Vec::new();
         let tools = if model_info.use_responses_lite {
-            if !prompt.tools.is_empty() {
-                let tools = create_tools_json_for_responses_lite(&prompt.tools)?;
+            let mut tools = create_tools_json_for_responses_lite(&prompt.tools)?;
+            if !is_openai {
+                sanitize_tool_redeclarations(&mut input, &mut tools);
+            }
+            if !tools.is_empty() {
                 prefix.push(ResponseItem::AdditionalTools {
                     id: Some(ResponseItemId::with_suffix(
                         "at",
@@ -1284,6 +1350,13 @@ impl ModelClient {
                 });
             }
             None
+        } else if !is_openai {
+            let mut tools = create_tools_json_for_responses_api(&prompt.tools)?;
+            sanitize_tool_redeclarations(&mut input, &mut tools);
+            Some(
+                Arc::<serde_json::value::RawValue>::from(serde_json::value::to_raw_value(&tools)?)
+                    .into(),
+            )
         } else {
             Some(create_tools_raw_json_for_responses_api(&prompt.tools)?.into())
         };

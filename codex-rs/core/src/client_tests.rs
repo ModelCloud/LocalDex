@@ -108,6 +108,160 @@ use wiremock::matchers::path;
 
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
 
+#[test_case::test_case(false, false; "history_only_responses")]
+#[test_case::test_case(true, false; "current_tools_responses")]
+#[test_case::test_case(false, true; "history_only_responses_lite")]
+#[test_case::test_case(true, true; "current_tools_responses_lite")]
+fn non_openai_tool_redeclarations_are_deduplicated(
+    current_tools: bool,
+    responses_lite: bool,
+) -> anyhow::Result<()> {
+    let tool = |name: &str, description: &str| json!({"type":"function","name":name,"description":description,"parameters":{"type":"object"}});
+    let additional = |tools| -> anyhow::Result<ResponseItem> {
+        Ok(serde_json::from_value(json!({
+            "type":"additional_tools","role":"developer","tools":tools
+        }))?)
+    };
+    let mut prompt = Prompt {
+        input: vec![
+            additional(json!([{"type":"namespace","name":"functions","tools":[
+                tool("exec", "old"),
+                tool("request_user_input", "old"),
+                tool("history_only", "old"),
+                tool("retained", "original")
+            ]}]))?,
+            serde_json::from_value(json!({
+                "type":"message","role":"user","content":[{"type":"input_text","text":"Keep the conversation"}]
+            }))?,
+            additional(json!([tool("exec", "superseded")]))?,
+            additional(json!([
+                tool("exec", "latest history"),
+                tool("request_user_input", "latest history"),
+                tool("history_only", "superseded within item"),
+                tool("history_only", "latest history"),
+                {"type":"namespace","name":"agents","tools":[tool("exec", "other namespace")]},
+                {"type":"web_search"}
+            ]))?,
+            additional(json!([]))?,
+        ],
+        ..Default::default()
+    };
+    if current_tools {
+        prompt.tools = ["exec", "request_user_input", "exec"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| {
+                ToolSpec::Function(ResponsesApiTool {
+                    name: name.to_string(),
+                    description: format!("current {index}"),
+                    strict: false,
+                    defer_loading: None,
+                    parameters: JsonSchema::default(),
+                    output_schema: None,
+                })
+            })
+            .collect();
+    }
+    let saved_history = prompt.input.clone();
+    let saved_tools = prompt.tools.clone();
+    let mut model = test_model_info();
+    model.use_responses_lite = responses_lite;
+    let client = test_model_client(SessionSource::Cli);
+    let build = |client: &ModelClient| {
+        client.build_responses_request(
+            &prompt,
+            &model,
+            None,
+            codex_protocol::config_types::ReasoningSummary::None,
+            None,
+            &test_responses_metadata_for_client(
+                client,
+                None,
+                format!("{}:0", client.state.thread_id),
+                None,
+                TestCodexResponsesRequestKind::Turn,
+            ),
+            false,
+        )
+    };
+    let request = build(&client)?;
+    let (wire, _) = crate::multidex_tool_namespace::prepare(true, &request, &request.input)?
+        .expect("compatibility translation");
+    let mut definitions: Vec<serde_json::Value> = wire
+        .tools
+        .map(|tools| serde_json::from_str(tools.get()))
+        .transpose()?
+        .unwrap_or_default();
+    for item in &wire.input {
+        if let ResponseItem::AdditionalTools { tools, .. } = item {
+            definitions.extend(tools.iter().cloned());
+        }
+    }
+    let mut by_name = BTreeMap::new();
+    for definition in definitions {
+        let name = definition["name"]
+            .as_str()
+            .or_else(|| definition["type"].as_str())
+            .expect("tool identity")
+            .to_string();
+        assert!(
+            by_name.insert(name.clone(), definition).is_none(),
+            "duplicate {name}"
+        );
+    }
+    assert!(
+        wire.input.iter().all(|item| {
+            !matches!(item, ResponseItem::AdditionalTools { tools, .. } if tools.is_empty())
+        }),
+        "drop empty declaration items"
+    );
+    assert_eq!(by_name.len(), 6);
+    assert!(
+        by_name["exec"]["description"]
+            .as_str()
+            .unwrap()
+            .ends_with(if current_tools {
+                "current 2"
+            } else {
+                "latest history"
+            })
+    );
+    assert!(
+        by_name["request_user_input"]["description"]
+            .as_str()
+            .unwrap()
+            .ends_with(if current_tools {
+                "current 1"
+            } else {
+                "latest history"
+            })
+    );
+    assert_eq!(by_name["history_only"]["description"], "latest history");
+    assert_eq!(by_name["retained"]["description"], "original");
+    assert!(
+        by_name
+            .values()
+            .any(|tool| tool["description"] == "other namespace")
+    );
+    assert!(request.input.iter().any(|item| item == &saved_history[1]));
+    assert_eq!(prompt.input, saved_history);
+    assert_eq!(prompt.tools, saved_tools);
+
+    let official = client.with_provider(create_model_provider(
+        ModelProviderInfo::create_openai_provider(None),
+        None,
+    ));
+    let official_request = build(&official)?;
+    assert!(official_request.input.ends_with(&saved_history));
+    if !responses_lite {
+        assert_eq!(
+            serde_json::to_value(&official_request.tools)?,
+            serde_json::to_value(&saved_tools)?,
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn local_reasoning_at_compacted_handoff_is_not_sent_to_official_model() -> anyhow::Result<()> {
     let original = test_model_client(SessionSource::Cli);
