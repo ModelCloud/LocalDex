@@ -1,5 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/approval_requests.rs
+assertion_line: 123
 expression: "format!(\"{buf:?}\")"
 ---
 Buffer {
@@ -22,7 +23,7 @@ Buffer {
         x: 2, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 46, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 7, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | REVERSED,
-        x: 0, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 78, y: 7, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 48, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 51, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 2, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,

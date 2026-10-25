@@ -1,0 +1,16 @@
+---
+source: tui/src/bottom_pane/list_selection_view.rs
+assertion_line: 2184
+expression: rendered
+---
+                                        
+  Select Reasoning Level for DeepSeek   
+  v4.1 Flash                            
+                                        
+                                        
+› 1.                                    
+     Highhhhhhhhhhhhhhhhhhhhhhhhhhhhhh  
+     hhhhhhhhhhhhhhhhh (current)        
+  2.                                    
+     Maxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+     xxxxxxxxxxxxxxx

@@ -67,7 +67,7 @@ const MIN_LIST_WIDTH_FOR_SIDE: u16 = 40;
 const SIDE_CONTENT_GAP: u16 = 2;
 
 /// Shared menu-surface horizontal inset (2 cells per side) used by selection popups.
-const MENU_SURFACE_HORIZONTAL_INSET: u16 = 4;
+pub(crate) const MENU_SURFACE_HORIZONTAL_INSET: u16 = 4;
 
 /// Controls how the side content panel is sized relative to the popup width.
 ///
@@ -1549,7 +1549,10 @@ impl Renderable for ListSelectionView {
             // Leave the preview's right inset outside the full-width focus row.
             width.saturating_sub(MENU_SURFACE_HORIZONTAL_INSET / 2 + SIDE_CONTENT_GAP + side_w)
         } else {
-            width
+            // Rows extend two cells left into the marker gutter, so they must
+            // stop before the right menu-surface inset instead of painting to
+            // the panel's right edge.
+            width.saturating_sub(MENU_SURFACE_HORIZONTAL_INSET / 2)
         };
 
         // Measure at the same width as the painted rows, including any side panel.
@@ -1627,7 +1630,7 @@ impl Renderable for ListSelectionView {
             area.width
                 .saturating_sub(MENU_SURFACE_HORIZONTAL_INSET / 2 + SIDE_CONTENT_GAP + sw)
         } else {
-            area.width
+            area.width.saturating_sub(MENU_SURFACE_HORIZONTAL_INSET / 2)
         };
         let rows = self.build_rows();
         let column_width = ColumnWidthConfig::new(self.col_width_mode, self.name_column_width)
@@ -2140,6 +2143,44 @@ mod tests {
             ..Default::default()
         });
         items
+    }
+
+    /// Sub-menu popups must keep the menu-surface right inset empty: row text
+    /// stops before the panel's right edge instead of clipping under it.
+    #[test]
+    fn picker_rows_leave_right_menu_surface_inset_empty() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let view = new_view(
+            SelectionViewParams {
+                title: Some("Select Reasoning Level for DeepSeek v4.1 Flash".to_string()),
+                items: vec![
+                    SelectionItem {
+                        name: "Highhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh".to_string(),
+                        is_current: true,
+                        dismiss_on_select: true,
+                        ..Default::default()
+                    },
+                    SelectionItem {
+                        name: "Maxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_string(),
+                        dismiss_on_select: true,
+                        ..Default::default()
+                    },
+                ],
+                ..SelectionViewParams::picker()
+            },
+            tx,
+        );
+        let rendered = render_lines_with_width(&view, /*width*/ 40);
+        // Rows extend two cells left into the marker gutter, so their right
+        // edge must stop before the two-cell right inset of the menu surface.
+        for line in rendered.lines() {
+            assert!(
+                line.ends_with("  ") || line.trim().is_empty(),
+                "popup content must not paint into the right inset: {line:?}"
+            );
+        }
+        insta::assert_snapshot!("picker_rows_leave_right_menu_surface_inset_empty", rendered);
     }
 
     fn render_before_after_scroll_snapshot(col_width_mode: ColumnWidthMode, width: u16) -> String {

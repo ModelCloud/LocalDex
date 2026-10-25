@@ -108,7 +108,9 @@ fn disabled_reason_wraps_in_the_description_column() {
     );
     let (tx, _rx) = unbounded_channel();
     let view = ListSelectionView::new(params, AppEventSender::new(tx), runtime.list);
-    let width = 64;
+    // Rows end before the right menu-surface inset, so this width renders the
+    // same column layout the old 64-column case produced.
+    let width = 66;
     let area = Rect::new(
         /*x*/ 0,
         /*y*/ 0,
@@ -130,8 +132,11 @@ fn disabled_reason_wraps_in_the_description_column() {
         .iter()
         .position(|row| row.contains("Remove custom binding (disabled)"))
         .expect("disabled action stays visible");
-    let reason_start = rows[y].find("No custom root override").unwrap();
-    let continuation_start = rows[y + 1].find("to remove").unwrap();
+    let reason_start = rows[y].find("No custom root").unwrap();
+    let continuation_start = rows[y + 1]
+        .char_indices()
+        .find_map(|(idx, ch)| (!ch.is_whitespace()).then_some(idx))
+        .unwrap();
     assert_eq!(
         crate::width::display_width(&rows[y + 1][..continuation_start]),
         crate::width::display_width(&rows[y][..reason_start])

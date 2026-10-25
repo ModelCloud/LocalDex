@@ -1,5 +1,6 @@
 ---
 source: tui/src/app/config_panel_tests.rs
+assertion_line: 162
 expression: "render_bottom_popup(&app.chat_widget, 80)"
 ---
   Effects
@@ -8,6 +9,7 @@ expression: "render_bottom_popup(&app.chat_widget, 80)"
 
 › 1. [ ] Animations                 Animate the welcome screen, working
                                     indicator, and transitions
-     [-] Composer stars (disabled)  Turn on Animations to show Astra task stars
+     [-] Composer stars (disabled)  Turn on Animations to show Astra task
+                                    stars
 
   enter toggle · esc back
