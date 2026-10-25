@@ -2820,6 +2820,7 @@ fn websocket_provider_with_connect_timeout(
         project_id: None,
         location: None,
         include_internal_metadata: false,
+        provider: None,
     }
 }
 

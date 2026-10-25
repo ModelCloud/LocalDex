@@ -229,8 +229,7 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
     }
 
     fn supports_api_key_models(&self) -> bool {
-        self.provider_info.model_catalog_url.is_some()
-            || (self.provider_info.is_openai() && self.provider_info.base_url.is_none())
+        self.provider_info.supports_api_key_models()
     }
 
     fn has_provider_api_key(&self) -> bool {

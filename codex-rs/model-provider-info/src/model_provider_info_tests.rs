@@ -9,6 +9,7 @@ use tempfile::tempdir;
 fn runtime_internal_metadata_opt_in_is_not_serialized_or_configurable() {
     let trusted = ModelProviderInfo {
         include_internal_metadata: true,
+        provider: None,
         ..Default::default()
     };
     assert_eq!(
@@ -103,6 +104,7 @@ base_url = "http://localhost:11434/v1"
         project_id: None,
         location: None,
         include_internal_metadata: false,
+        provider: None,
     };
 
     let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
@@ -147,6 +149,7 @@ query_params = { api-version = "2025-04-01-preview" }
         project_id: None,
         location: None,
         include_internal_metadata: false,
+        provider: None,
     };
 
     let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
@@ -195,6 +198,7 @@ supports_standalone_web_search = true
         project_id: None,
         location: None,
         include_internal_metadata: false,
+        provider: None,
     };
 
     let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
@@ -416,6 +420,7 @@ fn test_create_amazon_bedrock_provider() {
             project_id: None,
             location: None,
             include_internal_metadata: false,
+            provider: None,
         }
     );
 }
@@ -1023,4 +1028,60 @@ model_catalog_url = "https://gateway.example/codex/catalog?token=catalog-secret"
             .base_url,
         "https://gateway.example/v1"
     );
+}
+
+#[test]
+fn test_built_in_model_providers_include_openrouter() {
+    let providers = built_in_model_providers(/*openai_base_url*/ None);
+    let provider = providers
+        .get(OPENROUTER_PROVIDER_ID)
+        .expect("openrouter provider is built in");
+
+    assert_eq!(provider.name, "OpenRouter");
+    assert_eq!(
+        provider.base_url.as_deref(),
+        Some("https://openrouter.ai/api/v1")
+    );
+    assert_eq!(provider.env_key.as_deref(), Some("OPENROUTER_API_KEY"));
+    assert_eq!(provider.wire_api, WireApi::Responses);
+    assert!(!provider.requires_openai_auth);
+    assert!(provider.is_openrouter());
+    // OpenRouter's /models response is not a Codex catalog, so discovery must
+    // not be attempted; models resolve from bundled or fallback metadata.
+    assert!(!provider.supports_api_key_models());
+}
+
+#[test]
+fn test_deserialize_openrouter_provider_routing_toml() {
+    let provider: ModelProviderInfo = toml::from_str(
+        r#"
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+env_key = "OPENROUTER_API_KEY"
+
+[provider]
+only = ["wafer/mxfp4"]
+allow_fallbacks = false
+"#,
+    )
+    .unwrap();
+
+    let routing = provider.provider.expect("provider routing parsed");
+    assert_eq!(routing.only.as_deref(), Some(&["wafer/mxfp4".to_string()][..]));
+    assert_eq!(routing.allow_fallbacks, Some(false));
+}
+
+#[test]
+fn test_openrouter_routing_rejects_unknown_fields() {
+    let err = toml::from_str::<ModelProviderInfo>(
+        r#"
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+
+[provider]
+oonly = ["wafer/mxfp4"]
+"#,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("oonly"), "unexpected error: {err}");
 }

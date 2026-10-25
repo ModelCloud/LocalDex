@@ -99,6 +99,7 @@ async fn responses_stream_includes_subagent_header_on_review() {
         project_id: None,
         location: None,
         include_internal_metadata: false,
+        provider: None,
     };
 
     let codex_home = TempDir::new().expect("failed to create TempDir");
@@ -251,6 +252,7 @@ async fn responses_stream_includes_subagent_header_on_other() {
         project_id: None,
         location: None,
         include_internal_metadata: false,
+        provider: None,
     };
 
     let codex_home = TempDir::new().expect("failed to create TempDir");
@@ -384,6 +386,7 @@ async fn responses_respects_model_info_overrides_from_config() {
         project_id: None,
         location: None,
         include_internal_metadata: false,
+        provider: None,
     };
 
     let codex_home = TempDir::new().expect("failed to create TempDir");

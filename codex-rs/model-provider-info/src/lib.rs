@@ -14,6 +14,7 @@ use codex_protocol::auth::AuthMode;
 use codex_protocol::config_types::ModelProviderAuthInfo;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::EnvVarError;
+use codex_protocol::openrouter::OpenRouterRouting;
 use codex_protocol::error::Result as CodexResult;
 use codex_utils_redacted_string::RedactedString;
 use http::HeaderMap;
@@ -108,6 +109,12 @@ pub fn is_localdex_provider_id(provider_id: &str) -> bool {
 pub fn is_localdex_model(model: &str) -> bool {
     model == LOCALDEX_MODEL_ID
 }
+/// The built-in OpenRouter provider: OpenRouter's aggregate Responses
+/// endpoint with its `provider` routing extensions.
+pub const OPENROUTER_PROVIDER_ID: &str = "openrouter";
+const OPENROUTER_PROVIDER_NAME: &str = "OpenRouter";
+pub const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
+pub const OPENROUTER_API_KEY_ENV_VAR: &str = "OPENROUTER_API_KEY";
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
 pub const AMAZON_BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
@@ -260,6 +267,10 @@ pub struct ModelProviderInfo {
     #[serde(skip)]
     #[schemars(skip)]
     pub localdex_compatibility: bool,
+    /// OpenRouter provider-routing preferences, forwarded verbatim as the
+    /// request's top-level `provider` object. Only meaningful for providers
+    /// that implement OpenRouter's extended Responses API.
+    pub provider: Option<OpenRouterRouting>,
 }
 
 /// AWS SigV4 auth configuration for a model provider.
@@ -638,6 +649,7 @@ other non-default provider fields are not supported"
             project_id: None,
             location: None,
             include_internal_metadata: true,
+            provider: None,
         }
     }
 
@@ -683,6 +695,7 @@ other non-default provider fields are not supported"
             project_id: None,
             location: None,
             include_internal_metadata: false,
+            provider: None,
         }
     }
 
@@ -724,6 +737,48 @@ other non-default provider fields are not supported"
             project_id: None,
             location: None,
             include_internal_metadata: false,
+            provider: None,
+        }
+    }
+
+    /// OpenRouter aggregates upstream inference providers behind one
+    /// Responses endpoint. `OPENROUTER_API_KEY` supplies the credential;
+    /// OpenRouter `provider` routing stays opt-in through
+    /// `[model_providers.openrouter.provider]`.
+    pub fn create_openrouter_provider() -> ModelProviderInfo {
+        ModelProviderInfo {
+            name: OPENROUTER_PROVIDER_NAME.into(),
+            base_url: Some(OPENROUTER_BASE_URL.into()),
+            model_catalog_url: None,
+            env_key: Some(OPENROUTER_API_KEY_ENV_VAR.into()),
+            env_key_instructions: Some(
+                "Create an API key at https://openrouter.ai/keys and set it as the \
+                 OPENROUTER_API_KEY environment variable."
+                    .into(),
+            ),
+            experimental_bearer_token: None,
+            auth: None,
+            gateway_oauth: None,
+            aws: None,
+            capabilities: None,
+            wire_api: WireApi::Responses,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            server_overloaded_retry_delay_ms: None,
+            requires_openai_auth: false,
+            supports_websockets: false,
+            supports_responses_continuation: false,
+            localdex_compatibility: false,
+            supports_standalone_web_search: false,
+            project_id: None,
+            location: None,
+            include_internal_metadata: false,
+            provider: None,
         }
     }
 
@@ -763,6 +818,17 @@ other non-default provider fields are not supported"
         self.name == GCP_PROVIDER_NAME
     }
 
+    pub fn is_openrouter(&self) -> bool {
+        self.name == OPENROUTER_PROVIDER_NAME
+    }
+
+    /// Whether this provider serves a Codex-shaped model catalog for
+    /// API-key discovery. Providers that cannot (OpenRouter, OSS endpoints)
+    /// always resolve models from bundled or fallback metadata.
+    pub fn supports_api_key_models(&self) -> bool {
+        self.model_catalog_url.is_some() || (self.is_openai() && self.base_url.is_none())
+    }
+
     pub fn has_command_auth(&self) -> bool {
         self.auth.is_some()
     }
@@ -795,6 +861,7 @@ pub fn built_in_model_providers(
             AMAZON_BEDROCK_RUNTIME_PROVIDER_ID,
             amazon_bedrock_runtime_provider,
         ),
+        (OPENROUTER_PROVIDER_ID, P::create_openrouter_provider()),
         (
             OLLAMA_OSS_PROVIDER_ID,
             create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::Responses),
@@ -943,6 +1010,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         project_id: None,
         location: None,
         include_internal_metadata: false,
+        provider: None,
     }
 }
 

@@ -91,6 +91,7 @@ async fn continue_after_stream_error() {
         project_id: None,
         location: None,
         include_internal_metadata: false,
+        provider: None,
     };
 
     let TestCodex { codex, .. } = test_codex()

@@ -2113,6 +2113,7 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
         project_id: None,
         location: None,
         include_internal_metadata: false,
+        provider: None,
     };
 
     send_request_with_provider(provider).await;
@@ -3626,6 +3627,7 @@ async fn azure_responses_request_stores_and_preserves_prefixed_item_ids() {
         project_id: None,
         location: None,
         include_internal_metadata: false,
+        provider: None,
     };
 
     let codex_home = TempDir::new().unwrap();
@@ -4500,6 +4502,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
         project_id: None,
         location: None,
         include_internal_metadata: false,
+        provider: None,
     };
 
     // Init session
@@ -4593,6 +4596,7 @@ async fn env_var_overrides_loaded_auth() {
         project_id: None,
         location: None,
         include_internal_metadata: false,
+        provider: None,
     };
 
     // Init session

@@ -86,6 +86,7 @@ mod tests {
             project_id: None,
             location: None,
             include_internal_metadata: false,
+            provider: None,
         };
 
         let telemetry =

@@ -564,6 +564,7 @@ fn responses_request_properties_mismatch(
     let ResponsesApiRequest {
         model: previous_model,
         max_output_tokens: previous_max_output_tokens,
+        provider: _,
         input: _,
         previous_response_id: _,
         tools: previous_tools,
@@ -583,6 +584,7 @@ fn responses_request_properties_mismatch(
     let ResponsesApiRequest {
         model: current_model,
         max_output_tokens: current_max_output_tokens,
+        provider: _,
         input: _,
         previous_response_id: _,
         tools: current_tools,
@@ -1367,6 +1369,7 @@ impl ModelClient {
         let request = ResponsesApiRequest {
             model: model_info.slug.clone(),
             max_output_tokens: None,
+            provider: self.state.provider.info().provider.clone(),
             input,
             previous_response_id: None,
             tools,
