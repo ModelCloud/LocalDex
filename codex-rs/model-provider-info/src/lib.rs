@@ -112,6 +112,10 @@ pub fn is_localdex_model(model: &str) -> bool {
 /// The built-in OpenRouter provider: OpenRouter's aggregate Responses
 /// endpoint with its `provider` routing extensions.
 pub const OPENROUTER_PROVIDER_ID: &str = "openrouter";
+pub const OPENROUTER_DSV41_FLASH_MODEL_ID: &str = "deepseek/deepseek-v4.1-flash-1017";
+pub fn is_openrouter_model(model: &str) -> bool {
+    model == OPENROUTER_DSV41_FLASH_MODEL_ID
+}
 const OPENROUTER_PROVIDER_NAME: &str = "OpenRouter";
 pub const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 pub const OPENROUTER_API_KEY_ENV_VAR: &str = "OPENROUTER_API_KEY";

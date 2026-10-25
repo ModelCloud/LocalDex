@@ -45,14 +45,13 @@ pub struct OpenRouterRouting {
     /// Restrict to zero-data-retention providers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub zdr: Option<bool>,
-    /// Require the provider to return raw generation text rather than
-    /// normalizing reasoning into it.
+    /// Only use endpoints whose terms permit text distillation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enforce_distillable_text: Option<bool>,
     /// Whether providers may collect/store the request: `"allow"` or `"deny"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data_collection: Option<String>,
-    /// Ignore providers above these per-request price ceilings.
+    /// Price ceilings in USD per million tokens (or per request for that key).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_price: Option<HashMap<String, Value>>,
 }

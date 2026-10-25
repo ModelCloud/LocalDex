@@ -37,3 +37,14 @@ allow_fallbacks = false
 The bundled catalog already includes `deepseek/deepseek-v4.1-flash-1017`
 (context window, reasoning levels, and its DeepSeek-tuned system prompt), so
 models served through OpenRouter work without a remote model catalog.
+
+Selecting this slug chooses the built-in `openrouter` provider at startup or
+during a live model switch. Selecting `DS v4.1 Flash 1017` chooses the local
+provider; selecting a bundled OpenAI model from OpenRouter returns to OpenAI.
+Managed provider restrictions still apply.
+
+Both DS entries default to Max reasoning and use the same prompt adapted from
+DeepSeek Harness's `snapshots/session/worktree/system-prompt.expected.md`.
+The adaptation replaces Harness-only file, background-job, goal, and delegation
+tools with LocalDex equivalents; it is not a byte-for-byte copy. Explicit
+user-configured instructions can still override the model's default prompt.

@@ -5409,6 +5409,75 @@ async fn session_switches_between_omnigent_localdex_and_openai() {
 }
 
 #[tokio::test]
+async fn session_switches_between_openrouter_localdex_and_openai() {
+    let mut session = make_session_configuration_for_tests().await;
+    let mut config = (*session.original_config_do_not_use).clone();
+    config.model_providers.insert(
+        "localdex".to_string(),
+        ModelProviderInfo {
+            name: "LocalDex".to_string(),
+            base_url: Some("http://127.0.0.1:2120/v1".to_string()),
+            localdex_compatibility: true,
+            ..Default::default()
+        },
+    );
+    session.original_config_do_not_use = Arc::new(config);
+    for (model, explicit_provider, expected_provider) in [
+        ("deepseek/deepseek-v4.1-flash-1017", None, "openrouter"),
+        ("gpt-5.6-sol", None, "openai"),
+        ("DS v4.1 Flash 1017", None, "localdex"),
+        (
+            "deepseek/deepseek-v4.1-flash-1017",
+            Some("omnigent-localdex-test"),
+            "openrouter",
+        ),
+        ("another-vendor/model", None, "openrouter"),
+        ("gpt-5.6-sol", Some("openrouter"), "openai"),
+    ] {
+        session = session
+            .apply(
+                &SessionSettingsUpdate {
+                    step_settings: StepSettingsUpdate {
+                        model: Some(model.to_string()),
+                        ..Default::default()
+                    },
+                    model_provider: explicit_provider.map(str::to_string),
+                    ..Default::default()
+                },
+                &[],
+            )
+            .expect("switch provider");
+        assert_eq!(
+            session.original_config_do_not_use.model_provider_id, expected_provider,
+            "{model}"
+        );
+        assert_eq!(
+            session.provider.info(),
+            &session.original_config_do_not_use.model_provider
+        );
+    }
+
+    let mut mode = session.step_settings.collaboration_mode.clone();
+    mode.settings.model = "deepseek/deepseek-v4.1-flash-1017".to_string();
+    let from_mode = session
+        .apply(
+            &SessionSettingsUpdate {
+                step_settings: StepSettingsUpdate {
+                    collaboration_mode: Some(mode),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            &[],
+        )
+        .expect("collaboration-mode switch to OpenRouter");
+    assert_eq!(
+        from_mode.original_config_do_not_use.model_provider_id,
+        "openrouter"
+    );
+}
+
+#[tokio::test]
 async fn emit_subagent_session_started_includes_fork_lineage_and_originator() {
     use codex_app_server_protocol::ServerNotification;
     use codex_app_server_protocol::ThreadArchivedNotification;

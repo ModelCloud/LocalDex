@@ -806,6 +806,8 @@ fn responses_api_request_serializes_openrouter_provider_routing() -> Result<()> 
     };
     let value = serde_json::to_value(&request)?;
     assert!(value.get("provider").is_none());
+    let ws = serde_json::to_value(codex_api::ResponseCreateWsRequest::from(&request))?;
+    assert!(ws.get("provider").is_none());
 
     request.provider = Some(codex_protocol::openrouter::OpenRouterRouting {
         only: Some(vec!["wafer/mxfp4".to_string()]),
@@ -817,5 +819,7 @@ fn responses_api_request_serializes_openrouter_provider_routing() -> Result<()> 
         value["provider"],
         serde_json::json!({"only": ["wafer/mxfp4"], "allow_fallbacks": false})
     );
+    let ws = serde_json::to_value(codex_api::ResponseCreateWsRequest::from(&request))?;
+    assert_eq!(ws["provider"], value["provider"]);
     Ok(())
 }

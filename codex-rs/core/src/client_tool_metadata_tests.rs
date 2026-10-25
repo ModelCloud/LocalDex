@@ -1,4 +1,5 @@
 use super::*;
+use crate::client::responses_request_properties_mismatch;
 use codex_api::ResponseCreateWsRequest;
 use codex_api::ResponsesApiRequest;
 use codex_api::ResponsesWsRequest;
@@ -43,7 +44,7 @@ fn request_with_metadata_and_source(
     output.set_tool_call_cell_id("cell");
     output.mark_tool_calls_complete();
     ResponsesApiRequest {
-    provider: None,
+        provider: None,
         model: "test".to_string(),
         max_output_tokens: None,
         input: vec![output],
@@ -66,6 +67,35 @@ fn request_with_metadata_and_source(
 
 fn set_padding(request: &mut ResponsesApiRequest, padding: String) {
     request.client_metadata = Some(HashMap::from([("padding".to_string(), padding)]));
+}
+
+#[test]
+fn openrouter_routing_changes_prevent_response_continuation() {
+    let previous = request();
+    let mut current = previous.clone();
+    assert_eq!(
+        responses_request_properties_mismatch(&previous, &current),
+        None
+    );
+    current.provider = Some(codex_protocol::openrouter::OpenRouterRouting {
+        only: Some(vec!["wafer/mxfp4".to_string()]),
+        allow_fallbacks: Some(false),
+        ..Default::default()
+    });
+    assert_eq!(
+        responses_request_properties_mismatch(&previous, &current),
+        Some("provider_routing_changed")
+    );
+    let previous = current.clone();
+    assert_eq!(
+        responses_request_properties_mismatch(&previous, &current),
+        None
+    );
+    current.provider.as_mut().unwrap().allow_fallbacks = Some(true);
+    assert_eq!(
+        responses_request_properties_mismatch(&previous, &current),
+        Some("provider_routing_changed")
+    );
 }
 
 #[test]

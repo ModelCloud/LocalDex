@@ -95,9 +95,11 @@ use codex_model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
 use codex_model_provider_info::LOCALDEX_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
+use codex_model_provider_info::OPENROUTER_PROVIDER_ID;
 use codex_model_provider_info::built_in_model_providers;
 use codex_model_provider_info::is_localdex_model;
 use codex_model_provider_info::is_localdex_provider_id;
+use codex_model_provider_info::is_openrouter_model;
 use codex_model_provider_info::merge_configured_model_providers;
 use codex_models_manager::ModelsManagerConfig;
 use codex_prompts::ResolvedModelMessages;
@@ -4021,13 +4023,25 @@ impl Config {
                 ));
             }
             LOCALDEX_PROVIDER_ID.to_string()
+        } else if selected_model.is_some_and(is_openrouter_model) {
+            if required_model_provider.is_some_and(|provider| provider != OPENROUTER_PROVIDER_ID) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "the OpenRouter model requires the openrouter provider, but a different provider is required by managed configuration",
+                ));
+            }
+            OPENROUTER_PROVIDER_ID.to_string()
         } else if selected_model.is_some()
-            && is_localdex_provider_id(&requested_model_provider_id)
+            && (is_localdex_provider_id(&requested_model_provider_id)
+                || (requested_model_provider_id == OPENROUTER_PROVIDER_ID
+                    && selected_model.is_some_and(
+                        codex_models_manager::model_info::is_bundled_openai_model,
+                    )))
         {
             if required_model_provider.is_some() {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    "an OpenAI model cannot use a required LocalDex provider",
+                    "an OpenAI model cannot use a required LocalDex or OpenRouter provider",
                 ));
             }
             codex_model_provider_info::OPENAI_PROVIDER_ID.to_string()

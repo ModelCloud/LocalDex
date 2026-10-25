@@ -475,11 +475,37 @@ pub fn build_models_manager(
     auth_manager: Arc<AuthManager>,
 ) -> SharedModelsManager {
     let provider = create_model_provider(config.model_provider.clone(), Some(auth_manager));
-    // The LocalDex endpoint only describes the local model. Supply the merged
-    // catalog so one picker can also select the bundled upstream Codex models;
-    // an explicit user catalog remains authoritative.
-    let model_catalog = localdex_model_catalog_for_config(config);
-    let manager = provider.models_manager(config.codex_home.to_path_buf(), model_catalog);
+    let mut manager = provider.models_manager(
+        config.codex_home.to_path_buf(),
+        config.model_catalog.clone(),
+    );
+    // Built-in endpoint entries augment discovery; only a user catalog replaces it.
+    if config.model_catalog.is_none()
+        && let Some(catalog) = localdex_model_catalog_for_config(config)
+    {
+        let additional_models = catalog
+            .models
+            .into_iter()
+            .filter(|model| {
+                codex_model_provider_info::is_localdex_model(&model.slug)
+                    || codex_model_provider_info::is_openrouter_model(&model.slug)
+            })
+            .collect();
+        let default_model =
+            if codex_model_provider_info::is_localdex_provider_id(&config.model_provider_id) {
+                Some("DS v4.1 Flash 1017".to_string())
+            } else if config.model_provider_id == codex_model_provider_info::OPENROUTER_PROVIDER_ID
+            {
+                Some(codex_model_provider_info::OPENROUTER_DSV41_FLASH_MODEL_ID.to_string())
+            } else {
+                None
+            };
+        manager = Arc::new(codex_models_manager::manager::ModelsManagerOverlay::new(
+            manager,
+            additional_models,
+            default_model,
+        ));
+    }
     manager.set_api_key_model_discovery_enabled(
         config.features.enabled(Feature::ApiKeyModelDiscovery),
     );
@@ -490,15 +516,26 @@ fn localdex_model_catalog_for_config(
     config: &Config,
 ) -> Option<codex_protocol::openai_models::ModelsResponse> {
     config.model_catalog.clone().or_else(|| {
-        // Include the local model whenever LocalDex is registered, even when
-        // this session currently uses OpenAI. The app-server's model picker
-        // must let a live thread switch to the LocalDex model without restarting it.
-        (codex_model_provider_info::is_localdex_provider_id(&config.model_provider_id)
-            || config
-                .model_providers
-                .keys()
-                .any(|key| codex_model_provider_info::is_localdex_provider_id(key)))
-        .then(codex_models_manager::model_info::localdex_model_catalog)
+        // Expose registered endpoint models even while OpenAI is selected so
+        // the app-server picker can switch providers without restarting.
+        let has_localdex =
+            codex_model_provider_info::is_localdex_provider_id(&config.model_provider_id)
+                || config
+                    .model_providers
+                    .keys()
+                    .any(|key| codex_model_provider_info::is_localdex_provider_id(key));
+        let has_openrouter = config
+            .model_providers
+            .contains_key(codex_model_provider_info::OPENROUTER_PROVIDER_ID);
+        (has_localdex || has_openrouter).then(|| {
+            let mut catalog = codex_models_manager::model_info::localdex_model_catalog();
+            catalog.models.retain(|model| {
+                (has_localdex || !codex_model_provider_info::is_localdex_model(&model.slug))
+                    && (has_openrouter
+                        || !codex_model_provider_info::is_openrouter_model(&model.slug))
+            });
+            catalog
+        })
     })
 }
 

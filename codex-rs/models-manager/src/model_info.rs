@@ -229,6 +229,11 @@ pub fn localdex_model_catalog() -> ModelsResponse {
     catalog
 }
 
+pub fn is_bundled_openai_model(model: &str) -> bool {
+    crate::bundled_models_response()
+        .is_ok_and(|catalog| catalog.models.iter().any(|info| info.slug == model))
+}
+
 /// Metadata for the LocalDex provider's bundled DeepSeek endpoint.
 ///
 /// This is intentionally part of LocalDex rather than a `model_catalog_json`
@@ -255,10 +260,12 @@ fn openrouter_dsv41_flash_model_info() -> ModelInfo {
         "DS v4.1 Flash 1017 (OpenRouter)",
         "DS v4.1 Flash 1017 coding model served through OpenRouter.",
         // Matches the LocalDex Lite entry's default reasoning effort.
-        /*default_reasoning_level*/ ReasoningEffort::Max,
+        /*default_reasoning_level*/
+        ReasoningEffort::Max,
         // OpenRouter normalizes reasoning into a distinct stream rather than
         // mirroring raw thinking text, so the summary parameter is safe.
-        /*supports_reasoning_summary_parameter*/ true,
+        /*supports_reasoning_summary_parameter*/
+        true,
         /*default_reasoning_summary*/ ReasoningSummary::Auto,
         /*priority*/ 1,
     )

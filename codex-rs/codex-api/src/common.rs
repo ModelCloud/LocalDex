@@ -1,10 +1,10 @@
 use crate::error::ApiError;
 use codex_protocol::ResponseUsageMetadata;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
-use codex_protocol::openrouter::OpenRouterRouting;
 use codex_protocol::config_types::Verbosity as VerbosityConfig;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
+use codex_protocol::openrouter::OpenRouterRouting;
 use codex_protocol::protocol::ModelVerification;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::TokenUsage;
@@ -283,8 +283,7 @@ pub struct ResponsesApiRequest {
     // gateways may inspect request bodies incrementally before potentially multi-megabyte input.
     pub model: String,
     pub stream: bool,
-    /// OpenRouter provider-routing preferences; ignored by providers that do
-    /// not implement OpenRouter's extended Responses API.
+    /// Provider routing for endpoints implementing OpenRouter's extension.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<OpenRouterRouting>,
     #[serde(skip_serializing_if = "Option::is_none")]

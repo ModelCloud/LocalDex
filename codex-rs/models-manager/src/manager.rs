@@ -282,6 +282,169 @@ pub type ModelsManagerFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a
 /// Shared model manager handle used across runtime services.
 pub type SharedModelsManager = Arc<dyn ModelsManager>;
 
+/// Adds registered endpoint models without replacing the provider's discovery or auth policy.
+#[derive(Debug)]
+pub struct ModelsManagerOverlay {
+    inner: SharedModelsManager,
+    additional_models: Vec<ModelInfo>,
+    default_model: Option<String>,
+}
+
+impl ModelsManagerOverlay {
+    pub fn new(
+        inner: SharedModelsManager,
+        additional_models: Vec<ModelInfo>,
+        default_model: Option<String>,
+    ) -> Self {
+        Self {
+            inner,
+            additional_models,
+            default_model,
+        }
+    }
+
+    fn is_additional_model(&self, slug: &str) -> bool {
+        self.additional_models
+            .iter()
+            .any(|model| model.slug == slug)
+    }
+
+    fn merge(&self, mut models: Vec<ModelInfo>) -> Vec<ModelInfo> {
+        models.retain(|model| !self.is_additional_model(&model.slug));
+        models.extend(self.additional_models.clone());
+        models
+    }
+}
+
+impl ModelsManager for ModelsManagerOverlay {
+    fn for_originator(&self, originator: &str) -> Option<SharedModelsManager> {
+        self.inner.for_originator(originator).map(|inner| {
+            Arc::new(Self::new(
+                inner,
+                self.additional_models.clone(),
+                self.default_model.clone(),
+            )) as SharedModelsManager
+        })
+    }
+
+    fn set_api_key_model_discovery_enabled(&self, enabled: bool) {
+        self.inner.set_api_key_model_discovery_enabled(enabled);
+    }
+
+    fn raw_model_catalog(
+        &self,
+        refresh_strategy: RefreshStrategy,
+        http_client_factory: HttpClientFactory,
+    ) -> ModelsManagerFuture<'_, ModelsResponse> {
+        Box::pin(async move {
+            let catalog = self
+                .inner
+                .raw_model_catalog(refresh_strategy, http_client_factory)
+                .await;
+            ModelsResponse {
+                models: self.merge(catalog.models),
+            }
+        })
+    }
+
+    fn refresh_after_auth_change(
+        &self,
+        http_client_factory: HttpClientFactory,
+    ) -> ModelsManagerFuture<'_, ()> {
+        self.inner.refresh_after_auth_change(http_client_factory)
+    }
+
+    fn get_remote_models(&self) -> ModelsManagerFuture<'_, Vec<ModelInfo>> {
+        Box::pin(async move { self.merge(self.inner.get_remote_models().await) })
+    }
+
+    fn try_get_remote_models(&self) -> Result<Vec<ModelInfo>, TryLockError> {
+        self.inner
+            .try_get_remote_models()
+            .map(|models| self.merge(models))
+    }
+
+    fn auth_manager(&self) -> Option<&AuthManager> {
+        self.inner.auth_manager()
+    }
+
+    fn build_available_models(&self, models: Vec<ModelInfo>) -> Vec<ModelPreset> {
+        let default_model = self.default_model.clone().or_else(|| {
+            self.inner
+                .build_available_models(
+                    models
+                        .iter()
+                        .filter(|model| !self.is_additional_model(&model.slug))
+                        .cloned()
+                        .collect(),
+                )
+                .into_iter()
+                .find(|model| model.is_default)
+                .map(|model| model.model)
+        });
+        let mut presets = self.inner.build_available_models(models);
+        if let Some(default_model) = default_model
+            && presets.iter().any(|model| model.model == default_model)
+        {
+            for preset in &mut presets {
+                preset.is_default = preset.model == default_model;
+            }
+        }
+        presets
+    }
+
+    fn get_default_model<'a>(
+        &'a self,
+        model: &'a Option<String>,
+        allow_provider_model_fallback: bool,
+        refresh_strategy: RefreshStrategy,
+        http_client_factory: HttpClientFactory,
+    ) -> ModelsManagerFuture<'a, String> {
+        if let Some(model) = model.as_ref().or(self.default_model.as_ref())
+            && self.is_additional_model(model)
+        {
+            return Box::pin(std::future::ready(model.clone()));
+        }
+        self.inner.get_default_model(
+            model,
+            allow_provider_model_fallback,
+            refresh_strategy,
+            http_client_factory,
+        )
+    }
+
+    fn get_model_info<'a>(
+        &'a self,
+        model: &'a str,
+        config: &'a ModelsManagerConfig,
+    ) -> ModelsManagerFuture<'a, ModelInfo> {
+        if let Some(info) = self
+            .additional_models
+            .iter()
+            .find(|info| info.slug == model)
+        {
+            return Box::pin(std::future::ready(construct_model_info(
+                model,
+                Some(info.clone()),
+                config,
+            )));
+        }
+        self.inner.get_model_info(model, config)
+    }
+
+    fn list_collaboration_modes(&self) -> Vec<CollaborationModeMask> {
+        self.inner.list_collaboration_modes()
+    }
+
+    fn refresh_if_new_etag(
+        &self,
+        etag: String,
+        http_client_factory: HttpClientFactory,
+    ) -> ModelsManagerFuture<'_, ()> {
+        self.inner.refresh_if_new_etag(etag, http_client_factory)
+    }
+}
+
 /// Only explicit catalogs serialize refresh and suppress bundled fallback. Auth and discovery
 /// settings are still evaluated when models are requested.
 #[derive(Debug)]

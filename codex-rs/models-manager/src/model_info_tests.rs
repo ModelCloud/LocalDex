@@ -311,7 +311,10 @@ fn dsv41_flash_uses_deepseek_harness_prompt() {
     }
     assert_eq!(openrouter.slug, "deepseek/deepseek-v4.1-flash-1017");
     assert_eq!(openrouter.context_window, Some(262_144));
-    assert_eq!(openrouter.default_reasoning_level, Some(ReasoningEffort::Max));
+    assert_eq!(
+        openrouter.default_reasoning_level,
+        Some(ReasoningEffort::Max)
+    );
     assert!(openrouter.supports_reasoning_summary_parameter);
     assert_eq!(openrouter.visibility, ModelVisibility::List);
     assert!(
@@ -320,6 +323,14 @@ fn dsv41_flash_uses_deepseek_harness_prompt() {
             .iter()
             .any(|model| model.slug == OPENROUTER_DSV41_FLASH)
     );
+}
+
+#[test]
+fn bundled_openai_models_exclude_endpoint_specific_models() {
+    assert!(is_bundled_openai_model("gpt-5.6-sol"));
+    assert!(!is_bundled_openai_model(LOCALDEX_DSV41_FLASH));
+    assert!(!is_bundled_openai_model(OPENROUTER_DSV41_FLASH));
+    assert!(!is_bundled_openai_model("openai/gpt-5.6-sol"));
 }
 
 #[test]
