@@ -22,8 +22,14 @@ use std::path::PathBuf;
 use tracing::warn;
 
 pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
+/// The DeepSeek Harness system prompt, ported to LocalDex's tool surface
+/// (exec_command/write_stdin/apply_patch/update_plan/web_search). DS v4.1
+/// Flash is served with this prompt instead of the Codex one.
+pub const DEEPSEEK_INSTRUCTIONS: &str = include_str!("../deepseek_prompt.md");
 const PERSONALITY_SECTION_HEADER: &str = "# Personality";
 const LOCALDEX_DSV41_FLASH: &str = "DS v4.1 Flash 1017";
+/// The same DS v4.1 Flash model routed through OpenRouter's aggregate API.
+const OPENROUTER_DSV41_FLASH: &str = "deepseek/deepseek-v4.1-flash-1017";
 const LOCALDEX_DSV41_FLASH_CONTEXT_WINDOW: i64 = 262_144;
 const LOCALDEX_DSV41_FLASH_COMPACTION_HEADROOM: i64 = 4_196;
 const LOCALDEX_DSV41_FLASH_AUTO_COMPACT_TOKEN_LIMIT: i64 =
@@ -150,6 +156,9 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
     if slug == LOCALDEX_DSV41_FLASH {
         return apply_localdex_runtime_capabilities(localdex_dsv41_flash_model_info());
     }
+    if slug == OPENROUTER_DSV41_FLASH {
+        return openrouter_dsv41_flash_model_info();
+    }
     warn!("Unknown model {slug} is used. This will use fallback model metadata.");
     ModelInfo {
         slug: slug.to_string(),
@@ -212,11 +221,17 @@ pub fn localdex_model_catalog() -> ModelsResponse {
     let mut catalog = crate::bundled_models_response().unwrap_or_default();
     catalog
         .models
-        .retain(|model| model.slug != LOCALDEX_DSV41_FLASH);
+        .retain(|model| model.slug != LOCALDEX_DSV41_FLASH && model.slug != OPENROUTER_DSV41_FLASH);
     catalog.models.push(apply_localdex_runtime_capabilities(
         localdex_dsv41_flash_model_info(),
     ));
+    catalog.models.push(openrouter_dsv41_flash_model_info());
     catalog
+}
+
+pub fn is_bundled_openai_model(model: &str) -> bool {
+    crate::bundled_models_response()
+        .is_ok_and(|catalog| catalog.models.iter().any(|info| info.slug == model))
 }
 
 /// Metadata for the LocalDex provider's bundled DeepSeek endpoint.
@@ -227,14 +242,53 @@ pub fn localdex_model_catalog() -> ModelsResponse {
 /// provider routing. The inference server advertises matching capabilities
 /// through its OpenAI-compatible model-discovery endpoint.
 fn localdex_dsv41_flash_model_info() -> ModelInfo {
+    dsv41_flash_model_info(
+        LOCALDEX_DSV41_FLASH,
+        LOCALDEX_DSV41_FLASH,
+        "Local DS v4.1 Flash 1017 coding model.",
+        /*default_reasoning_level*/ ReasoningEffort::Max,
+        /*supports_reasoning_summary_parameter*/ false,
+        /*default_reasoning_summary*/ ReasoningSummary::None,
+        /*priority*/ 0,
+    )
+}
+
+/// The same model routed through the built-in OpenRouter provider.
+fn openrouter_dsv41_flash_model_info() -> ModelInfo {
+    dsv41_flash_model_info(
+        OPENROUTER_DSV41_FLASH,
+        "DS v4.1 Flash 1017 (OpenRouter)",
+        "DS v4.1 Flash 1017 coding model served through OpenRouter.",
+        // Matches the LocalDex Lite entry's default reasoning effort.
+        /*default_reasoning_level*/
+        ReasoningEffort::Max,
+        // OpenRouter normalizes reasoning into a distinct stream rather than
+        // mirroring raw thinking text, so the summary parameter is safe.
+        /*supports_reasoning_summary_parameter*/
+        true,
+        /*default_reasoning_summary*/ ReasoningSummary::Auto,
+        /*priority*/ 1,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dsv41_flash_model_info(
+    slug: &str,
+    display_name: &str,
+    description: &str,
+    default_reasoning_level: ReasoningEffort,
+    supports_reasoning_summary_parameter: bool,
+    default_reasoning_summary: ReasoningSummary,
+    priority: i32,
+) -> ModelInfo {
     ModelInfo {
-        slug: LOCALDEX_DSV41_FLASH.to_string(),
-        display_name: LOCALDEX_DSV41_FLASH.to_string(),
-        description: Some("Local DS v4.1 Flash 1017 coding model.".to_string()),
+        slug: slug.to_string(),
+        display_name: display_name.to_string(),
+        description: Some(description.to_string()),
         // DSV4.1 accepts `off`, `low`, `high`, `max`, or a numeric budget. Its
         // OpenAI-compatible endpoint explicitly rejects Codex's generic
         // `medium` default, and the local model defaults to maximum depth.
-        default_reasoning_level: Some(ReasoningEffort::Max),
+        default_reasoning_level: Some(default_reasoning_level),
         supported_reasoning_levels: vec![
             ReasoningEffortPreset {
                 effort: ReasoningEffort::Custom("off".to_string()),
@@ -254,19 +308,19 @@ fn localdex_dsv41_flash_model_info() -> ModelInfo {
             },
         ],
         shell_type: ConfigShellToolType::UnifiedExec,
-        // This is a configured local provider model, not a hidden fallback.
-        // The local model leads the picker: the lowest priority sorts first,
+        // These are configured provider models, not hidden fallbacks. The
+        // local model leads the picker: the lowest priority sorts first,
         // which also makes it the default when this catalog is in use.
         visibility: ModelVisibility::List,
         supported_in_api: true,
-        priority: 0,
+        priority,
         additional_speed_tiers: Vec::new(),
         service_tiers: Vec::new(),
         default_service_tier: None,
         available_access_programs: None,
         availability_nux: None,
         upgrade: None,
-        model_messages: Some(local_model_messages()),
+        model_messages: Some(dsv41_model_messages()),
         // LocalDex uses the same skill catalog and bridge as Codex. Include
         // the usage protocol so a local model knows to inspect a selected
         // SKILL.md before it acts on that skill.
@@ -274,11 +328,11 @@ fn localdex_dsv41_flash_model_info() -> ModelInfo {
         include_plugin_usage_instructions: false,
         include_apps_usage_instructions: false,
         // The local endpoint streams raw reasoning text. It does not expose a
-        // distinct reasoning-summary stream, so never ask it for one: some
+        // distinct reasoning-summary stream, so never ask it for one there: some
         // OpenAI-compatible servers mirror a requested summary alongside the
         // raw stream, which duplicates/interleaves visible thinking.
-        supports_reasoning_summary_parameter: false,
-        default_reasoning_summary: ReasoningSummary::None,
+        supports_reasoning_summary_parameter,
+        default_reasoning_summary,
         support_verbosity: false,
         default_verbosity: None,
         apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
@@ -318,6 +372,15 @@ fn localdex_dsv41_flash_model_info() -> ModelInfo {
 fn local_model_messages() -> ModelMessages {
     ModelMessages {
         instructions_template: Some(BASE_INSTRUCTIONS.to_string()),
+        ..Default::default()
+    }
+}
+
+/// DS v4.1 Flash runs with the DeepSeek Harness system prompt: the model's
+/// own prompt is shorter and better tuned than the generic Codex one.
+fn dsv41_model_messages() -> ModelMessages {
+    ModelMessages {
+        instructions_template: Some(DEEPSEEK_INSTRUCTIONS.to_string()),
         ..Default::default()
     }
 }

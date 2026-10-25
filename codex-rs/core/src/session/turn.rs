@@ -1595,8 +1595,10 @@ async fn maybe_run_previous_model_inline_compact(
         previous_model_turn_context.config = Arc::new(config);
     } else if turn_context.provider.info().localdex_compatibility
         || codex_model_provider_info::is_localdex_model(&previous_model)
+        || turn_context.provider.info().is_openrouter()
+        || codex_model_provider_info::is_openrouter_model(&previous_model)
     {
-        // A LocalDex transition can cross providers. Without proven historical
+        // An endpoint transition can cross providers. Without proven historical
         // routing, preserve a hash boundary using the current model/provider.
         // Downshifts can defer to the current-model budget path below.
         if matches!(reason, CompactionReason::CompHashChanged) {

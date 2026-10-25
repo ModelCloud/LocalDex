@@ -73,9 +73,74 @@ async fn localdex_model_is_in_catalog_while_openai_is_selected() {
             .iter()
             .any(|model| model.slug == "DS v4.1 Flash 1017")
     );
+    let openrouter = catalog
+        .models
+        .iter()
+        .find(|model| model.slug == "deepseek/deepseek-v4.1-flash-1017")
+        .expect("registered OpenRouter model should be selectable");
+    assert_eq!(
+        openrouter
+            .model_messages
+            .as_ref()
+            .unwrap()
+            .instructions_template
+            .as_deref(),
+        Some(codex_models_manager::model_info::DEEPSEEK_INSTRUCTIONS)
+    );
 }
 
 struct ParentInstructionsProvider(codex_extension_api::Instructions);
+
+#[tokio::test]
+async fn openrouter_model_is_in_catalog_without_a_local_endpoint() {
+    let mut config = test_config().await;
+    config.model_provider_id = "openai".to_string();
+    config
+        .model_providers
+        .retain(|key, _| !codex_model_provider_info::is_localdex_provider_id(key));
+    let catalog = super::localdex_model_catalog_for_config(&config)
+        .expect("built-in OpenRouter should expose its catalog without LocalDex config");
+    assert!(
+        catalog.models.iter().any(|model| {
+            model.slug == codex_model_provider_info::OPENROUTER_DSV41_FLASH_MODEL_ID
+        })
+    );
+    assert!(
+        !catalog
+            .models
+            .iter()
+            .any(|model| { codex_model_provider_info::is_localdex_model(&model.slug) })
+    );
+    let manager = build_models_manager(
+        &config,
+        AuthManager::from_auth_for_testing(codex_login::CodexAuth::from_api_key("test-key")),
+    );
+    let models = manager.get_remote_models().await;
+    assert!(
+        models
+            .iter()
+            .any(|model| codex_model_provider_info::is_openrouter_model(&model.slug))
+    );
+    assert!(
+        !models
+            .iter()
+            .any(|model| codex_model_provider_info::is_localdex_model(&model.slug))
+    );
+}
+
+#[tokio::test]
+async fn openrouter_registration_preserves_explicit_user_catalog() {
+    let mut config = test_config().await;
+    let model = codex_models_manager::model_info::model_info_from_slug("user-catalog-model");
+    config.model_catalog = Some(ModelsResponse {
+        models: vec![model.clone()],
+    });
+    let manager = build_models_manager(
+        &config,
+        AuthManager::from_auth_for_testing(codex_login::CodexAuth::from_api_key("test-key")),
+    );
+    assert_eq!(manager.get_remote_models().await, vec![model]);
+}
 
 impl codex_extension_api::UserInstructionsProvider for ParentInstructionsProvider {
     fn load_user_instructions(&self) -> codex_extension_api::LoadInstructionsFuture<'_> {

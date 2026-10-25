@@ -1413,7 +1413,11 @@ impl Session {
     }
 
     pub(crate) async fn maybe_emit_model_warnings_for_turn(&self, tc: &TurnContext) {
-        if tc.model_info().used_fallback_model_metadata {
+        // Providers without a Codex model catalog (OpenRouter, OSS endpoints)
+        // always serve bundled or fallback metadata, so warning per turn is noise.
+        if tc.model_info().used_fallback_model_metadata
+            && tc.provider.info().supports_api_key_models()
+        {
             self.send_event(
                 tc,
                 EventMsg::Warning(WarningEvent {

@@ -4,6 +4,7 @@ use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::config_types::Verbosity as VerbosityConfig;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
+use codex_protocol::openrouter::OpenRouterRouting;
 use codex_protocol::protocol::ModelVerification;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::TokenUsage;
@@ -282,6 +283,9 @@ pub struct ResponsesApiRequest {
     // gateways may inspect request bodies incrementally before potentially multi-megabyte input.
     pub model: String,
     pub stream: bool,
+    /// Provider routing for endpoints implementing OpenRouter's extension.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<OpenRouterRouting>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -319,6 +323,7 @@ impl<'a> From<&'a ResponsesApiRequest> for ResponseCreateWsRequest<'a> {
             tools: request.tools.as_ref().map(ResponsesApiTools::as_raw_value),
             tool_choice: &request.tool_choice,
             parallel_tool_calls: request.parallel_tool_calls,
+            provider: request.provider.as_ref(),
             reasoning: request.reasoning.as_ref(),
             store: request.store,
             stream: request.stream,
@@ -340,6 +345,8 @@ pub struct ResponseCreateWsRequest<'a> {
     // gateways may inspect request bodies incrementally before potentially multi-megabyte input.
     pub model: &'a str,
     pub stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<&'a OpenRouterRouting>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]

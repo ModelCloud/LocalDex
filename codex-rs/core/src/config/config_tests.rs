@@ -1228,6 +1228,93 @@ region = "us-west-2"
 }
 
 #[tokio::test]
+async fn openrouter_model_selects_its_provider_and_preserves_other_routes() -> std::io::Result<()> {
+    for (model, requested_provider, expected_provider) in [
+        ("deepseek/deepseek-v4.1-flash-1017", "openai", "openrouter"),
+        (
+            "deepseek/deepseek-v4.1-flash-1017",
+            "localdex",
+            "openrouter",
+        ),
+        ("gpt-5.6-sol", "openrouter", "openai"),
+        ("another-vendor/model", "openrouter", "openrouter"),
+        ("DS v4.1 Flash 1017", "openrouter", "localdex"),
+    ] {
+        let cfg = toml::from_str::<ConfigToml>(&format!(
+            r#"
+model = "{model}"
+model_provider = "{requested_provider}"
+
+[model_providers.localdex]
+name = "LocalDex"
+base_url = "http://127.0.0.1:2120/v1"
+
+[model_providers.openrouter.provider]
+only = ["wafer/mxfp4"]
+allow_fallbacks = false
+"#
+        ))
+        .expect("valid OpenRouter config");
+        let config = Config::load_config_with_layer_stack(
+            LOCAL_FS.as_ref(),
+            cfg,
+            ConfigOverrides::default(),
+            tempdir()?.abs(),
+            ConfigLayerStack::new(
+                Vec::new(),
+                ConfigRequirements::default(),
+                ConfigRequirementsToml::default(),
+            )?,
+        )
+        .await?;
+        assert_eq!(config.model_provider_id, expected_provider, "{model}");
+        if expected_provider == "openrouter" {
+            assert_eq!(
+                config.model_provider.env_key.as_deref(),
+                Some("OPENROUTER_API_KEY")
+            );
+            assert_eq!(
+                config
+                    .model_provider
+                    .provider
+                    .as_ref()
+                    .unwrap()
+                    .allow_fallbacks,
+                Some(false)
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn openrouter_model_cannot_bypass_managed_provider() -> std::io::Result<()> {
+    let cfg = ConfigToml {
+        model: Some("deepseek/deepseek-v4.1-flash-1017".to_string()),
+        ..Default::default()
+    };
+    let error = Config::load_config_with_layer_stack(
+        LOCAL_FS.as_ref(),
+        cfg,
+        ConfigOverrides::default(),
+        tempdir()?.abs(),
+        ConfigLayerStack::new(
+            Vec::new(),
+            ConfigRequirements::default(),
+            ConfigRequirementsToml {
+                model_provider: Some("openai".to_string()),
+                ..Default::default()
+            },
+        )?,
+    )
+    .await
+    .expect_err("managed provider must not be bypassed");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(error.to_string().contains("managed configuration"));
+    Ok(())
+}
+
+#[tokio::test]
 async fn load_config_applies_amazon_bedrock_aws_profile_override() {
     let cfg = toml::from_str::<ConfigToml>(
         r#"

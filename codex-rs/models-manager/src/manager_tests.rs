@@ -945,6 +945,112 @@ async fn refresh_available_models_uses_remote_only_catalog_for_chatgpt_auth() {
 }
 
 #[tokio::test]
+async fn endpoint_overlay_preserves_remote_refresh_defaults_and_prompt_metadata() {
+    let codex_home = tempdir().expect("temp dir");
+    let slug = "deepseek/deepseek-v4.1-flash-1017";
+    let endpoint = TestModelsEndpoint::new(vec![
+        vec![
+            remote_model("remote-first", "First", 10),
+            remote_model(slug, "Duplicate", 0),
+        ],
+        vec![remote_model("remote-second", "Second", 10)],
+    ]);
+    let inner = openai_manager_for_tests(codex_home.path().to_path_buf(), endpoint.clone());
+    let manager = ModelsManagerOverlay::new(
+        Arc::new(inner),
+        vec![model_info::model_info_from_slug(slug)],
+        None,
+    );
+    for expected in ["remote-first", "remote-second"] {
+        let catalog = manager
+            .raw_model_catalog(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY.clone())
+            .await;
+        assert_eq!(catalog.models.len(), 2);
+        assert!(catalog.models.iter().any(|model| model.slug == expected));
+        let presets = manager.build_available_models(catalog.models);
+        assert!(
+            presets
+                .iter()
+                .any(|model| model.model == expected && model.is_default)
+        );
+        assert!(
+            presets
+                .iter()
+                .any(|model| model.model == slug && !model.is_default)
+        );
+    }
+    assert_eq!(endpoint.fetch_count(), 2);
+    assert_eq!(manager.try_get_remote_models().unwrap().len(), 2);
+    let info = manager
+        .get_model_info(slug, &ModelsManagerConfig::default())
+        .await;
+    assert_eq!(
+        info.default_reasoning_level,
+        Some(codex_protocol::openai_models::ReasoningEffort::Max)
+    );
+    assert_eq!(
+        info.model_messages
+            .unwrap()
+            .instructions_template
+            .as_deref(),
+        Some(model_info::DEEPSEEK_INSTRUCTIONS)
+    );
+    assert_eq!(
+        manager
+            .get_default_model(
+                &None,
+                false,
+                RefreshStrategy::Offline,
+                DEFAULT_HTTP_CLIENT_FACTORY.clone()
+            )
+            .await,
+        "remote-second"
+    );
+    assert_eq!(
+        manager
+            .get_default_model(
+                &Some(slug.to_string()),
+                true,
+                RefreshStrategy::Offline,
+                DEFAULT_HTTP_CLIENT_FACTORY.clone()
+            )
+            .await,
+        slug
+    );
+}
+
+#[tokio::test]
+async fn endpoint_overlay_uses_active_endpoint_default() {
+    let slug = "deepseek/deepseek-v4.1-flash-1017";
+    let inner = static_manager_for_tests(ModelsResponse {
+        models: vec![remote_model("upstream", "Upstream", 0)],
+    });
+    let manager = ModelsManagerOverlay::new(
+        Arc::new(inner),
+        vec![model_info::model_info_from_slug(slug)],
+        Some(slug.to_string()),
+    );
+    assert_eq!(
+        manager
+            .get_default_model(
+                &None,
+                false,
+                RefreshStrategy::Offline,
+                DEFAULT_HTTP_CLIENT_FACTORY.clone()
+            )
+            .await,
+        slug
+    );
+    assert!(
+        manager
+            .try_list_models()
+            .unwrap()
+            .iter()
+            .any(|model| model.model == slug && model.is_default)
+    );
+}
+
+#[tokio::test]
 async fn refresh_available_models_uses_cached_remote_only_catalog_for_chatgpt_auth() {
     let remote_models = vec![remote_model(
         "chatgpt-cached-source-of-truth",

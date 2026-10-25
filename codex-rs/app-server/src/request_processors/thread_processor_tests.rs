@@ -661,6 +661,7 @@ mod thread_processor_behavior_tests {
             project_id: None,
             location: None,
             include_internal_metadata: false,
+            provider: None,
         };
         let config_manager = ConfigManager::new(
             temp_dir.path().to_path_buf(),

@@ -296,6 +296,44 @@ fn localdex_catalog_makes_the_local_model_selectable_without_replacing_codex_mod
 }
 
 #[test]
+fn dsv41_flash_uses_deepseek_harness_prompt() {
+    let local = model_info_from_slug(LOCALDEX_DSV41_FLASH);
+    let openrouter = model_info_from_slug(OPENROUTER_DSV41_FLASH);
+
+    for model in [&local, &openrouter] {
+        assert_eq!(
+            render_model_instructions(model),
+            DEEPSEEK_INSTRUCTIONS,
+            "{} must use the DeepSeek Harness prompt",
+            model.slug
+        );
+        assert!(!model.used_fallback_model_metadata);
+    }
+    assert_eq!(openrouter.slug, "deepseek/deepseek-v4.1-flash-1017");
+    assert_eq!(openrouter.context_window, Some(262_144));
+    assert_eq!(
+        openrouter.default_reasoning_level,
+        Some(ReasoningEffort::Max)
+    );
+    assert!(openrouter.supports_reasoning_summary_parameter);
+    assert_eq!(openrouter.visibility, ModelVisibility::List);
+    assert!(
+        localdex_model_catalog()
+            .models
+            .iter()
+            .any(|model| model.slug == OPENROUTER_DSV41_FLASH)
+    );
+}
+
+#[test]
+fn bundled_openai_models_exclude_endpoint_specific_models() {
+    assert!(is_bundled_openai_model("gpt-5.6-sol"));
+    assert!(!is_bundled_openai_model(LOCALDEX_DSV41_FLASH));
+    assert!(!is_bundled_openai_model(OPENROUTER_DSV41_FLASH));
+    assert!(!is_bundled_openai_model("openai/gpt-5.6-sol"));
+}
+
+#[test]
 fn localdex_runtime_capability_uses_only_matching_positive_context_window() {
     assert_eq!(
         super::localdex_runtime_context_window(

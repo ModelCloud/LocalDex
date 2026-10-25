@@ -3041,6 +3041,14 @@
           "description": "Google Cloud project ID for the built-in GCP provider. Takes precedence over `GOOGLE_CLOUD_PROJECT` when deriving the Vertex AI endpoint.",
           "type": "string"
         },
+        "provider": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/OpenRouterRouting"
+            }
+          ],
+          "description": "OpenRouter provider-routing preferences, forwarded verbatim as the request's top-level `provider` object. Only meaningful for providers that implement OpenRouter's extended Responses API."
+        },
         "query_params": {
           "additionalProperties": {
             "type": "string"
@@ -3058,6 +3066,12 @@
           "default": false,
           "description": "Does this provider require an OpenAI API key or ChatGPT login token? If true, the user is presented with a login screen on first run, and credentials are stored using the backend selected by `cli_auth_credentials_store`. If false (the default), the login screen is skipped, and the API key (if needed) comes from the environment variable specified by `env_key`.",
           "type": "boolean"
+        },
+        "server_overloaded_retry_delay_ms": {
+          "description": "Delay (in milliseconds) before retrying a request that failed because the model is at capacity (`server_is_overloaded`). Capacity retries are unbounded and never consume `stream_max_retries`. Defaults to 1000ms; `CODEX_SERVER_OVERLOADED_RETRY_DELAY_MS` overrides it globally when unset.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "stream_idle_timeout_ms": {
           "description": "Idle timeout (in milliseconds) to wait for activity on a streaming response before treating the connection as lost.",
@@ -3637,6 +3651,69 @@
           "type": "string"
         }
       ]
+    },
+    "OpenRouterRouting": {
+      "additionalProperties": false,
+      "description": "OpenRouter provider-routing preferences, sent verbatim as the top-level `provider` object on Responses (and chat completions) requests.\n\nConfigured per model provider as `[model_providers.<id>.provider]`, e.g. ```toml [model_providers.openrouter.provider] only = [\"wafer/mxfp4\"] allow_fallbacks = false ```\n\nField meanings: <https://openrouter.ai/docs/guides/routing/provider-selection>",
+      "properties": {
+        "allow_fallbacks": {
+          "description": "Whether OpenRouter may fall back to other providers. Set `false` together with `only`/`order` to pin an exact provider.",
+          "type": "boolean"
+        },
+        "data_collection": {
+          "description": "Whether providers may collect/store the request: `\"allow\"` or `\"deny\"`.",
+          "type": "string"
+        },
+        "enforce_distillable_text": {
+          "description": "Only use endpoints whose terms permit text distillation.",
+          "type": "boolean"
+        },
+        "ignore": {
+          "description": "Never route to these providers.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_price": {
+          "additionalProperties": true,
+          "description": "Price ceilings in USD per million tokens (or per request for that key).",
+          "type": "object"
+        },
+        "only": {
+          "description": "Route only to these upstream providers, e.g. `[\"wafer/mxfp4\"]`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "order": {
+          "description": "Prefer providers in this order, still allowing fallbacks.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "quantizations": {
+          "description": "Restrict to these quantization levels (e.g. `[\"bf16\", \"fp8\"]`).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "require_parameters": {
+          "description": "Only use providers that support every parameter in the request.",
+          "type": "boolean"
+        },
+        "sort": {
+          "description": "Endpoint sort order: `\"price\"`, `\"throughput\"`, or `\"latency\"`. OpenRouter also accepts an object form, so this stays untyped."
+        },
+        "zdr": {
+          "description": "Restrict to zero-data-retention providers.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
     },
     "OrchestratorToml": {
       "additionalProperties": false,

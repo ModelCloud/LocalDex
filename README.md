@@ -39,6 +39,11 @@ ln -sfn "$CODEX_HOME_DIR/packages/standalone/releases/<previous-release>" \
 
 ### Configure named OpenAI-compatible providers
 
+OpenRouter is built in: set `OPENROUTER_API_KEY` locally and select
+`deepseek/deepseek-v4.1-flash-1017`. See [OpenRouter configuration](docs/config.md#localdex-providers)
+for Wafer-only routing. Both the local and OpenRouter DS v4.1 Flash entries
+default to Max reasoning and use the DeepSeek Harness prompt adapted to LocalDex's tools.
+
 LocalDex keeps the built-in `openai` provider and its normal ChatGPT/API-key
 authentication. Add custom providers by name in `CODEX_HOME/config.toml`; each
 provider has its own endpoint and bearer-token environment variable:

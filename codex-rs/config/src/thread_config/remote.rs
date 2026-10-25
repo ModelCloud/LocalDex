@@ -202,6 +202,7 @@ fn model_provider_from_proto(
         project_id: provider.project_id,
         location: provider.location,
         include_internal_metadata: false,
+        provider: None,
     };
     Ok((id, info))
 }
@@ -239,6 +240,7 @@ fn model_provider_to_proto(
         include_internal_metadata: _,
         localdex_compatibility: _,
         capabilities: _,
+        provider: _,
     } = provider;
 
     proto::ModelProvider {
@@ -613,6 +615,7 @@ mod tests {
             project_id: None,
             location: None,
             include_internal_metadata: false,
+            provider: None,
         }
     }
 

@@ -77,6 +77,7 @@ async fn retries_on_early_close() {
         project_id: None,
         location: None,
         include_internal_metadata: false,
+        provider: None,
     };
 
     let TestCodex { codex, .. } = test_codex()

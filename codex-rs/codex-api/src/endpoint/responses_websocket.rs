@@ -1053,6 +1053,7 @@ mod tests {
     #[test]
     fn direct_serialization_preserves_websocket_request_payload() {
         let api_request = ResponsesApiRequest {
+            provider: None,
             model: "gpt-test".to_string(),
             max_output_tokens: Some(65_536),
             input: vec![ResponseItem::Message {
