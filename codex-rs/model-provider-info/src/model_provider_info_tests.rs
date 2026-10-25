@@ -1067,7 +1067,10 @@ allow_fallbacks = false
     .unwrap();
 
     let routing = provider.provider.expect("provider routing parsed");
-    assert_eq!(routing.only.as_deref(), Some(&["wafer/mxfp4".to_string()][..]));
+    assert_eq!(
+        routing.only.as_deref(),
+        Some(&["wafer/mxfp4".to_string()][..])
+    );
     assert_eq!(routing.allow_fallbacks, Some(false));
 }
 
@@ -1084,4 +1087,57 @@ oonly = ["wafer/mxfp4"]
     )
     .unwrap_err();
     assert!(err.to_string().contains("oonly"), "unexpected error: {err}");
+}
+
+#[test]
+fn test_openrouter_override_merges_onto_built_in() {
+    let configured: ModelProviderInfo = toml::from_str(
+        r#"
+[provider]
+only = ["wafer/mxfp4"]
+allow_fallbacks = false
+"#,
+    )
+    .unwrap();
+
+    let merged = merge_configured_model_providers(
+        built_in_model_providers(/*openai_base_url*/ None),
+        HashMap::from([(OPENROUTER_PROVIDER_ID.to_string(), configured)]),
+    )
+    .unwrap();
+    let provider = merged.get(OPENROUTER_PROVIDER_ID).unwrap();
+
+    // Built-in fields survive the override.
+    assert_eq!(provider.name, "OpenRouter");
+    assert_eq!(
+        provider.base_url.as_deref(),
+        Some("https://openrouter.ai/api/v1")
+    );
+    assert_eq!(provider.env_key.as_deref(), Some("OPENROUTER_API_KEY"));
+    let routing = provider.provider.as_ref().expect("provider routing merged");
+    assert_eq!(
+        routing.only.as_deref(),
+        Some(&["wafer/mxfp4".to_string()][..])
+    );
+    assert_eq!(routing.allow_fallbacks, Some(false));
+}
+
+#[test]
+fn test_openrouter_override_rejects_unsupported_fields() {
+    let configured: ModelProviderInfo = toml::from_str(
+        r#"
+requires_openai_auth = true
+"#,
+    )
+    .unwrap();
+
+    let err = merge_configured_model_providers(
+        built_in_model_providers(/*openai_base_url*/ None),
+        HashMap::from([(OPENROUTER_PROVIDER_ID.to_string(), configured)]),
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("only supports changing"),
+        "unexpected error: {err}"
+    );
 }

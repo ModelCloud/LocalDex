@@ -42,6 +42,7 @@ use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
 use codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
+use codex_model_provider_info::OPENROUTER_PROVIDER_ID;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_protocol::config_types::Personality;
@@ -65,11 +66,12 @@ use serde::Serialize;
 use serde::de::Error as SerdeError;
 use serde_json::Value as JsonValue;
 
-const RESERVED_MODEL_PROVIDER_IDS: [&str; 6] = [
+const RESERVED_MODEL_PROVIDER_IDS: [&str; 7] = [
     AMAZON_BEDROCK_PROVIDER_ID,
     AMAZON_BEDROCK_RUNTIME_PROVIDER_ID,
     GCP_PROVIDER_ID,
     OPENAI_PROVIDER_ID,
+    OPENROUTER_PROVIDER_ID,
     OLLAMA_OSS_PROVIDER_ID,
     LMSTUDIO_OSS_PROVIDER_ID,
 ];
@@ -942,7 +944,10 @@ pub fn validate_reserved_model_provider_ids(
         .filter(|key| {
             !matches!(
                 key.as_str(),
-                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID | GCP_PROVIDER_ID
+                AMAZON_BEDROCK_PROVIDER_ID
+                    | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID
+                    | GCP_PROVIDER_ID
+                    | OPENROUTER_PROVIDER_ID
             ) && RESERVED_MODEL_PROVIDER_IDS.contains(&key.as_str())
         })
         .map(|key| format!("`{key}`"))
@@ -979,7 +984,10 @@ pub fn validate_model_providers(
         }
         if !matches!(
             key.as_str(),
-            AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID | GCP_PROVIDER_ID
+            AMAZON_BEDROCK_PROVIDER_ID
+                | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID
+                | GCP_PROVIDER_ID
+                | OPENROUTER_PROVIDER_ID
         ) && provider.name.trim().is_empty()
         {
             return Err(format!(

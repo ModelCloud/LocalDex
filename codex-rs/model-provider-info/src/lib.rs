@@ -14,8 +14,8 @@ use codex_protocol::auth::AuthMode;
 use codex_protocol::config_types::ModelProviderAuthInfo;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::EnvVarError;
-use codex_protocol::openrouter::OpenRouterRouting;
 use codex_protocol::error::Result as CodexResult;
+use codex_protocol::openrouter::OpenRouterRouting;
 use codex_utils_redacted_string::RedactedString;
 use http::HeaderMap;
 use http::header::HeaderName;
@@ -952,6 +952,39 @@ pub fn merge_configured_model_providers(
                         .http_headers
                         .get_or_insert_default()
                         .extend(http_headers_override);
+                }
+            }
+        } else if key == OPENROUTER_PROVIDER_ID {
+            let provider_override = provider.provider.take();
+            let base_url_override = provider.base_url.take();
+            let auth_override = provider.auth.take();
+            let http_headers_override = provider.http_headers.take();
+            let env_key_override = provider.env_key.take();
+            if provider != ModelProviderInfo::default() {
+                return Err(format!(
+                    "model_providers.{OPENROUTER_PROVIDER_ID} only supports changing \
+`provider`, `base_url`, `auth`, `http_headers`, and `env_key`; other non-default provider fields are not supported"
+                ));
+            }
+
+            if let Some(built_in_provider) = model_providers.get_mut(OPENROUTER_PROVIDER_ID) {
+                if provider_override.is_some() {
+                    built_in_provider.provider = provider_override;
+                }
+                if let Some(base_url_override) = base_url_override {
+                    built_in_provider.base_url = Some(base_url_override);
+                }
+                if let Some(auth_override) = auth_override {
+                    built_in_provider.auth = Some(auth_override);
+                }
+                if let Some(http_headers_override) = http_headers_override {
+                    built_in_provider
+                        .http_headers
+                        .get_or_insert_default()
+                        .extend(http_headers_override);
+                }
+                if let Some(env_key_override) = env_key_override {
+                    built_in_provider.env_key = Some(env_key_override);
                 }
             }
         } else {
