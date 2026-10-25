@@ -98,6 +98,7 @@ pub(crate) fn request_body(request: &Value) -> Result<(Value, HashSet<String>), 
             .to_owned();
         match kind {
             "function" => {
+                custom.remove(&name);
                 let mut function = json!({"name":name,"parameters":tool["parameters"]});
                 for key in ["description", "strict"] {
                     if let Some(value) = tool.get(key) {
@@ -568,6 +569,43 @@ mod tests {
         let tools = body["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["function"]["description"], "newer");
+        Ok(())
+    }
+
+    #[test]
+    fn lithos_redefined_tool_kind_controls_response_decoding() -> Result<()> {
+        for (old_kind, new_kind) in [("custom", "function"), ("function", "custom")] {
+            let request = json!({
+                "input": [{"type":"additional_tools","tools":[
+                    {"type":old_kind,"name":"exec","parameters":{"type":"object"}}
+                ]}],
+                "tools": [{"type":new_kind,"name":"exec","parameters":{"type":"object"}}]
+            });
+            let (body, custom) = request_body(&request)?;
+            assert_eq!(body["tools"].as_array().unwrap().len(), 1);
+            assert_eq!(custom.contains("exec"), new_kind == "custom");
+            let arguments = if new_kind == "custom" {
+                r#"{"input":"echo hello"}"#
+            } else {
+                r#"{"command":"echo hello"}"#
+            };
+            let mut state = ChatState::default();
+            state.chunk(json!({"id":"chat","choices":[{
+                "index":0,"delta":{"tool_calls":[{
+                    "index":0,"id":"call_exec","function":{"name":"exec","arguments":arguments}
+                }]},"finish_reason":"tool_calls"
+            }]}))?;
+            let events = state.complete(&custom)?;
+            let expected = if new_kind == "custom" {
+                "custom_tool_call"
+            } else {
+                "function_call"
+            };
+            assert!(events.iter().any(|event| {
+                matches!(event, ResponseEvent::OutputItemDone(item)
+                    if serde_json::to_value(item).unwrap()["type"] == expected)
+            }));
+        }
         Ok(())
     }
 

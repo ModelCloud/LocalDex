@@ -126,6 +126,11 @@ trying again; increasing connection retries will not raise the output budget.
 
 ### Switching models and providers
 
+In `/model`, DeepSeek v4.1 Flash appears once. Select its provider (Local,
+OpenRouter, or LithosAI), then a variant when available (LithosAI Regular,
+Fast, or Ultra), and finally the reasoning effort. Models available from only
+one provider stay in the flat list.
+
 The model picker routes the bundled OpenAI, MultiDex, OpenRouter, and Lithos
 models to their providers without discarding conversation history. The selected
 model's context budget applies to the next turn. Moving to a smaller window can
