@@ -321,18 +321,38 @@ async fn failed_multidex_compaction_retries_on_next_user_prompt() -> Result<()> 
     Ok(())
 }
 
-#[test_case::test_case("openai", "multidex", "gpt-5.5", "DS v4.1 Flash 1017"; "openai_to_multidex")]
-#[test_case::test_case("multidex", "openai", "DS v4.1 Flash 1017", "gpt-5.5"; "multidex_to_openai")]
-#[test_case::test_case("omnigent-multidex-test", "openai", "DS v4.1 Flash 1017", "gpt-5.5"; "namespaced_multidex_to_openai")]
-#[test_case::test_case("custom", "multidex", "custom/old", "DS v4.1 Flash 1017"; "custom_to_multidex")]
-#[test_case::test_case("openai", "custom", "gpt-5.5", "custom/next"; "openai_to_custom")]
+#[derive(Clone, Copy, Debug)]
+enum ProviderSwitch {
+    HashChange,
+    Downshift,
+    Upshift,
+}
+
+#[test_case::test_matrix(
+    [
+        ("openai", "multidex", "gpt-5.5", "DS v4.1 Flash 1017"),
+        ("multidex", "openai", "DS v4.1 Flash 1017", "gpt-5.5"),
+        ("omnigent-multidex-test", "openai", "DS v4.1 Flash 1017", "gpt-5.5"),
+        ("custom", "multidex", "custom/old", "DS v4.1 Flash 1017"),
+        ("openai", "custom", "gpt-5.5", "custom/next"),
+        ("openai", "openrouter", "gpt-5.5", "deepseek/deepseek-v4.1-flash-1017"),
+        ("openrouter", "openai", "deepseek/deepseek-v4.1-flash-1017", "gpt-5.5"),
+        ("multidex", "openrouter", "DS v4.1 Flash 1017", "deepseek/deepseek-v4.1-flash-1017"),
+        ("openrouter", "multidex", "deepseek/deepseek-v4.1-flash-1017", "DS v4.1 Flash 1017"),
+    ],
+    [ProviderSwitch::HashChange, ProviderSwitch::Downshift, ProviderSwitch::Upshift]
+)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn previous_model_compaction_keeps_its_provider(
-    old_id: &str,
-    next_id: &str,
-    old_model: &str,
-    next_model: &str,
+    (old_id, next_id, old_model, next_model): (&str, &str, &str, &str),
+    switch: ProviderSwitch,
 ) -> Result<()> {
+    let should_compact = !matches!(switch, ProviderSwitch::Upshift);
+    let next_window = match switch {
+        ProviderSwitch::HashChange => 273_000,
+        ProviderSwitch::Downshift => 125_000,
+        ProviderSwitch::Upshift => 512_000,
+    };
     let old_server = MockServer::start().await;
     let next_server = MockServer::start().await;
     let decoy_server = MockServer::start().await;
@@ -356,8 +376,15 @@ async fn previous_model_compaction_keeps_its_provider(
     ]);
     configured.insert(old_id.to_string(), make_provider(old_id, &old_server));
     configured.insert(next_id.to_string(), make_provider(next_id, &next_server));
-    let providers = merge_configured_model_providers(Default::default(), configured)
+    let openrouter_override = configured.remove("openrouter");
+    let mut providers = merge_configured_model_providers(Default::default(), configured)
         .expect("provider normalization");
+    if let Some(endpoint) = openrouter_override {
+        let mut provider = ModelProviderInfo::create_openrouter_provider();
+        provider.base_url = endpoint.base_url;
+        provider.env_key = None;
+        providers.insert("openrouter".to_string(), provider);
+    }
     // Hash transitions may legitimately increase short histories.
     let compact_response = if old_id == "openai" {
         remote_v2_compaction_response()
@@ -367,17 +394,14 @@ async fn previous_model_compaction_keeps_its_provider(
             ev_completed_with_tokens("r2", 10),
         ])
     };
-    let old_mock = mount_sse_sequence(
-        &old_server,
-        vec![
-            sse(vec![
-                ev_assistant_message("answer", "Short answer"),
-                ev_completed_with_tokens("r1", 150),
-            ]),
-            compact_response,
-        ],
-    )
-    .await;
+    let mut old_responses = vec![sse(vec![
+        ev_assistant_message("answer", "Short answer"),
+        ev_completed_with_tokens("r1", 150_000),
+    ])];
+    if should_compact {
+        old_responses.push(compact_response);
+    }
+    let old_mock = mount_sse_sequence(&old_server, old_responses).await;
     let next_mock = mount_sse_sequence(
         &next_server,
         vec![sse(vec![
@@ -392,10 +416,23 @@ async fn previous_model_compaction_keeps_its_provider(
         .with_model_info_override(old_model, |info| {
             info.comp_hash = Some("old-hash".to_string());
             info.context_window = Some(273_000);
+            info.max_context_window = Some(273_000);
+            info.auto_compact_token_limit = None;
+            info.effective_context_window_percent = 100;
         })
-        .with_model_info_override(next_model, |info| {
-            info.comp_hash = Some("next-hash".to_string());
-            info.context_window = Some(273_000);
+        .with_model_info_override(next_model, move |info| {
+            info.comp_hash = Some(
+                if matches!(switch, ProviderSwitch::HashChange) {
+                    "next-hash"
+                } else {
+                    "old-hash"
+                }
+                .to_string(),
+            );
+            info.context_window = Some(next_window);
+            info.max_context_window = Some(next_window);
+            info.auto_compact_token_limit = None;
+            info.effective_context_window_percent = 100;
         })
         .with_model(old_model)
         .with_config(move |config| {
@@ -408,6 +445,7 @@ async fn previous_model_compaction_keeps_its_provider(
         })
         .build_with_auto_env(&old_server)
         .await?;
+    let reported_context_window = std::cell::Cell::new(None);
     for (index, model) in [old_model, next_model].into_iter().enumerate() {
         let mut request = TurnInputRequest::user_input(vec![UserInput::Text {
             text: "Answer using the selected model".to_string(),
@@ -422,18 +460,25 @@ async fn previous_model_compaction_keeps_its_provider(
         }
         test.codex.start_or_steer_turn(request).await?;
         let completed = wait_for_event_match(&test.codex, |event| match event {
+            EventMsg::TokenCount(event) => {
+                if let Some(info) = &event.info {
+                    reported_context_window.set(info.model_context_window);
+                }
+                None
+            }
             EventMsg::TurnComplete(completed) => Some(completed.clone()),
             _ => None,
         })
         .await;
         assert_eq!(completed.error, None, "turn for {model} failed");
     }
+    assert_eq!(reported_context_window.get(), Some(next_window));
     let old_requests = old_mock.requests();
     let next_requests = next_mock.requests();
     assert_eq!(
         old_requests.len(),
-        2,
-        "old provider receives sampling and compaction"
+        if should_compact { 2 } else { 1 },
+        "only downshifts or hash boundaries require old-provider compaction"
     );
     assert_eq!(
         next_requests.len(),
@@ -445,6 +490,23 @@ async fn previous_model_compaction_keeps_its_provider(
         assert_eq!(request.body_json()["model"], old_model);
     }
     assert_eq!(next_requests[0].body_json()["model"], next_model);
+    assert!(
+        next_requests[0]
+            .body_json()
+            .get("previous_response_id")
+            .is_none(),
+        "response IDs must not cross providers"
+    );
+    let history = next_requests[0].body_json().to_string();
+    assert!(history.contains(if should_compact {
+        if old_id == "openai" {
+            REMOTE_V2_SUMMARY
+        } else {
+            "Expanded transition summary."
+        }
+    } else {
+        "Short answer"
+    }));
     for (id, requests) in [(old_id, &old_requests), (next_id, &next_requests)] {
         if codex_model_provider_info::is_multidex_provider_id(id) {
             assert!(
@@ -465,15 +527,33 @@ async fn previous_model_compaction_keeps_its_provider(
     Ok(())
 }
 
+#[test_case::test_matrix(
+    [
+        ("gpt-5.5", "DS v4.1 Flash 1017", "multidex"),
+        ("deepseek-ai/DeepSeek-V4.1-Flash", "gpt-5.5", "openai"),
+        ("deepseek-ai/DeepSeek-V4.1-Flash-fast", "gpt-5.5", "openai"),
+        ("deepseek-ai/DeepSeek-V4.1-Flash-ultra", "gpt-5.5", "openai"),
+    ],
+    [ProviderSwitch::HashChange, ProviderSwitch::Downshift]
+)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cold_resume_hash_change_compacts_with_current_provider_below_budget() -> Result<()> {
+async fn cold_resume_compacts_with_current_provider(
+    (old_model, next_model, next_id): (&str, &str, &str),
+    switch: ProviderSwitch,
+) -> Result<()> {
+    let hash_change = matches!(switch, ProviderSwitch::HashChange);
+    let old_answer = if hash_change {
+        "Short answer".to_string()
+    } else {
+        "Original answer. ".repeat(40_000)
+    };
     let old_server = MockServer::start().await;
     let current_server = MockServer::start().await;
     let old_mock = mount_sse_sequence(
         &old_server,
         vec![sse(vec![
-            ev_assistant_message("old-answer", "Short answer"),
-            ev_completed_with_tokens("r1", 100),
+            ev_assistant_message("old-answer", &old_answer),
+            ev_completed_with_tokens("r1", if hash_change { 100 } else { 150_000 }),
         ])],
     )
     .await;
@@ -494,28 +574,42 @@ async fn cold_resume_hash_change_compacts_with_current_provider_below_budget() -
     let mut providers = merge_configured_model_providers(
         Default::default(),
         std::collections::HashMap::from([(
-            MULTIDEX_PROVIDER_ID.to_string(),
+            next_id.to_string(),
             create_oss_provider_with_base_url(
                 &format!("{}/v1", current_server.uri()),
                 WireApi::Responses,
             ),
         )]),
     )
-    .expect("MultiDex normalization");
-    let local_provider = providers.remove(MULTIDEX_PROVIDER_ID).unwrap();
+    .expect("provider normalization");
+    let mut next_provider = providers.remove(next_id).unwrap();
+    next_provider
+        .capabilities
+        .get_or_insert_with(Default::default)
+        .remote_compaction = Some(codex_model_provider_info::RemoteCompactionSupport::Unsupported);
     let mut initial_builder = test_codex()
-        .with_model_info_override("gpt-5.5", |info| {
+        .with_model_info_override(old_model, |info| {
             info.comp_hash = Some("old-hash".to_string());
+            info.context_window = Some(273_000);
+            info.max_context_window = Some(273_000);
+            info.auto_compact_token_limit = None;
+            info.effective_context_window_percent = 100;
         })
-        .with_model_info_override("DS v4.1 Flash 1017", |info| {
-            info.comp_hash = Some("new-hash".to_string());
+        .with_model_info_override(next_model, move |info| {
+            info.comp_hash = Some(if hash_change { "new-hash" } else { "old-hash" }.to_string());
+            info.context_window = Some(125_000);
+            info.max_context_window = Some(125_000);
+            info.auto_compact_token_limit = None;
+            info.effective_context_window_percent = 100;
         })
-        .with_model("gpt-5.5")
+        .with_model(old_model)
         .with_config(|config| {
             config.model_post_turn_compact_threshold_percent = 0;
         });
     let initial = initial_builder.build_with_auto_env(&old_server).await?;
-    initial.submit_turn("First answer").await?;
+    initial.submit_text_turn("First answer").await?;
+    assert_eq!(old_mock.requests().len(), 1);
+    assert_eq!(old_mock.requests()[0].body_json()["model"], old_model);
     let rollout_path = initial
         .session_configured
         .rollout_path
@@ -523,21 +617,19 @@ async fn cold_resume_hash_change_compacts_with_current_provider_below_budget() -
         .expect("rollout path");
     initial.codex.shutdown_and_wait().await?;
     let catalog = initial.config.model_catalog.clone();
-    let mut resumed_builder =
-        test_codex()
-            .with_model("DS v4.1 Flash 1017")
-            .with_config(move |config| {
-                config.model_catalog = catalog;
-                config.model_provider_id = MULTIDEX_PROVIDER_ID.to_string();
-                config.model_provider = local_provider.clone();
-                config
-                    .model_providers
-                    .insert(MULTIDEX_PROVIDER_ID.to_string(), local_provider);
-                config.model_post_turn_compact_threshold_percent = 0;
-                config.model_auto_compact_token_limit = Some(100_000);
-                let _ = config.features.disable(Feature::TokenBudget);
-                set_test_compact_prompt(config);
-            });
+    let next_id = next_id.to_string();
+    let mut resumed_builder = test_codex()
+        .with_model(next_model)
+        .with_config(move |config| {
+            config.model_catalog = catalog;
+            config.model_provider_id = next_id.clone();
+            config.model_provider = next_provider.clone();
+            config.model_providers.insert(next_id, next_provider);
+            config.model_post_turn_compact_threshold_percent = 0;
+            config.model_auto_compact_token_limit = Some(100_000);
+            let _ = config.features.disable(Feature::TokenBudget);
+            set_test_compact_prompt(config);
+        });
     let resumed = resumed_builder
         .resume(&current_server, initial.home.clone(), rollout_path)
         .await?;
@@ -563,12 +655,12 @@ async fn cold_resume_hash_change_compacts_with_current_provider_below_budget() -
     assert_eq!(
         requests.len(),
         2,
-        "hash boundary requires compaction even at only 100 tokens"
+        "hash boundaries and context downshifts require compaction after resume"
     );
     assert!(
         requests
             .iter()
-            .all(|request| request.body_json()["model"] == "DS v4.1 Flash 1017")
+            .all(|request| request.body_json()["model"] == next_model)
     );
     assert!(
         requests

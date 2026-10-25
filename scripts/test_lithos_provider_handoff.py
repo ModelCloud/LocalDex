@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise one live app-server thread across three loopback providers.
+"""Exercise one live app-server thread across four loopback providers.
 
 Uses fake credentials and mock HTTP endpoints. Run with --binary /path/to/codex.
 The separate opt-in live provider tests use the user's private environment key.
@@ -9,13 +9,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import queue
 import subprocess
 import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 
 def main() -> None:
@@ -23,7 +23,7 @@ def main() -> None:
     parser.add_argument("--binary", required=True)
     args = parser.parse_args()
     requests: list[tuple[str, dict]] = []
-    tokens = {"openai": "test-only-openai", "multidex": "test-only-local", "lithos": "test-only-lithos"}
+    tokens = {"openai": "test-only-openai", "multidex": "test-only-local", "lithos": "test-only-lithos", "openrouter": "test-only-openrouter"}
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -48,6 +48,9 @@ def main() -> None:
                 wire = "".join("data: " + json.dumps(event) + "\n\n" for event in events) + "data: [DONE]\n\n"
             else:
                 assert self.path.endswith("/responses"), self.path
+                assert "ORCHID" in json.dumps(body["input"]), "conversation history was lost"
+                if provider == "openrouter":
+                    assert body["provider"] == {"only": ["wafer/mxfp4"], "allow_fallbacks": False}
                 if provider == "openai":
                     assert not any(item.get("type") == "reasoning" and item.get("content") for item in body["input"]), "plaintext reasoning reached OpenAI"
                 text = "OPENAI_OK" if provider == "openai" else "LOCAL_OK"
@@ -83,10 +86,16 @@ requires_openai_auth = false
 [model_providers.lithos]
 base_url = "{base}/lithos/v1"
 env_key = "LITHOS_API_KEY"
+[model_providers.openrouter]
+base_url = "{base}/openrouter/v1"
+env_key = "OPENROUTER_API_KEY"
+[model_providers.openrouter.provider]
+only = ["wafer/mxfp4"]
+allow_fallbacks = false
 ''')
         (home / "auth.json").write_text(json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": tokens["openai"]}))
         (home / "auth.json").chmod(0o600)
-        env = {**os.environ, "CODEX_HOME": str(home), "CODEX_DISABLE_CLOUD_CONFIG": "1", "OPENAI_API_KEY": tokens["openai"], "CODEX_API_KEY": tokens["openai"], "MULTIDEX_API_KEY": tokens["multidex"], "LITHOS_API_KEY": tokens["lithos"]}
+        env = {**os.environ, "CODEX_HOME": str(home), "CODEX_DISABLE_CLOUD_CONFIG": "1", "OPENAI_API_KEY": tokens["openai"], "CODEX_API_KEY": tokens["openai"], "MULTIDEX_API_KEY": tokens["multidex"], "LITHOS_API_KEY": tokens["lithos"], "OPENROUTER_API_KEY": tokens["openrouter"]}
         with (root / "stderr.log").open("w") as stderr:
             process = subprocess.Popen([args.binary, "app-server", "--stdio"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr, text=True, env=env)
             events: queue.Queue = queue.Queue()
@@ -100,6 +109,7 @@ env_key = "LITHOS_API_KEY"
 
             threading.Thread(target=reader, daemon=True).start()
             sequence = 0
+            context_windows: list[int] = []
 
             def receive(predicate, seconds=40):
                 deadline = time.monotonic() + seconds
@@ -109,6 +119,8 @@ env_key = "LITHOS_API_KEY"
                         raise AssertionError("app-server emitted invalid JSON")
                     if event.get("method") == "error":
                         raise AssertionError(event)
+                    if event.get("method") == "thread/tokenUsage/updated":
+                        context_windows.append(event["params"]["tokenUsage"]["modelContextWindow"])
                     if predicate(event):
                         return event
                 raise TimeoutError("app-server response timed out")
@@ -128,28 +140,45 @@ env_key = "LITHOS_API_KEY"
                 process.stdin.flush()
                 started = rpc("thread/start", {"model": "gpt-5.6-sol", "modelProvider": "openai", "cwd": str(root), "approvalPolicy": "never", "sandbox": "workspace-write"})
                 thread_id = started["thread"]["id"]
+                local_windows = iter((131_072, 524_288))
                 for provider, model, prompt in [
                     ("openai", "gpt-5.6-sol", "The original secret word is ORCHID. Acknowledge only."),
                     ("lithos", "deepseek-ai/DeepSeek-V4.1-Flash", "What was the original secret word? Reply only that word."),
                     ("multidex", "DS v4.1 Flash 1017", "Keep the original secret word. Acknowledge only."),
+                    ("openrouter", "deepseek/deepseek-v4.1-flash-1017", "What was the original secret word? Reply only that word."),
                     ("lithos", "deepseek-ai/DeepSeek-V4.1-Flash-ultra", "What was the original secret word? Reply only that word."),
                     ("openai", "gpt-5.6-sol", "Keep the original secret word. Acknowledge only."),
+                    ("openrouter", "deepseek/deepseek-v4.1-flash-1017", "What was the original secret word? Reply only that word."),
+                    ("multidex", "DS v4.1 Flash 1017", "Keep the original secret word. Acknowledge only."),
+                    ("openai", "gpt-5.6-sol", "Keep the original secret word. Acknowledge only."),
                 ]:
+                    expected_window = {"openrouter": 262_144, "lithos": 1_000_000}.get(provider)
+                    if provider == "multidex":
+                        expected_window = next(local_windows)
+                        (home / "multidex-runtime-capabilities.json").write_text(json.dumps({
+                            "model": model, "context_window": expected_window,
+                            "max_prompt_tokens": expected_window - 2,
+                        }))
                     if provider != "openai" or requests:
                         # Model-only selection must infer the provider, as /model does.
                         rpc("thread/settings/update", {"threadId": thread_id, "model": model, "effort": "high", "serviceTier": "default"})
                     before = len(requests)
+                    usage_before = len(context_windows)
                     rpc("turn/start", {"threadId": thread_id, "input": [{"type": "text", "text": prompt, "text_elements": []}]})
                     completed = receive(lambda event: event.get("method") == "turn/completed")
                     assert completed["params"]["turn"]["status"] == "completed", completed
                     assert len(requests) > before
                     assert all(path.startswith("/" + provider + "/") and body["model"] == model for path, body in requests[before:])
-                    print("PASS", provider, model, flush=True)
+                    assert len(context_windows) > usage_before, "missing context budget notification"
+                    assert context_windows[-1] > 0
+                    if expected_window is not None:
+                        assert context_windows[-1] == expected_window, (provider, context_windows[-1], expected_window)
+                    print("PASS", provider, model, "context:", context_windows[-1], flush=True)
             finally:
                 process.terminate()
                 process.wait(timeout=10)
                 server.shutdown()
-    print("PASS: one thread, five turns, provider credentials/endpoints and history preserved")
+    print("PASS: one thread, nine turns, provider credentials/endpoints and history preserved")
 
 
 if __name__ == "__main__":
