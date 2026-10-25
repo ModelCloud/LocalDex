@@ -254,8 +254,8 @@ fn openrouter_dsv41_flash_model_info() -> ModelInfo {
         OPENROUTER_DSV41_FLASH,
         "DS v4.1 Flash 1017 (OpenRouter)",
         "DS v4.1 Flash 1017 coding model served through OpenRouter.",
-        // Verified reasoning effort on OpenRouter's Responses endpoint.
-        /*default_reasoning_level*/ ReasoningEffort::High,
+        // Matches the LocalDex Lite entry's default reasoning effort.
+        /*default_reasoning_level*/ ReasoningEffort::Max,
         // OpenRouter normalizes reasoning into a distinct stream rather than
         // mirroring raw thinking text, so the summary parameter is safe.
         /*supports_reasoning_summary_parameter*/ true,

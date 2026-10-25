@@ -311,7 +311,7 @@ fn dsv41_flash_uses_deepseek_harness_prompt() {
     }
     assert_eq!(openrouter.slug, "deepseek/deepseek-v4.1-flash-1017");
     assert_eq!(openrouter.context_window, Some(262_144));
-    assert_eq!(openrouter.default_reasoning_level, Some(ReasoningEffort::High));
+    assert_eq!(openrouter.default_reasoning_level, Some(ReasoningEffort::Max));
     assert!(openrouter.supports_reasoning_summary_parameter);
     assert_eq!(openrouter.visibility, ModelVisibility::List);
     assert!(
