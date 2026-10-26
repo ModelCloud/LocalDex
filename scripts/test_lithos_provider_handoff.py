@@ -100,22 +100,22 @@ service_tier = "default"
 [model_providers.multidex]
 name = "MultiDex"
 base_url = "{base}/multidex/v1"
-env_key = "MULTIDEX_API_KEY"
+experimental_bearer_token = "{tokens[multidex]}"
 wire_api = "responses"
 requires_openai_auth = false
 [model_providers.lithos]
 base_url = "{base}/lithos/v1"
-env_key = "LITHOS_API_KEY"
+experimental_bearer_token = "{tokens[lithos]}"
 [model_providers.openrouter]
 base_url = "{base}/openrouter/v1"
-env_key = "OPENROUTER_API_KEY"
+experimental_bearer_token = "{tokens[openrouter]}"
 [model_providers.openrouter.provider]
 only = ["wafer/mxfp4"]
 allow_fallbacks = false
 ''')
         (home / "auth.json").write_text(json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": tokens["openai"]}))
         (home / "auth.json").chmod(0o600)
-        env = {**os.environ, "CODEX_HOME": str(home), "CODEX_DISABLE_CLOUD_CONFIG": "1", "OPENAI_API_KEY": tokens["openai"], "CODEX_API_KEY": tokens["openai"], "MULTIDEX_API_KEY": tokens["multidex"], "LITHOS_API_KEY": tokens["lithos"], "OPENROUTER_API_KEY": tokens["openrouter"]}
+        env = {**os.environ, "CODEX_HOME": str(home), "CODEX_DISABLE_CLOUD_CONFIG": "1", "OPENAI_API_KEY": tokens["openai"], "CODEX_API_KEY": tokens["openai"], "MULTIDEX_API_KEY": "", "LITHOS_API_KEY": "", "OPENROUTER_API_KEY": ""}
         with (root / "stderr.log").open("w") as stderr:
             process = subprocess.Popen([args.binary, "app-server", "--stdio"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr, text=True, env=env)
             events: queue.Queue = queue.Queue()

@@ -39,7 +39,8 @@ ln -sfn "$CODEX_HOME_DIR/packages/standalone/releases/<previous-release>" \
 
 ### Configure named OpenAI-compatible providers
 
-OpenRouter is built in: set `OPENROUTER_API_KEY` locally and select
+OpenRouter is built in: set `experimental_bearer_token` under
+`[model_providers.openrouter]` in `CODEX_HOME/config.toml` and select
 `deepseek/deepseek-v4.1-flash-1017`. See [OpenRouter configuration](docs/config.md#multidex-providers)
 for Wafer-only routing. Both the local and OpenRouter DS v4.1 Flash entries
 default to Max reasoning and use the DeepSeek Harness prompt adapted to MultiDex's tools.

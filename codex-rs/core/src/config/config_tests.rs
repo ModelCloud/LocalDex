@@ -1283,8 +1283,8 @@ allow_fallbacks = false
         assert_eq!(config.model_provider_id, expected_provider, "{model}");
         if expected_provider == "openrouter" {
             assert_eq!(
-                config.model_provider.env_key.as_deref(),
-                Some("OPENROUTER_API_KEY")
+                config.model_provider.env_key, None,
+                "openrouter credentials come from config.toml"
             );
             assert_eq!(
                 config
