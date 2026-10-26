@@ -201,6 +201,7 @@ fn model_provider_from_proto(
         capabilities: None,
         project_id: provider.project_id,
         location: provider.location,
+        credential_file: provider.credential_file.map(Into::into),
         include_internal_metadata: false,
         provider: None,
     };
@@ -238,6 +239,7 @@ fn model_provider_to_proto(
         supports_responses_continuation,
         supports_standalone_web_search,
         include_internal_metadata: _,
+        credential_file,
         multidex_compatibility: _,
         capabilities: _,
         provider: _,
@@ -248,6 +250,7 @@ fn model_provider_to_proto(
         name,
         base_url,
         model_catalog_url: model_catalog_url.map(RedactedString::into_inner),
+        credential_file: credential_file.map(|path| path.to_string_lossy().into_owned()),
         env_key,
         env_key_instructions,
         experimental_bearer_token: experimental_bearer_token.map(RedactedString::into_inner),
@@ -464,6 +467,7 @@ mod tests {
         expected.supports_responses_continuation = true;
         expected.project_id = Some("vertex-project".to_string());
         expected.location = Some("us-central1".to_string());
+        expected.credential_file = Some(workspace_dir().join("adc.json").into_path_buf());
         expected.auth = None;
         expected.experimental_bearer_token = Some("synthetic-provider-token".into());
         let proto = model_provider_to_proto("local", expected.clone());
@@ -505,6 +509,7 @@ mod tests {
                             model_catalog_url: Some(
                                 "http://127.0.0.1:8061/api/codex/models".to_string(),
                             ),
+                            credential_file: None,
                             env_key: None,
                             env_key_instructions: None,
                             experimental_bearer_token: None,
@@ -614,6 +619,7 @@ mod tests {
             capabilities: None,
             project_id: None,
             location: None,
+            credential_file: None,
             include_internal_metadata: false,
             provider: None,
         }

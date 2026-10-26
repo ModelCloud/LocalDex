@@ -31,7 +31,12 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+      - name: Read repository Rust toolchain
+        id: rust-toolchain
+        run: python3 -c 'import tomllib; print("channel=" + tomllib.load(open("codex-rs/rust-toolchain.toml", "rb"))["toolchain"]["channel"])' >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+        with:
+          toolchain: ${{ steps.rust-toolchain.outputs.channel }}
       - name: Configure V8 sandbox artifacts
         uses: ./.github/actions/setup-rusty-v8
         with:

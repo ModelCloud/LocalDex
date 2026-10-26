@@ -16,7 +16,7 @@ use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCNotification;
 use codex_app_server_protocol::RequestId;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnStartParams;
@@ -26,6 +26,7 @@ use codex_app_server_protocol::TurnSteerResponse;
 use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
 use core_test_support::skip_if_remote;
+use pretty_assertions::assert_eq;
 use serde_json::Value;
 use std::collections::HashMap;
 use tempfile::TempDir;
@@ -98,6 +99,41 @@ async fn turn_steer_requires_active_turn() -> Result<()> {
         serde_json::Value::Null
     );
     assert_eq!(event["event_params"]["rejection_reason"], "no_active_turn");
+
+    let malformed_request = mcp
+        .send_turn_steer_request(TurnSteerParams {
+            thread_id: thread.id,
+            client_user_message_id: None,
+            input: vec![V2UserInput::Text {
+                text: "rejected input".to_owned(),
+                text_elements: Vec::new(),
+            }],
+            responsesapi_client_metadata: None,
+            responsesapi_client_metadata_patch: None,
+            additional_context: Some(HashMap::from([(
+                "browser_info".to_owned(),
+                AdditionalContextEntry {
+                    value: "rejected context".to_owned(),
+                    kind: AdditionalContextKind::Untrusted,
+                    name: Some("agent.browser".to_owned()),
+                },
+            )])),
+            expected_turn_id: "turn-does-not-exist".to_owned(),
+        })
+        .await?;
+    let error = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(malformed_request)),
+    )
+    .await??;
+    assert_eq!(
+        error.error,
+        codex_app_server_protocol::JSONRPCErrorError {
+            code: -32600,
+            message: "additional context name must match [a-z][a-z0-9_]{0,63}".to_owned(),
+            data: None,
+        }
+    );
 
     Ok(())
 }
@@ -318,9 +354,9 @@ async fn turn_steer_returns_active_turn_id() -> Result<()> {
             let params = notification.params.expect("item/started params");
             let item_started: ItemStartedNotification =
                 serde_json::from_value(params).expect("deserialize item/started notification");
-            let ThreadItem::UserMessage {
+            let ThreadItemPayload::UserMessage {
                 client_id, content, ..
-            } = item_started.item
+            } = item_started.item.payload
             else {
                 continue;
             };
@@ -430,6 +466,7 @@ async fn turn_steer_rejects_context_only_input_without_merging_context() -> Resu
         AdditionalContextEntry {
             value: "tab one".to_string(),
             kind: AdditionalContextKind::Untrusted,
+            name: None,
         },
     )]));
     let steer_req = mcp
