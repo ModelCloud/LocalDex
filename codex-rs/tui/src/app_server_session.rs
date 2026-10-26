@@ -2464,6 +2464,7 @@ async fn started_thread_from_start_response(
                     .unwrap_or(codex_protocol::config_types::ReasoningSummary::None),
             ),
             ThreadParamsMode::Remote => config.model_reasoning_summary,
+            ThreadParamsMode::Cloud => None,
         },
     })
 }
