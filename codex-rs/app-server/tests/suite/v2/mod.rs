@@ -48,6 +48,8 @@ mod connection_handling_websocket;
 mod connection_handling_websocket_compression;
 #[cfg(unix)]
 mod connection_handling_websocket_unix;
+#[path = "critical_path_analytics_tests.rs"]
+mod critical_path_analytics;
 #[cfg(unix)]
 mod curated_mcp_sync;
 mod current_time;
@@ -85,6 +87,7 @@ mod luna_reserve;
 mod marketplace_add;
 mod marketplace_remove;
 mod marketplace_upgrade;
+mod mcp_connection_sharing;
 mod mcp_event_stream;
 mod mcp_protocol_default;
 mod mcp_resource;

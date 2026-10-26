@@ -978,6 +978,9 @@
             "credential_masking": {
               "type": "boolean"
             },
+            "critical_path_timing": {
+              "type": "boolean"
+            },
             "current_time_reminder": {
               "$ref": "#/definitions/FeatureToml_for_CurrentTimeReminderConfigToml"
             },
@@ -1138,6 +1141,9 @@
               "type": "boolean"
             },
             "mcp_2026_07_28": {
+              "type": "boolean"
+            },
+            "mcp_connection_sharing": {
               "type": "boolean"
             },
             "mcp_oauth_refresh_coordination": {
@@ -1390,6 +1396,9 @@
               "type": "boolean"
             },
             "unified_image_budget": {
+              "type": "boolean"
+            },
+            "untrusted_as_tool_output": {
               "type": "boolean"
             },
             "use_agent_identity": {
@@ -7667,6 +7676,9 @@
         "credential_masking": {
           "type": "boolean"
         },
+        "critical_path_timing": {
+          "type": "boolean"
+        },
         "current_time_reminder": {
           "$ref": "#/definitions/FeatureToml_for_CurrentTimeReminderConfigToml"
         },
@@ -7827,6 +7839,9 @@
           "type": "boolean"
         },
         "mcp_2026_07_28": {
+          "type": "boolean"
+        },
+        "mcp_connection_sharing": {
           "type": "boolean"
         },
         "mcp_oauth_refresh_coordination": {
@@ -8079,6 +8094,9 @@
           "type": "boolean"
         },
         "unified_image_budget": {
+          "type": "boolean"
+        },
+        "untrusted_as_tool_output": {
           "type": "boolean"
         },
         "use_agent_identity": {

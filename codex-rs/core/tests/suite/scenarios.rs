@@ -152,6 +152,9 @@ mod mcp_resource_messages;
 #[path = "scenarios_mcp_ema.rs"]
 mod mcp_ema;
 
+#[path = "scenarios_mcp_sharing.rs"]
+mod mcp_sharing;
+
 #[path = "scenarios_guardian_agent_messages_tests.rs"]
 mod guardian_agent_messages;
 
@@ -1409,7 +1412,8 @@ async fn skill_read_recovers_omitted_installation_and_reads_selected_environment
         }
     }
 
-    let executor = core_test_support::exec_server::ExecServerProcess::start().await?;
+    let executor =
+        core_test_support::exec_server::ExecServerProcess::start_with_version("0.164.0").await?;
     // Keep byte-budget decisions stable across host temporary-directory lengths.
     let temp_root = fs::canonicalize(std::env::temp_dir())?;
     let workspace = tempfile::Builder::new()

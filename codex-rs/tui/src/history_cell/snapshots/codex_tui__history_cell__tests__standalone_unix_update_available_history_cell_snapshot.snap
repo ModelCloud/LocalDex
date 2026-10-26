@@ -1,13 +1,12 @@
 ---
 source: tui/src/history_cell/tests.rs
-assertion_line: 1379
 expression: rendered
 ---
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ ✨ Update available! 0.164.0 -> 9.9.9                                                                      │
-│ Run sh -c 'curl -fsSL                                                                                      │
-│ https://raw.githubusercontent.com/ModelCloud/MultiDex/main/scripts/install/install-multidex.sh | sh' to    │
-│ update.                                                                                                    │
+│ Run sh -c 's=$(curl -fsSL                                                                                  │
+│ https://raw.githubusercontent.com/ModelCloud/MultiDex/main/scripts/install/install-multidex.sh) && sh -c   │
+│ "$s"' to update.                                                                                           │
 │                                                                                                            │
 │ See full release notes:                                                                                    │
 │ https://github.com/ModelCloud/MultiDex/releases                                                            │
