@@ -99,7 +99,7 @@ impl ModelProvider for GcpModelProvider {
     }
 
     fn memory_consolidation_preferred_model(&self) -> &'static str {
-        "gpt-6.1-sol"
+        "gpt-6.1-terra"
     }
 
     fn auth_manager(&self) -> Option<Arc<AuthManager>> {
@@ -156,7 +156,7 @@ impl ModelProvider for GcpModelProvider {
         model_catalog.models.retain(|model| {
             matches!(
                 model.slug.as_str(),
-                "gpt-6-astra" | "gpt-6-luna" | "gpt-6.1-sol"
+                "gpt-6-astra" | "gpt-6-luna" | "gpt-6.1-sol" | "gpt-6.1-terra"
             )
         });
         // Vertex supports function tools, namespaces, and client-side tool search, but not
