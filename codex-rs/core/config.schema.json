@@ -1197,6 +1197,9 @@
             "personality": {
               "type": "boolean"
             },
+            "plugin_discovery_prefetch": {
+              "type": "boolean"
+            },
             "plugin_hooks": {
               "type": "boolean"
             },
@@ -5234,6 +5237,7 @@
               "open_external_editor": null,
               "open_transcript": null,
               "queue": null,
+              "select_transcript": null,
               "submit": null,
               "toggle_fast_mode": null,
               "toggle_raw_output": null,
@@ -6094,6 +6098,14 @@
           ],
           "description": "Queue the current composer draft while a task is running."
         },
+        "select_transcript": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Enter keyboard selection mode for the transcript."
+        },
         "submit": {
           "allOf": [
             {
@@ -6263,6 +6275,7 @@
             "open_external_editor": null,
             "open_transcript": null,
             "queue": null,
+            "select_transcript": null,
             "submit": null,
             "toggle_fast_mode": null,
             "toggle_raw_output": null,
@@ -7895,6 +7908,9 @@
         "personality": {
           "type": "boolean"
         },
+        "plugin_discovery_prefetch": {
+          "type": "boolean"
+        },
         "plugin_hooks": {
           "type": "boolean"
         },
@@ -8572,7 +8588,7 @@
       "type": "boolean"
     },
     "thread_unload_delay_secs": {
-      "description": "Seconds a thread must have no subscribers and no activity before app-server unloads it. Defaults to 1800 (30 minutes); zero unloads immediately. Resolved when each thread is loaded; request config overrides apply per thread.",
+      "description": "Seconds a thread must have no subscribers and no activity before app-server unloads it. Defaults to 60 (1 minute); zero unloads immediately. Resolved when each thread is loaded; request config overrides apply per thread.",
       "format": "uint64",
       "minimum": 0.0,
       "type": "integer"

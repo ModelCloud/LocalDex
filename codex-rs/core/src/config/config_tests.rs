@@ -258,9 +258,9 @@ async fn load_config_applies_optional_mcp_startup_grace() -> std::io::Result<()>
 async fn load_config_resolves_thread_unload_delay() -> anyhow::Result<()> {
     let codex_home = tempdir()?;
     for (toml, seconds) in [
-        ("", 1800),
+        ("", 60),
         ("thread_unload_delay_secs = 0", 0),
-        ("thread_unload_delay_secs = 60", 60),
+        ("thread_unload_delay_secs = 1800", 1800),
     ] {
         let config = Config::load_from_base_config_with_overrides(
             toml::from_str(toml)?,
@@ -10821,6 +10821,7 @@ async fn test_requirements_web_search_mode_allowlist_does_not_warn_when_unset() 
         cli_auth_credentials_store: None,
         chatgpt_base_url: None,
         sqlite_home: None,
+        unsafe_enforce_sqlite_journal_mode: None,
         log_dir: None,
         model_catalog_json: None,
         check_for_update_on_startup: None,
@@ -13996,8 +13997,12 @@ async fn load_with_enterprise_requirement(
         .await
 }
 
+#[test_case::test_case(true; "enforce_sqlite_journal_mode")]
+#[test_case::test_case(false; "preserve_sqlite_journal_mode")]
 #[tokio::test]
-async fn exact_requirements_apply_to_runtime_config() -> std::io::Result<()> {
+async fn exact_requirements_apply_to_runtime_config(
+    enforce_delete_on_nfs: bool,
+) -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let unused_diagnostics = codex_home.path().join("unused-diagnostics");
     std::fs::write(&unused_diagnostics, "not a directory")?;
@@ -14016,6 +14021,7 @@ async fn exact_requirements_apply_to_runtime_config() -> std::io::Result<()> {
 log_dir = {unused_diagnostics:?}
 check_for_update_on_startup = true
 allow_login_shell = true
+unsafe_enforce_sqlite_journal_mode = false
 
 [feedback]
 enabled = true
@@ -14028,6 +14034,7 @@ enabled = true
     let requirements = format!(
         r#"
 sqlite_home = {:?}
+unsafe_enforce_sqlite_journal_mode = {enforce_delete_on_nfs}
 log_dir = {:?}
 model_catalog_json = {:?}
 check_for_update_on_startup = false
@@ -14042,7 +14049,13 @@ enabled = false
     );
     let config = load_with_enterprise_requirement(&codex_home, requirements).await?;
 
-    assert_eq!(config.sqlite.home(), required_sqlite_home.as_path());
+    assert_eq!(
+        config.sqlite,
+        codex_state::SqliteConfig::new_for_testing(AbsolutePathBuf::try_from(
+            required_sqlite_home.clone()
+        )?)
+        .enable_delete_mode_on_nfs(enforce_delete_on_nfs)
+    );
     assert_eq!(config.log_dir, required_log_dir);
     assert_eq!(
         (
