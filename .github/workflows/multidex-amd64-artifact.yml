@@ -14,7 +14,7 @@ on:
       - "scripts/build_codex_package.py"
       - "scripts/codex_package/**"
       - "scripts/install/install-multidex.sh"
-      - "codex-rs/Cargo.lock"
+      - "codex-rs/**"
       - "third_party/v8/**"
 
 permissions:
