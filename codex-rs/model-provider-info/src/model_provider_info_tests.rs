@@ -1175,3 +1175,39 @@ requires_openai_auth = true
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn test_built_in_override_bearer_token_replaces_env_key() {
+    for provider_id in [OPENROUTER_PROVIDER_ID, LITHOS_PROVIDER_ID] {
+        let configured: ModelProviderInfo = toml::from_str(
+            r#"
+experimental_bearer_token = "sk-test-token"
+"#,
+        )
+        .unwrap();
+
+        let merged = merge_configured_model_providers(
+            built_in_model_providers(/*openai_base_url*/ None),
+            HashMap::from([(provider_id.to_string(), configured)]),
+        )
+        .unwrap();
+        let provider = merged.get(provider_id).unwrap();
+
+        // A literal config token must not be shadowed by the built-in
+        // env_key: api_key() errors when the env var is absent rather than
+        // falling through to experimental_bearer_token.
+        assert_eq!(
+            provider
+                .experimental_bearer_token
+                .clone()
+                .map(|token| token.into_inner())
+                .as_deref(),
+            Some("sk-test-token"),
+            "provider {provider_id} did not keep the bearer token"
+        );
+        assert_eq!(
+            provider.env_key, None,
+            "provider {provider_id} must drop env_key when a token is set"
+        );
+    }
+}

@@ -998,10 +998,11 @@ pub fn merge_configured_model_providers(
             let auth_override = provider.auth.take();
             let http_headers_override = provider.http_headers.take();
             let env_key_override = provider.env_key.take();
+            let bearer_token_override = provider.experimental_bearer_token.take();
             if provider != ModelProviderInfo::default() {
                 return Err(format!(
                     "model_providers.{key} only supports changing \
-`provider`, `base_url`, `auth`, `http_headers`, and `env_key`; other non-default provider fields are not supported"
+`provider`, `base_url`, `auth`, `http_headers`, `env_key`, and `experimental_bearer_token`; other non-default provider fields are not supported"
                 ));
             }
 
@@ -1023,6 +1024,13 @@ pub fn merge_configured_model_providers(
                 }
                 if let Some(env_key_override) = env_key_override {
                     built_in_provider.env_key = Some(env_key_override);
+                }
+                if let Some(bearer_token_override) = bearer_token_override {
+                    built_in_provider.experimental_bearer_token = Some(bearer_token_override);
+                    // api_key() errors when the env var is absent instead of
+                    // falling through to the token, so a configured literal
+                    // token must replace the built-in env_key outright.
+                    built_in_provider.env_key = None;
                 }
             }
         } else {
