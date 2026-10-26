@@ -17,9 +17,14 @@ does not enable managed-hooks-only mode.
 ## MultiDex providers
 
 MultiDex registers an `openrouter` provider by default: it points at
-`https://openrouter.ai/api/v1` and reads its credential from the
-`OPENROUTER_API_KEY` environment variable (or `env_key_fallbacks`/`auth.json`,
-like every other `env_key` provider). No keys are stored in the repo.
+`https://openrouter.ai/api/v1` and reads its credential only from
+`experimental_bearer_token` in `CODEX_HOME/config.toml` — provider API keys
+never come from environment variables. No keys are stored in the repo.
+
+```toml
+[model_providers.openrouter]
+experimental_bearer_token = "sk-or-..."
+```
 
 OpenRouter provider routing is configured through the `provider` table on the
 provider entry and is forwarded verbatim as the request's top-level `provider`
@@ -51,8 +56,15 @@ user-configured instructions can still override the model's default prompt.
 
 ### Lithos
 
-The built-in provider ID is `lithos`. Set `LITHOS_API_KEY` privately in the
-environment; do not put keys in source files. It uses a native transport adapter
+The built-in provider ID is `lithos`. Its credential also comes only from
+`experimental_bearer_token` in `CODEX_HOME/config.toml`, never the environment:
+
+```toml
+[model_providers.lithos]
+experimental_bearer_token = "lith_..."
+```
+
+It uses a native transport adapter
 for `https://api.lithosai.cloud/v1/chat/completions`, without a local proxy.
 MultiDex keeps upstream conversation construction and converts only the HTTP
 request and streamed response at the provider boundary.

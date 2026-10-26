@@ -118,7 +118,6 @@ pub fn is_openrouter_model(model: &str) -> bool {
 }
 const OPENROUTER_PROVIDER_NAME: &str = "OpenRouter";
 pub const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
-pub const OPENROUTER_API_KEY_ENV_VAR: &str = "OPENROUTER_API_KEY";
 pub const LITHOS_PROVIDER_ID: &str = "lithos";
 pub const LITHOS_MODEL_IDS: [&str; 3] = [
     "deepseek-ai/DeepSeek-V4.1-Flash",
@@ -605,10 +604,7 @@ other non-default provider fields are not supported"
         let env_delay_ms = std::env::var(SERVER_OVERLOADED_RETRY_DELAY_ENV_VAR)
             .ok()
             .and_then(|raw| raw.parse::<u64>().ok());
-        env_delay_ms
-            .or(Some(DEFAULT_SERVER_OVERLOADED_RETRY_DELAY_MS))
-            .map(Duration::from_millis)
-            .expect("default server-overloaded retry delay is set")
+        Duration::from_millis(env_delay_ms.unwrap_or(DEFAULT_SERVER_OVERLOADED_RETRY_DELAY_MS))
     }
 
     /// Effective timeout for websocket connect attempts.
@@ -755,20 +751,17 @@ other non-default provider fields are not supported"
     }
 
     /// OpenRouter aggregates upstream inference providers behind one
-    /// Responses endpoint. `OPENROUTER_API_KEY` supplies the credential;
-    /// OpenRouter `provider` routing stays opt-in through
-    /// `[model_providers.openrouter.provider]`.
+    /// Responses endpoint. Credentials come only from the config file —
+    /// `experimental_bearer_token` in `[model_providers.openrouter]` — so API
+    /// keys never ride the process environment. OpenRouter `provider`
+    /// routing stays opt-in through `[model_providers.openrouter.provider]`.
     pub fn create_openrouter_provider() -> ModelProviderInfo {
         ModelProviderInfo {
             name: OPENROUTER_PROVIDER_NAME.into(),
             base_url: Some(OPENROUTER_BASE_URL.into()),
             model_catalog_url: None,
-            env_key: Some(OPENROUTER_API_KEY_ENV_VAR.into()),
-            env_key_instructions: Some(
-                "Create an API key at https://openrouter.ai/keys and set it as the \
-                 OPENROUTER_API_KEY environment variable."
-                    .into(),
-            ),
+            env_key: None,
+            env_key_instructions: None,
             experimental_bearer_token: None,
             auth: None,
             gateway_oauth: None,
@@ -843,8 +836,6 @@ other non-default provider fields are not supported"
         let mut provider = Self::create_openrouter_provider();
         provider.name = "Lithos".into();
         provider.base_url = Some("https://api.lithosai.cloud/v1".into());
-        provider.env_key = Some("LITHOS_API_KEY".into());
-        provider.env_key_instructions = Some("Set LITHOS_API_KEY to your Lithos API key.".into());
         provider.multidex_compatibility = true;
         provider.stream_max_retries = Some(0);
         provider.request_max_retries = Some(0);
@@ -997,12 +988,17 @@ pub fn merge_configured_model_providers(
             let base_url_override = provider.base_url.take();
             let auth_override = provider.auth.take();
             let http_headers_override = provider.http_headers.take();
-            let env_key_override = provider.env_key.take();
+            if provider.env_key.is_some() {
+                return Err(format!(
+                    "model_providers.{key} does not support `env_key`; use \
+`experimental_bearer_token` to store the credential in config.toml"
+                ));
+            }
             let bearer_token_override = provider.experimental_bearer_token.take();
             if provider != ModelProviderInfo::default() {
                 return Err(format!(
                     "model_providers.{key} only supports changing \
-`provider`, `base_url`, `auth`, `http_headers`, `env_key`, and `experimental_bearer_token`; other non-default provider fields are not supported"
+`provider`, `base_url`, `auth`, `http_headers`, and `experimental_bearer_token`; other non-default provider fields are not supported"
                 ));
             }
 
@@ -1022,14 +1018,11 @@ pub fn merge_configured_model_providers(
                         .get_or_insert_default()
                         .extend(http_headers_override);
                 }
-                if let Some(env_key_override) = env_key_override {
-                    built_in_provider.env_key = Some(env_key_override);
-                }
                 if let Some(bearer_token_override) = bearer_token_override {
                     built_in_provider.experimental_bearer_token = Some(bearer_token_override);
                     // api_key() errors when the env var is absent instead of
                     // falling through to the token, so a configured literal
-                    // token must replace the built-in env_key outright.
+                    // token must replace any built-in env_key outright.
                     built_in_provider.env_key = None;
                 }
             }

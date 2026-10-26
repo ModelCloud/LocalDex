@@ -1042,7 +1042,7 @@ fn test_built_in_model_providers_include_openrouter() {
         provider.base_url.as_deref(),
         Some("https://openrouter.ai/api/v1")
     );
-    assert_eq!(provider.env_key.as_deref(), Some("OPENROUTER_API_KEY"));
+    assert_eq!(provider.env_key, None, "credentials come from config.toml");
     assert_eq!(provider.wire_api, WireApi::Responses);
     assert!(!provider.requires_openai_auth);
     assert!(provider.is_openrouter());
@@ -1059,7 +1059,7 @@ fn lithos_uses_its_own_key_and_does_not_replay_failed_generations() {
         provider.base_url.as_deref(),
         Some("https://api.lithosai.cloud/v1")
     );
-    assert_eq!(provider.env_key.as_deref(), Some("LITHOS_API_KEY"));
+    assert_eq!(provider.env_key, None, "credentials come from config.toml");
     assert!(!provider.requires_openai_auth);
     assert!(!provider.supports_websockets);
     assert!(!provider.supports_responses_continuation);
@@ -1073,7 +1073,7 @@ fn lithos_uses_its_own_key_and_does_not_replay_failed_generations() {
 #[test]
 fn lithos_auth_override_preserves_native_transport_identity() {
     let configured: ModelProviderInfo =
-        toml::from_str("env_key = \"PRIVATE_LITHOS_KEY\"\n").expect("valid provider");
+        toml::from_str("experimental_bearer_token = \"private-token\"\n").expect("valid provider");
     let merged = merge_configured_model_providers(
         built_in_model_providers(None),
         HashMap::from([(LITHOS_PROVIDER_ID.to_string(), configured)]),
@@ -1082,7 +1082,31 @@ fn lithos_auth_override_preserves_native_transport_identity() {
     let provider = &merged[LITHOS_PROVIDER_ID];
     assert!(provider.is_lithos());
     assert!(provider.multidex_compatibility);
-    assert_eq!(provider.env_key.as_deref(), Some("PRIVATE_LITHOS_KEY"));
+    assert_eq!(
+        provider
+            .experimental_bearer_token
+            .clone()
+            .map(|token| token.into_inner())
+            .as_deref(),
+        Some("private-token")
+    );
+}
+
+#[test]
+fn built_in_overrides_reject_env_key() {
+    for provider_id in [OPENROUTER_PROVIDER_ID, LITHOS_PROVIDER_ID] {
+        let configured: ModelProviderInfo =
+            toml::from_str("env_key = \"SOME_API_KEY\"\n").expect("valid provider");
+        let err = merge_configured_model_providers(
+            built_in_model_providers(None),
+            HashMap::from([(provider_id.to_string(), configured)]),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("does not support `env_key`"),
+            "provider {provider_id} returned unexpected error: {err}"
+        );
+    }
 }
 
 #[test]
@@ -1147,7 +1171,7 @@ allow_fallbacks = false
         provider.base_url.as_deref(),
         Some("https://openrouter.ai/api/v1")
     );
-    assert_eq!(provider.env_key.as_deref(), Some("OPENROUTER_API_KEY"));
+    assert_eq!(provider.env_key, None);
     let routing = provider.provider.as_ref().expect("provider routing merged");
     assert_eq!(
         routing.only.as_deref(),
@@ -1193,9 +1217,6 @@ experimental_bearer_token = "sk-test-token"
         .unwrap();
         let provider = merged.get(provider_id).unwrap();
 
-        // A literal config token must not be shadowed by the built-in
-        // env_key: api_key() errors when the env var is absent rather than
-        // falling through to experimental_bearer_token.
         assert_eq!(
             provider
                 .experimental_bearer_token
@@ -1207,7 +1228,7 @@ experimental_bearer_token = "sk-test-token"
         );
         assert_eq!(
             provider.env_key, None,
-            "provider {provider_id} must drop env_key when a token is set"
+            "provider {provider_id} must not look up credentials in the environment"
         );
     }
 }
