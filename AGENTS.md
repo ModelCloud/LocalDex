@@ -21,3 +21,8 @@ commit as well as its version.
 
 Before substantial Rust builds, follow
 [.codex/skills/multidex-build-acceleration/SKILL.md](.codex/skills/multidex-build-acceleration/SKILL.md).
+
+When building from an Apple Silicon Mac (or without dedicated Linux builders), follow
+[.codex/skills/multidex-build-from-mac/SKILL.md](.codex/skills/multidex-build-from-mac/SKILL.md).
+It pins Rust to the channel declared in `codex-rs/rust-toolchain.toml`, requires the same compiler
+on macOS and both Linux architectures, and covers the amd64 Ubuntu 24.04/26.04 and arm64 builds.
