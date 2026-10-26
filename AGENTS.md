@@ -26,3 +26,11 @@ When building from an Apple Silicon Mac (or without dedicated Linux builders), f
 [.codex/skills/multidex-build-from-mac/SKILL.md](.codex/skills/multidex-build-from-mac/SKILL.md).
 It pins Rust to the channel declared in `codex-rs/rust-toolchain.toml`, requires the same compiler
 on macOS and both Linux architectures, and covers the amd64 Ubuntu 24.04/26.04 and arm64 builds.
+
+That skill is also the canonical reference for the `smolvm` VM commands used to build every
+non-native target, including the flag set that breaks builds when omitted (`--net-backend
+virtio-net`, an explicit `--mem`, `--net`, and `--oci-platform` with `--rosetta` for amd64).
+Before publishing, it requires installing every asset from the published release and confirming the
+reported SHA matches the source commit: a release missing
+`multidex-package-x86_64-unknown-linux-gnu-ubuntu24.04.tar.gz` silently makes
+`install-multidex.sh` on Ubuntu 24.04 fall back to an older release.
