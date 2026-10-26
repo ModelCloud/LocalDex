@@ -61,6 +61,10 @@ jobs:
           cp "$archive" "dist/multidex/multidex-package-${target}.tar.gz"
           sha256sum "dist/multidex/multidex-package-${target}.tar.gz" > "dist/multidex/multidex-package-${target}.tar.gz.sha256"
           cp scripts/install/install-multidex.sh dist/multidex/install-multidex.sh
+      - name: Record artifact source and version
+        run: |
+          git rev-parse HEAD > dist/multidex/SOURCE_COMMIT
+          python3 -c 'import tomllib; print(tomllib.load(open("codex-rs/Cargo.toml", "rb"))["workspace"]["package"]["version"])' > dist/multidex/VERSION
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: multidex-linux-${{ matrix.arch }}
