@@ -20,6 +20,7 @@ use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::manager::StaticModelsManager;
 use codex_protocol::account::PlanType;
 use codex_protocol::account::ProviderAccount;
+use codex_protocol::auth::RefreshTokenFailedError;
 use codex_protocol::error::CodexErr;
 use codex_protocol::openai_models::ModelsResponse;
 
@@ -271,7 +272,11 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
                             session: routing_context.session.clone(),
                         },
                     )
-                    .await?
+                    .await
+                    .map_err(|error| match error.downcast::<RefreshTokenFailedError>() {
+                        Ok(rejection) => CodexErr::RefreshTokenFailed(rejection),
+                        Err(error) => error.into(),
+                    })?
                 {
                     crate::workspace_routing::apply_workspace_routing(&mut provider, routing)?;
                     redirect_policy = ClientRedirectPolicy::Reject;
