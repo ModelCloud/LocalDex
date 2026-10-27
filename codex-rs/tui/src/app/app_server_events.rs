@@ -166,7 +166,7 @@ impl App {
     async fn handle_server_notification_event(
         &mut self,
         app_server_client: &AppServerSession,
-        notification: ServerNotification,
+        mut notification: ServerNotification,
     ) {
         if let ServerNotification::ThreadStarted(started) = &notification
             && started.thread.ephemeral
@@ -192,6 +192,16 @@ impl App {
                 let _ = sender.send(notification);
             }
             return;
+        }
+        if let ServerNotification::TurnModerationMetadata(metadata) = &mut notification
+            && (!super::safety_recourse::supports_server(app_server_client)
+                || self
+                    .primary_thread_id
+                    .is_none_or(|id| id.to_string() != metadata.thread_id))
+            && let Some(metadata) = metadata.metadata.as_object_mut()
+        {
+            metadata.remove("safety_block");
+            metadata.remove("safety_recourse");
         }
         // A picker can leave an old runtime's close notification queued while the same thread
         // is resumed. Thread IDs survive reloads, so confirm that the displayed thread is still

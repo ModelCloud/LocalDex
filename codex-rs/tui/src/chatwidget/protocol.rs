@@ -88,6 +88,14 @@ impl ChatWidget {
             }
             ServerNotification::TurnStarted(notification) => {
                 self.clear_prompt_suggestion();
+                if self
+                    .bottom_pane
+                    .dismiss_view_by_id(safety_recourse::VIEW_ID)
+                    && self.bottom_pane.no_modal_or_popup_active()
+                {
+                    self.on_modal_or_popup_closed();
+                }
+                self.safety_recourse = None;
                 if from_replay {
                     self.restore_realtime_transcripts_before_turn(&notification.turn.id);
                 } else {
@@ -218,7 +226,7 @@ impl ChatWidget {
                             notification.error.additional_details,
                         );
                     }
-                } else {
+                } else if from_replay || !safety_recourse::defer_error(self, &notification) {
                     self.last_non_retry_error = Some((
                         notification.turn_id.clone(),
                         notification.error.message.clone(),
@@ -248,6 +256,11 @@ impl ChatWidget {
             }
             ServerNotification::ModelSafetyBufferingUpdated(notification) => {
                 self.on_model_safety_buffering_updated(notification, replay_kind)
+            }
+            ServerNotification::TurnModerationMetadata(notification) => {
+                if !from_replay {
+                    safety_recourse::on_metadata(self, notification);
+                }
             }
             ServerNotification::AuthRecoveryStarted(notification) => {
                 self.add_info_message(notification.message, /*hint*/ None)
@@ -395,7 +408,6 @@ impl ChatWidget {
             | ServerNotification::ExternalAgentConfigImportProgress(_)
             | ServerNotification::ExternalAgentConfigImportCompleted(_)
             | ServerNotification::FsChanged(_)
-            | ServerNotification::TurnModerationMetadata(_)
             | ServerNotification::FuzzyFileSearchSessionUpdated(_)
             | ServerNotification::FuzzyFileSearchSessionCompleted(_)
             | ServerNotification::ThreadRealtimeItemAdded(_)
@@ -441,6 +453,9 @@ impl ChatWidget {
             && self.turn_lifecycle.last_turn_id.as_deref() == Some(notification.turn.id.as_str());
         self.last_rendered_user_message_display = None;
         let mut question_drafts = None;
+        let live_turn =
+            replay_kind.is_none() && self.last_turn_id() == Some(notification.turn.id.as_str());
+        let mut recourse = self.safety_recourse.take_if(|_| live_turn);
         let was_replaying_turn_completion = self.thread_usage.replaying_turn_completion;
         self.thread_usage.replaying_turn_completion = replay_kind.is_some();
         match notification.turn.status {
@@ -515,7 +530,11 @@ impl ChatWidget {
                 if replay_kind.is_none() {
                     question_drafts = self.take_question_drafts();
                 }
-                if let Some(error) = notification.turn.error {
+                let error = notification
+                    .turn
+                    .error
+                    .or_else(|| recourse.as_mut()?.deferred_error.take());
+                if let Some(error) = error {
                     if replay_kind.is_none()
                         && error.codex_error_info
                             == Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation)
@@ -524,6 +543,8 @@ impl ChatWidget {
                             Some(notification.turn.id.clone()),
                             error.misalignment,
                         );
+                        self.last_non_retry_error = None;
+                    } else if safety_recourse::render_failure(self, recourse, &error) {
                         self.last_non_retry_error = None;
                     } else if self.last_non_retry_error.as_ref()
                         == Some(&(notification.turn.id.clone(), error.message.clone()))
