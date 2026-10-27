@@ -491,6 +491,7 @@ impl ThreadHistoryBuilder {
             | RolloutItem::RealtimeItem(_)
             | RolloutItem::RetainedContext(_)
             | RolloutItem::SecurityRiskScore(_)
+            | RolloutItem::DynamicToolsUpdated { .. }
             | RolloutItem::SessionMeta(_) => {}
         }
     }
@@ -1043,7 +1044,7 @@ impl ThreadHistoryBuilder {
             saved_path: payload.saved_path.clone(),
             input_images: payload.input_images.clone(),
             imagegen_request_id: None,
-            generation_id: None,
+            generation_id: payload.generation_id.clone(),
         });
         self.upsert_item_in_current_turn(item);
     }
@@ -2929,6 +2930,7 @@ mod tests {
                     path: test_path_buf("/tmp/reference.png").abs(),
                     sha256: "ab".repeat(32),
                 }],
+                generation_id: None,
             })),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
                 root_turn_id: None,
