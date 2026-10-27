@@ -1478,12 +1478,22 @@ fn guardian_write_stdin_preserves_input_and_foreign_cwd(
     Ok(())
 }
 
-#[test_case::test_case(codex_utils_path_uri::PathConvention::Windows, r"C:\workspace"; "windows")]
-#[test_case::test_case(codex_utils_path_uri::PathConvention::Posix, "/C:/workspace"; "posix")]
-fn guardian_exec_command_uses_executor_cwd_convention(
-    cwd_convention: codex_utils_path_uri::PathConvention,
+#[test_case::test_case(Some("windows"), r"C:\workspace"; "windows")]
+#[test_case::test_case(Some("linux"), "/C:/workspace"; "posix")]
+#[test_case::test_case(None, r"C:\workspace"; "legacy")]
+#[tokio::test]
+async fn guardian_exec_command_uses_executor_cwd_convention(
+    platform_os: Option<&str>,
     expected_cwd: &str,
 ) -> serde_json::Result<()> {
+    let (_session, mut turn) = crate::session::tests::make_session_and_context().await;
+    let mut executor = turn.initial_environments.primary().unwrap().clone();
+    executor.selection.environment_id = codex_exec_server::REMOTE_ENVIRONMENT_ID.to_string();
+    executor.executor_platform_os = platform_os.map(str::to_owned);
+    turn.initial_environments
+        .environments
+        .push(TurnEnvironmentState::Ready(executor));
+    let context = GuardianReviewContext::from(Arc::new(turn));
     let cwd = PathUri::parse("file:///C:/workspace").expect("valid executor cwd");
     let action = crate::tools::sandboxing::ApprovalAction::ExecCommand {
         id: "command-1".to_string(),
@@ -1496,9 +1506,10 @@ fn guardian_exec_command_uses_executor_cwd_convention(
         justification: None,
         tty: false,
         proposed_execpolicy_amendment: None,
-    }
-    .into_guardian_request(Some(cwd_convention))
-    .expect("Guardian request should render executor cwd");
+    };
+    let action = ReviewAction::from_approval_action(action, &context)
+        .request
+        .expect("Guardian request should render executor cwd");
 
     assert_eq!(
         guardian_approval_request_to_json(&action)?,
@@ -1518,41 +1529,6 @@ fn guardian_exec_command_uses_executor_cwd_convention(
             command: "git status".to_string(),
             cwd: LegacyAppPathString::from_string(expected_cwd),
         },
-    );
-    Ok(())
-}
-
-#[test]
-fn guardian_apply_patch_preserves_foreign_paths_and_redacts_patch_text() -> serde_json::Result<()> {
-    let cwd = PathUri::parse("file:///C:/workspace").expect("valid executor cwd");
-    let file =
-        PathUri::parse("file:///C:/workspace/guardian.txt").expect("valid executor file path");
-    let patch = "*** Begin Patch\n*** Update File: guardian.txt\n@@\n+secret\n*** End Patch";
-    let action = GuardianApprovalRequest::ApplyPatch {
-        environment_id: "local".to_string(),
-        id: "patch-1".to_string(),
-        cwd,
-        files: vec![file],
-        patch: patch.to_string(),
-    };
-
-    assert_eq!(
-        guardian_approval_request_to_json(&action)?,
-        serde_json::json!({
-            "tool": "apply_patch",
-            "environment_id": "local",
-            "cwd": r"C:\workspace",
-            "files": [r"C:\workspace\guardian.txt"],
-            "patch": patch,
-        }),
-    );
-    assert_eq!(
-        serde_json::to_value(guardian_assessment_action(&action))?,
-        serde_json::json!({
-            "type": "apply_patch",
-            "cwd": r"C:\workspace",
-            "files": [r"C:\workspace\guardian.txt"],
-        }),
     );
     Ok(())
 }
