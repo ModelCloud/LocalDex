@@ -28,3 +28,40 @@ OS-selecting `install-multidex.sh` in the release.
 The Linux release workflow in `.github/workflows/multidex-release-linux.yml` is tied to version tags and covers only the two Linux targets. A new merged commit with the same version still needs this three-platform publication.
 
 `scripts/install/install-multidex.sh` resolves `latest` by walking the published releases newest first and selecting the first one that ships the requested target, so a commit-specific release becomes installable as soon as its assets are uploaded. An explicit `--release` accepts either a version (`0.163.0`, `multidex-v0.163.0`) or a release tag (`multidex-build-0.163.0-18dbfada9`). Publish every platform before announcing a build: a release that is missing the asset for a target is skipped in favor of the next newest release that has it.
+
+## Migrating existing configs before a fleet install
+
+A release can change which fields the built-in gateway providers accept. Because a rejected
+field aborts the *whole* config load — not just the affected provider — an incompatible
+`~/.codex/config.toml` makes every session on that host fail to start. Reconcile configs
+before swapping the binary, and validate them on the installed binary first so a bad edit
+cannot leave a host with nothing that boots.
+
+The credential field for the built-in `openrouter` and `lithos` providers is the one that has
+actually churned. Different releases accept different subset, and they disagree in *opposite*
+directions:
+
+| Release generation | `env_key` | `experimental_bearer_token` | `auth` |
+| --- | --- | --- | --- |
+| older | accepted | rejected | accepted |
+| newer | rejected | accepted | accepted |
+
+`auth.command` is the only form every generation accepts, so it is the safe target for a
+migration: a command that prints the credential, with the variable still forwarded to the
+process. Migrate to `auth` rather than to whichever inline field the release you are installing
+happens to prefer, otherwise the next release forces the same migration again in the other
+direction.
+
+Built-in providers also accept only a limited override set. Fields that are ordinary on a
+custom provider — `request_max_retries`, `stream_idle_timeout_ms`, `name`, and similar — abort
+the load on a built-in provider in every recent release. Legacy
+`~/.local/share/{localdex,multidex}/config.toml` copies often carry them, so they can already be
+unloadable before a new release is installed; prune them to the accepted set rather than
+assuming the file was working.
+
+Two traps when scripting the migration:
+
+- Do not validate every config against one `CODEX_HOME`. Point the binary at each config's own
+  directory, otherwise only the primary file is really exercised and the others silently pass.
+- Treat a config that failed *before* the migration as a pre-existing fault, not a regression.
+  Record a baseline first so a genuine break is distinguishable from one you inherited.
