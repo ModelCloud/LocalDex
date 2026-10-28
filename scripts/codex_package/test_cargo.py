@@ -100,11 +100,12 @@ class SourceBinariesForTargetTest(unittest.TestCase):
                 PACKAGE_VARIANTS["multidex"],
                 build_entrypoint=True,
                 build_code_mode_host=True,
+                build_exec_server=True,
                 build_bwrap=True,
                 build_codex_command_runner=False,
                 build_codex_windows_sandbox_setup=False,
             ),
-            ["codex", "codex-code-mode-host", "bwrap"],
+            ["codex", "codex-code-mode-host", "codex-exec-server", "bwrap"],
         )
 
     def test_build_uses_prebuilt_windows_helpers_without_running_cargo(self) -> None:
