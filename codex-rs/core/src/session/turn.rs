@@ -20,6 +20,7 @@ use crate::feedback_tags;
 use crate::hook_runtime::drain_async_hook_results;
 use crate::hook_runtime::hooks_for_model_request;
 use crate::hook_runtime::inspect_pending_input;
+use crate::hook_runtime::legacy_notify_input_messages;
 use crate::hook_runtime::record_additional_contexts;
 use crate::hook_runtime::record_pending_input;
 use crate::hook_runtime::run_legacy_after_agent_hook;
@@ -622,7 +623,7 @@ pub(crate) async fn run_turn(
         }
         .await;
         match sampling_request_result {
-            Ok((sampling_request_output, sampling_request_input)) => {
+            Ok((sampling_request_output, notify_messages)) => {
                 context_overflow_compacted = false;
                 let (model_needs_follow_up, sampling_request_last_agent_message) =
                     match sampling_request_output {
@@ -831,7 +832,7 @@ pub(crate) async fn run_turn(
                     if run_legacy_after_agent_hook(
                         &sess,
                         &turn_context,
-                        &sampling_request_input,
+                        notify_messages,
                         last_agent_message.clone(),
                     )
                     .await
@@ -1999,7 +2000,7 @@ async fn run_sampling_request(
     client_session: &mut ModelClientSession,
     input: Vec<ResponseItem>,
     cancellation_token: CancellationToken,
-) -> CodexResult<(SamplingRequestResult, Vec<ResponseItem>)> {
+) -> CodexResult<(SamplingRequestResult, Vec<String>)> {
     let turn_context = Arc::clone(&step_context.turn);
     let preempt = step_context.preempt.clone().unwrap_or_default();
     let _input_watch = if let Some(preempt) = &step_context.preempt {
@@ -2032,11 +2033,12 @@ async fn run_sampling_request(
     );
     let mut retry_state = ResponsesStreamRetryState::default();
     let mut initial_input = Some(input);
-    let mut original_input = None;
+    let mut notify_messages = Vec::new();
     let mut executed_tool_calls_by_output = HashMap::new();
     loop {
         // Running code-mode cells can request review while this response is in flight.
         // Keep the latest received ID until response.created replaces it.
+        let first_attempt = initial_input.is_some();
         let prompt_input = if let Some(input) = initial_input.take() {
             input
         } else {
@@ -2070,6 +2072,9 @@ async fn run_sampling_request(
             )
             .await?;
         }
+        if first_attempt && turn_context.config.notify.is_some() {
+            notify_messages = legacy_notify_input_messages(&prompt.input);
+        }
         let mut draining_for_mailbox = false;
         let err = match try_run_sampling_request(
             tool_runtime.clone(),
@@ -2079,7 +2084,7 @@ async fn run_sampling_request(
             client_session,
             &responses_metadata,
             Arc::clone(&turn_diff_tracker),
-            &prompt,
+            prompt,
             cancellation_token.child_token(),
             &mut draining_for_mailbox,
             arm_multidex_sampling_preemption(sess.as_ref(), turn_context.as_ref()).await,
@@ -2087,7 +2092,7 @@ async fn run_sampling_request(
         .await
         {
             Ok(output) => {
-                return Ok((output, original_input.unwrap_or(prompt.input)));
+                return Ok((output, notify_messages));
             }
             Err(err) => match err.details() {
                 CodexErrorDetails::ContextWindowExceeded => {
@@ -2104,8 +2109,6 @@ async fn run_sampling_request(
                 _ => err,
             },
         };
-
-        let original_input = original_input.get_or_insert(prompt.input);
 
         let retry = handle_response_stream_error(
             &mut retry_state,
@@ -2130,7 +2133,7 @@ async fn run_sampling_request(
                     needs_follow_up: true,
                     last_agent_message: None,
                 },
-                std::mem::take(original_input),
+                notify_messages,
             ));
         }
         retry??;
@@ -2962,7 +2965,7 @@ async fn try_run_sampling_request(
     client_session: &mut ModelClientSession,
     responses_metadata: &CodexResponsesMetadata,
     turn_diff_tracker: SharedTurnDiffTracker,
-    prompt: &Prompt,
+    prompt: Prompt,
     cancellation_token: CancellationToken,
     draining_for_mailbox: &mut bool,
     sampling_preemption: Option<CancellationToken>,
@@ -3047,7 +3050,7 @@ async fn try_run_sampling_request(
         .await;
     let stream_request = client_session
         .stream(
-            prompt,
+            &prompt,
             &step_context.settings.model_info,
             &step_context.session_telemetry,
             effort,
@@ -3092,6 +3095,7 @@ async fn try_run_sampling_request(
             }
         },
     };
+    drop(prompt);
     if cancellation_token.is_cancelled() {
         return Err(CodexErr::TurnAborted);
     }
