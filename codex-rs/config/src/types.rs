@@ -30,6 +30,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 
+use codex_utils_redacted_string::RedactedString;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -616,7 +617,8 @@ pub enum OtelExporterKind {
     OtlpHttp {
         endpoint: String,
         #[serde(default)]
-        headers: HashMap<String, String>,
+        #[schemars(with = "HashMap<String, String>")]
+        headers: HashMap<String, RedactedString>,
         protocol: OtelHttpProtocol,
         #[serde(default)]
         tls: Option<OtelTlsConfig>,
@@ -624,7 +626,8 @@ pub enum OtelExporterKind {
     OtlpGrpc {
         endpoint: String,
         #[serde(default)]
-        headers: HashMap<String, String>,
+        #[schemars(with = "HashMap<String, String>")]
+        headers: HashMap<String, RedactedString>,
         #[serde(default)]
         tls: Option<OtelTlsConfig>,
     },
@@ -635,8 +638,7 @@ pub enum OtelExporterKind {
 #[schemars(deny_unknown_fields)]
 pub struct OtelConfigToml {
     /// Byte limit for tool-result log output; independent of model-visible output.
-    #[serde(default)]
-    pub tool_result: codex_protocol::config_types::ToolResultLogConfig,
+    pub tool_result: Option<codex_protocol::config_types::ToolResultLogConfig>,
     /// Log user prompt in traces
     pub log_user_prompt: Option<bool>,
     /// Opt in to logging final main-agent and spawned-subagent responses to an OTLP log exporter.
