@@ -974,6 +974,21 @@ async fn endpoint_overlay_preserves_remote_refresh_defaults_and_prompt_metadata(
             .await;
         assert_eq!(catalog.models.len(), 2);
         assert!(catalog.models.iter().any(|model| model.slug == expected));
+        let sourced_catalog = manager
+            .model_catalog_with_origins(
+                RefreshStrategy::Offline,
+                DEFAULT_HTTP_CLIENT_FACTORY.clone(),
+            )
+            .await;
+        assert_eq!(
+            sourced_catalog
+                .iter()
+                .map(|entry| entry.model.clone())
+                .collect::<Vec<_>>(),
+            catalog.models
+        );
+        assert_eq!(sourced_catalog[0].origin, ModelOrigin::Provider);
+        assert_eq!(sourced_catalog[1].origin, ModelOrigin::ExplicitConfig);
         let presets = manager.build_available_models(catalog.models);
         assert!(
             presets

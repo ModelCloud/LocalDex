@@ -354,19 +354,27 @@ impl ModelsManager for ModelsManagerOverlay {
         self.inner.set_api_key_model_discovery_enabled(enabled);
     }
 
-    fn raw_model_catalog(
+    fn model_catalog_with_origins(
         &self,
         refresh_strategy: RefreshStrategy,
         http_client_factory: HttpClientFactory,
-    ) -> ModelsManagerFuture<'_, ModelsResponse> {
+    ) -> ModelsManagerFuture<'_, Vec<CatalogModel>> {
         Box::pin(async move {
-            let catalog = self
+            let mut catalog = self
                 .inner
-                .raw_model_catalog(refresh_strategy, http_client_factory)
+                .model_catalog_with_origins(refresh_strategy, http_client_factory)
                 .await;
-            ModelsResponse {
-                models: self.merge(catalog.models),
-            }
+            catalog.retain(|entry| !self.is_additional_model(&entry.model.slug));
+            catalog.extend(
+                self.additional_models
+                    .iter()
+                    .cloned()
+                    .map(|model| CatalogModel {
+                        model,
+                        origin: ModelOrigin::ExplicitConfig,
+                    }),
+            );
+            catalog
         })
     }
 
