@@ -648,6 +648,25 @@ mod tests {
     }
 
     #[test]
+    fn lithos_accepts_a_real_openai_switch_payload() -> Result<()> {
+        // Byte shapes taken from a live OpenAI rollout on agent-gpu-0:
+        // reasoning items carry encrypted_content with content=None.
+        let (body, _) = request_body(&json!({"model":"test","input":[
+            {"type":"reasoning","summary":[],
+             "encrypted_content":"gAAAAABq4Ynrjlim6j5BqUaZAW5wDKDZo9YTONo-"},
+            {"type":"compaction","encrypted_content":"gAAAAABq4Yn43WsbxUTB2OMQ_B-31Hf83EVyE5zA"},
+            {"type":"message","role":"user","content":"continue after the switch"},
+            {"type":"function_call","name":"exec_command","arguments":"{}","call_id":"c1"},
+            {"type":"function_call_output","call_id":"c1","output":"ok"}
+        ]}))?;
+        let msgs = body["messages"].as_array().expect("messages");
+        assert_eq!(msgs[0]["content"], "continue after the switch");
+        let roles: Vec<&str> = msgs.iter().filter_map(|m| m["role"].as_str()).collect();
+        assert!(roles.contains(&"tool"), "tool output preserved: {roles:?}");
+        Ok(())
+    }
+
+    #[test]
     fn lithos_still_honours_a_readable_compaction_summary() -> Result<()> {
         let summary = "## Active Objective\nContinue the previous work.";
         let (body, _) = request_body(&json!({"model":"test","input":[
