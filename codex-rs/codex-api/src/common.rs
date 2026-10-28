@@ -436,6 +436,8 @@ pub enum ResponseInterrupt {
 }
 
 pub struct ResponseStream {
+    /// Routing pin from the connection that produced these responses. Never model metadata.
+    pub routing_affinity: Option<codex_http_client::ChatGptRoutingAffinity>,
     pub rx_event: ResponseStreamReceiver,
     /// Server-assigned `x-request-id` response header, when present.
     pub upstream_request_id: Option<String>,

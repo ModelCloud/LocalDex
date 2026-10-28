@@ -104,6 +104,7 @@ pub fn spawn_response_stream(
     });
 
     ResponseStream {
+        routing_affinity: None,
         rx_event: ResponseStreamReceiver::new(rx_event, cancellation_token),
         upstream_request_id,
         interrupt: None,

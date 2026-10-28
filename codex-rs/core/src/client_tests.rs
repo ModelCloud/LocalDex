@@ -2707,6 +2707,7 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
     let (last_response_tx, last_response_rx) = tokio::sync::oneshot::channel();
     let mut stream = super::map_response_stream(
         codex_api::ResponseStream {
+            routing_affinity: None,
             rx_event: codex_api::ResponseStreamReceiver::new(
                 rx_event,
                 tokio_util::sync::CancellationToken::new(),
