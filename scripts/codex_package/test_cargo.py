@@ -21,7 +21,6 @@ class SourceBinariesForTargetTest(unittest.TestCase):
                 PACKAGE_VARIANTS["codex"],
                 build_entrypoint=False,
                 build_code_mode_host=False,
-                build_exec_server=False,
                 build_bwrap=False,
                 build_codex_command_runner=False,
                 build_codex_windows_sandbox_setup=False,
@@ -38,7 +37,6 @@ class SourceBinariesForTargetTest(unittest.TestCase):
                 PACKAGE_VARIANTS["codex"],
                 build_entrypoint=False,
                 build_code_mode_host=False,
-                build_exec_server=False,
                 build_bwrap=False,
                 build_codex_command_runner=False,
                 build_codex_windows_sandbox_setup=False,
@@ -55,7 +53,6 @@ class SourceBinariesForTargetTest(unittest.TestCase):
                 PACKAGE_VARIANTS["codex"],
                 build_entrypoint=False,
                 build_code_mode_host=False,
-                build_exec_server=False,
                 build_bwrap=False,
                 build_codex_command_runner=False,
                 build_codex_windows_sandbox_setup=False,
@@ -70,7 +67,6 @@ class SourceBinariesForTargetTest(unittest.TestCase):
                 PACKAGE_VARIANTS["codex"],
                 build_entrypoint=False,
                 build_code_mode_host=False,
-                build_exec_server=False,
                 build_bwrap=False,
                 build_codex_command_runner=True,
                 build_codex_windows_sandbox_setup=True,
@@ -85,12 +81,11 @@ class SourceBinariesForTargetTest(unittest.TestCase):
                 PACKAGE_VARIANTS["codex-app-server"],
                 build_entrypoint=False,
                 build_code_mode_host=True,
-                build_exec_server=True,
                 build_bwrap=False,
                 build_codex_command_runner=False,
                 build_codex_windows_sandbox_setup=False,
             ),
-            ["codex-code-mode-host", "codex-exec-server"],
+            ["codex-code-mode-host"],
         )
 
     def test_multidex_builds_the_upstream_codex_binary_before_staging(self) -> None:
@@ -100,12 +95,11 @@ class SourceBinariesForTargetTest(unittest.TestCase):
                 PACKAGE_VARIANTS["multidex"],
                 build_entrypoint=True,
                 build_code_mode_host=True,
-                build_exec_server=True,
                 build_bwrap=True,
                 build_codex_command_runner=False,
                 build_codex_windows_sandbox_setup=False,
             ),
-            ["codex", "codex-code-mode-host", "codex-exec-server", "bwrap"],
+            ["codex", "codex-code-mode-host", "bwrap"],
         )
 
     def test_build_uses_prebuilt_windows_helpers_without_running_cargo(self) -> None:
@@ -123,7 +117,6 @@ class SourceBinariesForTargetTest(unittest.TestCase):
                 profile="release",
                 entrypoint_bin=entrypoint,
                 code_mode_host_bin=code_mode_host,
-                exec_server_bin=code_mode_host,
                 bwrap_bin=None,
                 codex_command_runner_bin=command_runner,
                 codex_windows_sandbox_setup_bin=sandbox_setup,
