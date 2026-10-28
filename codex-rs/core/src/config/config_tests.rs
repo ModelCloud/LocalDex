@@ -10561,7 +10561,7 @@ beta = "two"
 
     assert_eq!(
         config.otel.span_attributes,
-        BTreeMap::from([("example.trace_attr".to_string(), "enabled".to_string())])
+        HashMap::from([("example.trace_attr".to_string(), "enabled".to_string())])
     );
     assert_eq!(
         config.otel.tracestate,
@@ -10611,7 +10611,7 @@ alpha = "one\ntwo"
     assert_eq!(config.otel.environment, "test");
     assert_eq!(
         config.otel.span_attributes,
-        BTreeMap::from([("example.trace_attr".to_string(), "enabled".to_string())])
+        HashMap::from([("example.trace_attr".to_string(), "enabled".to_string())])
     );
     assert_eq!(
         config.otel.tracestate,
@@ -14101,6 +14101,8 @@ environment = "production"
 exporter = { otlp-http = { endpoint = "https://managed.example/logs", protocol = "binary", headers = { Authorization = "managed-secret" } } }
 trace_exporter = "none"
 metrics_exporter = { otlp-grpc = { endpoint = "https://managed.example:4317" } }
+span_attributes = { "deployment.environment" = "production", team = "platform" }
+tracestate = { vendor = { tenant = "managed" }, managed = { required = "yes" } }
 "#,
     r#"
 [otel]
@@ -14110,10 +14112,10 @@ environment = "production"
 exporter = { otlp-http = { endpoint = "https://managed.example/logs", protocol = "binary", headers = { Authorization = "managed-secret" } } }
 trace_exporter = "none"
 metrics_exporter = { otlp-grpc = { endpoint = "https://managed.example:4317" } }
-span_attributes = { "deployment.environment" = "user", machine = "laptop" }
-tracestate = { vendor = { tenant = "user", region = "us" }, other = { keep = "yes" } }
+span_attributes = { "deployment.environment" = "production", machine = "laptop", team = "platform" }
+tracestate = { vendor = { tenant = "managed", region = "us" }, other = { keep = "yes" }, managed = { required = "yes" } }
 "#,
-    true; "managed_exact_values_and_user_metadata"
+    true; "managed_exact_values_and_unmanaged_metadata"
 )]
 #[test_case::test_case(
     "[otel]\nenvironment = 'user'", "[otel]\ntool_result = { max_bytes = 1024 }",
