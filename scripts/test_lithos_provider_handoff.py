@@ -100,15 +100,15 @@ service_tier = "default"
 [model_providers.multidex]
 name = "MultiDex"
 base_url = "{base}/multidex/v1"
-experimental_bearer_token = "{tokens[multidex]}"
+experimental_bearer_token = "{tokens['multidex']}"
 wire_api = "responses"
 requires_openai_auth = false
 [model_providers.lithos]
 base_url = "{base}/lithos/v1"
-experimental_bearer_token = "{tokens[lithos]}"
+experimental_bearer_token = "{tokens['lithos']}"
 [model_providers.openrouter]
 base_url = "{base}/openrouter/v1"
-experimental_bearer_token = "{tokens[openrouter]}"
+experimental_bearer_token = "{tokens['openrouter']}"
 [model_providers.openrouter.provider]
 only = ["wafer/mxfp4"]
 allow_fallbacks = false
