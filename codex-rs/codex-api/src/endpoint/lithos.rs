@@ -135,9 +135,22 @@ pub(crate) fn request_body(request: &Value) -> Result<(Value, HashSet<String>), 
     for item in input {
         match item["type"].as_str().unwrap_or("message") {
             "additional_tools" => {}
-            "compaction" => {
-                let summary=item["encrypted_content"].as_str().filter(|s|s.chars().any(char::is_whitespace))
-                    .ok_or_else(||invalid("Lithos cannot decode another provider's encrypted compaction; use a plaintext conversation summary"))?;
+            "compaction" | "context_compaction" => {
+                // A compaction item belongs to the provider that minted it. Only
+                // the readable form can cross providers; an opaque encrypted
+                // token (no whitespace) is undecodable here. Dropping the item
+                // keeps the rest of the conversation usable, whereas failing the
+                // request would make a mid-session provider switch impossible.
+                let Some(summary) = item["encrypted_content"]
+                    .as_str()
+                    .filter(|s| s.chars().any(char::is_whitespace))
+                else {
+                    tracing::warn!(
+                        "Lithos dropped a compaction summary it cannot decode; \
+                         the conversation continues without that summary"
+                    );
+                    continue;
+                };
                 flush(&mut messages, &mut pending);
                 messages.push(json!({"role":"user","content":summary}));
             }
@@ -150,7 +163,10 @@ pub(crate) fn request_body(request: &Value) -> Result<(Value, HashSet<String>), 
                 if !reasoning.is_empty() {
                     append(assistant(&mut pending), "reasoning_content", &reasoning);
                 } else if item.get("encrypted_content").is_some_and(|v| !v.is_null()) {
-                    return Err(invalid("Encrypted reasoning cannot be sent to Lithos"));
+                    // Same rule as compaction: an encrypted reasoning payload
+                    // has no plaintext for Lithos to consume. Reasoning is not
+                    // required for correctness, so skip it instead of failing.
+                    tracing::debug!("Lithos dropped an encrypted reasoning item it cannot decode");
                 }
             }
             "message" => {
@@ -615,7 +631,60 @@ mod tests {
             request_body(&json!({"model":"test","input":[],"previous_response_id":"resp_old"}))
                 .is_err()
         );
-        assert!(request_body(&json!({"model":"test","input":[{"type":"compaction","encrypted_content":"opaque"}]})).is_err());
+    }
+
+    #[test]
+    fn lithos_drops_foreign_compaction_instead_of_failing_the_switch() -> Result<()> {
+        // An OpenAI-issued compaction token has no whitespace and cannot be
+        // decoded by Lithos. A provider switch must still succeed: the turn is
+        // served without that summary rather than erroring out.
+        let (body, _) = request_body(&json!({"model":"test","input":[
+            {"type":"compaction","encrypted_content":"opaqueEncryptedToken"},
+            {"type":"message","role":"user","content":"after the switch"}
+        ]}))?;
+        assert_eq!(body["messages"][0]["role"], "user");
+        assert_eq!(body["messages"][0]["content"], "after the switch");
+        Ok(())
+    }
+
+    #[test]
+    fn lithos_accepts_a_real_openai_switch_payload() -> Result<()> {
+        // Byte shapes taken from a live OpenAI rollout on agent-gpu-0:
+        // reasoning items carry encrypted_content with content=None.
+        let (body, _) = request_body(&json!({"model":"test","input":[
+            {"type":"reasoning","summary":[],
+             "encrypted_content":"gAAAAABq4Ynrjlim6j5BqUaZAW5wDKDZo9YTONo-"},
+            {"type":"compaction","encrypted_content":"gAAAAABq4Yn43WsbxUTB2OMQ_B-31Hf83EVyE5zA"},
+            {"type":"message","role":"user","content":"continue after the switch"},
+            {"type":"function_call","name":"exec_command","arguments":"{}","call_id":"c1"},
+            {"type":"function_call_output","call_id":"c1","output":"ok"}
+        ]}))?;
+        let msgs = body["messages"].as_array().expect("messages");
+        assert_eq!(msgs[0]["content"], "continue after the switch");
+        let roles: Vec<&str> = msgs.iter().filter_map(|m| m["role"].as_str()).collect();
+        assert!(roles.contains(&"tool"), "tool output preserved: {roles:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn lithos_still_honours_a_readable_compaction_summary() -> Result<()> {
+        let summary = "## Active Objective\nContinue the previous work.";
+        let (body, _) = request_body(&json!({"model":"test","input":[
+            {"type":"compaction","encrypted_content":summary}
+        ]}))?;
+        assert_eq!(body["messages"][0]["role"], "user");
+        assert_eq!(body["messages"][0]["content"], summary);
+        Ok(())
+    }
+
+    #[test]
+    fn lithos_drops_encrypted_reasoning_without_failing() -> Result<()> {
+        let (body, _) = request_body(&json!({"model":"test","input":[
+            {"type":"reasoning","summary":[],"encrypted_content":"encrypted-reasoning"},
+            {"type":"message","role":"user","content":"hello"}
+        ]}))?;
+        assert_eq!(body["messages"][0]["content"], "hello");
+        Ok(())
     }
 
     #[test]
