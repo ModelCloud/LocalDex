@@ -862,7 +862,10 @@ mod thread_processor_behavior_tests {
         );
 
         assert_eq!(typesafe_overrides.model, Some("gpt-5.2-codex".to_string()));
-        assert_eq!(typesafe_overrides.model_provider, None);
+        assert_eq!(
+            typesafe_overrides.model_provider,
+            Some("mock_provider".to_string())
+        );
         assert_eq!(
             request_overrides,
             Some(HashMap::from([(
@@ -874,8 +877,7 @@ mod thread_processor_behavior_tests {
     }
 
     #[test]
-    fn merge_persisted_resume_metadata_skips_persisted_values_when_model_overridden() -> Result<()>
-    {
+    fn merge_persisted_resume_metadata_preserves_provider_when_model_overridden() -> Result<()> {
         let mut request_overrides = Some(HashMap::from([(
             "model".to_string(),
             serde_json::Value::String("gpt-5.2-codex".to_string()),
@@ -891,7 +893,10 @@ mod thread_processor_behavior_tests {
         );
 
         assert_eq!(typesafe_overrides.model, None);
-        assert_eq!(typesafe_overrides.model_provider, None);
+        assert_eq!(
+            typesafe_overrides.model_provider,
+            Some("mock_provider".to_string())
+        );
         assert_eq!(
             request_overrides,
             Some(HashMap::from([(
@@ -926,7 +931,7 @@ mod thread_processor_behavior_tests {
     }
 
     #[test]
-    fn merge_persisted_resume_metadata_skips_persisted_values_when_reasoning_effort_overridden()
+    fn merge_persisted_resume_metadata_preserves_provider_when_reasoning_effort_overridden()
     -> Result<()> {
         let mut request_overrides = Some(HashMap::from([(
             "model_reasoning_effort".to_string(),
@@ -943,7 +948,10 @@ mod thread_processor_behavior_tests {
         );
 
         assert_eq!(typesafe_overrides.model, None);
-        assert_eq!(typesafe_overrides.model_provider, None);
+        assert_eq!(
+            typesafe_overrides.model_provider,
+            Some("mock_provider".to_string())
+        );
         assert_eq!(
             request_overrides,
             Some(HashMap::from([(
