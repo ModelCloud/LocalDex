@@ -750,6 +750,7 @@ mod tests {
             bytes: Box::pin(futures::stream::iter(chunks)),
         };
         let mut stream = response_stream(response, Duration::from_secs(1), HashSet::new());
+        assert!(stream.routing_affinity.is_none());
         let mut text = String::new();
         let mut completed = false;
         while let Some(event) = stream.next().await {
