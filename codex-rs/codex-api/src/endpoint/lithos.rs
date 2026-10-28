@@ -500,6 +500,7 @@ fn response_stream(
         }
     });
     ResponseStream {
+        routing_affinity: None,
         rx_event: ResponseStreamReceiver::new(rx, cancellation),
         upstream_request_id,
         interrupt: None,
