@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use std::time::Instant;
 
 use crate::client::ModelClientSession;
@@ -3095,7 +3096,13 @@ async fn try_run_sampling_request(
         },
     };
     drop(prompt);
-    if cancellation_token.is_cancelled() {
+    let can_interrupt = turn_context
+        .config
+        .features
+        .enabled(Feature::InterruptOnCancel)
+        && step_context.settings.model_info.use_responses_lite
+        && stream.interrupt.is_some();
+    if cancellation_token.is_cancelled() && !can_interrupt {
         return Err(CodexErr::TurnAborted);
     }
     let mut in_flight: FuturesOrdered<InFlightFuture<'static>> = FuturesOrdered::new();
@@ -3127,6 +3134,7 @@ async fn try_run_sampling_request(
         !sess.services.extensions.turn_item_contributors().is_empty();
     let mut active_item_is_streaming_to_client = false;
     let receiving_span = trace_span!("receiving_stream");
+    let mut drop_connection_after_stream = false;
     let outcome: CodexResult<SamplingRequestResult> = loop {
         let handle_responses = trace_span!(
             parent: &receiving_span,
@@ -3155,8 +3163,7 @@ async fn try_run_sampling_request(
                     std::future::pending::<()>().await;
                 }
             } => {
-                drop(stream);
-                client_session.drop_connection();
+                drop_connection_after_stream = true;
                 break Ok(SamplingRequestResult::Preempted);
             }
             _ = preempt.cancelled() => {
@@ -3174,8 +3181,7 @@ async fn try_run_sampling_request(
                     continue;
                 }
                 // TODO: Reconcile any response item already presented to the client.
-                drop(stream);
-                client_session.drop_connection();
+                drop_connection_after_stream = true;
                 break Ok(SamplingRequestResult::Completed {
                     needs_follow_up: true,
                     last_agent_message,
@@ -3201,8 +3207,7 @@ async fn try_run_sampling_request(
             && !matches!(event.as_ref(), Some(Err(err))
                 if matches!(err.details(), CodexErrorDetails::ResponseIncomplete(_)))
         {
-            drop(stream);
-            client_session.drop_connection();
+            drop_connection_after_stream = true;
             break Ok(SamplingRequestResult::Preempted);
         }
 
@@ -3751,6 +3756,16 @@ async fn try_run_sampling_request(
             }
         }
     };
+    if cancellation_token.is_cancelled() && !response_completed && can_interrupt {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        if let Some(interrupt) = stream.interrupt.take() {
+            let _ = interrupt.send(codex_api::ResponseInterrupt::Cancel { deadline });
+        }
+    }
+    drop(stream);
+    if drop_connection_after_stream {
+        client_session.drop_connection();
+    }
     drop(sampling_span);
     drop(sampling_timing_guard);
     if let Some(finish_post_request) = finish_post_request {

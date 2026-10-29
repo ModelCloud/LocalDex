@@ -1128,6 +1128,9 @@
             "instant_interrupt": {
               "type": "boolean"
             },
+            "interrupt_on_cancel": {
+              "type": "boolean"
+            },
             "item_ids": {
               "type": "boolean"
             },
@@ -7865,6 +7868,9 @@
           "type": "boolean"
         },
         "instant_interrupt": {
+          "type": "boolean"
+        },
+        "interrupt_on_cancel": {
           "type": "boolean"
         },
         "item_ids": {
