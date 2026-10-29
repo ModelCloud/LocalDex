@@ -924,6 +924,9 @@
             "code_mode_host_grpc": {
               "type": "boolean"
             },
+            "code_mode_host_output_truncation": {
+              "type": "boolean"
+            },
             "code_mode_interrupt": {
               "type": "boolean"
             },
@@ -7674,6 +7677,9 @@
           "$ref": "#/definitions/FeatureToml_for_CodeModeHostConfigToml"
         },
         "code_mode_host_grpc": {
+          "type": "boolean"
+        },
+        "code_mode_host_output_truncation": {
           "type": "boolean"
         },
         "code_mode_interrupt": {

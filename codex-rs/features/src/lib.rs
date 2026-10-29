@@ -150,6 +150,8 @@ pub enum Feature {
     CodeModeHost,
     /// Use gRPC over stdio for the process-owned code-mode host.
     CodeModeHostGrpc,
+    /// Truncate output in the process-owned code-mode host before sending it to Core.
+    CodeModeHostOutputTruncation,
     /// Establish the code-mode host connection during session startup.
     CodeModePrewarm,
     /// Terminate active code mode cells when their turn is interrupted.
@@ -1282,6 +1284,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
+        id: Feature::CodeModeHostOutputTruncation,
+        key: "code_mode_host_output_truncation",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
         id: Feature::CodeModePrewarm,
         key: "code_mode_prewarm",
         stage: Stage::UnderDevelopment,
@@ -1564,7 +1572,11 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::RespectSystemProxy,
         key: "respect_system_proxy",
-        stage: Stage::UnderDevelopment,
+        stage: Stage::Experimental {
+            name: "System proxy",
+            menu_description: "Use macOS or Windows system proxy settings for Codex requests.",
+            announcement: "",
+        },
         default_enabled: false,
     },
     FeatureSpec {
