@@ -98,6 +98,7 @@ async fn responses_stream_includes_subagent_header_on_review() {
         capabilities: None,
         project_id: None,
         location: None,
+        credential_file: None,
         include_internal_metadata: false,
         provider: None,
     };
@@ -251,6 +252,7 @@ async fn responses_stream_includes_subagent_header_on_other() {
         capabilities: None,
         project_id: None,
         location: None,
+        credential_file: None,
         include_internal_metadata: false,
         provider: None,
     };
@@ -385,6 +387,7 @@ async fn responses_respects_model_info_overrides_from_config() {
         capabilities: None,
         project_id: None,
         location: None,
+        credential_file: None,
         include_internal_metadata: false,
         provider: None,
     };
