@@ -107,6 +107,7 @@ async fn same_manager_creation_retains_step_executor_and_shares_exec_policy() ->
         cancellation_token: CancellationToken::new(),
         tracker: Default::default(),
         call_id: "spawn-call".into(),
+        native_call: None,
         tool_name: ToolName::plain("host_spawn"),
         source: ToolCallSource::Direct,
         payload: ToolPayload::Function {
