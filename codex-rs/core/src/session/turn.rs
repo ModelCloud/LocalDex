@@ -2574,6 +2574,7 @@ pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<RealtimeEventTex
         | EventMsg::McpToolCallBegin(_)
         | EventMsg::McpToolCallEnd(_)
         | EventMsg::ElicitationAbandoned(_)
+        | EventMsg::NetworkApprovalResolved { .. }
         | EventMsg::WebSearchBegin(_)
         | EventMsg::WebSearchEnd(_)
         | EventMsg::ExecCommandBegin(_)

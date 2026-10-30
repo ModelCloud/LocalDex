@@ -1648,6 +1648,14 @@ pub enum EventMsg {
 
     ExecApprovalRequest(ExecApprovalRequestEvent),
 
+    /// Ends an in-process network prompt, including when its proxy request is dropped.
+    #[serde(skip)]
+    #[schemars(skip)]
+    #[ts(skip)]
+    NetworkApprovalResolved {
+        approval_id: String,
+    },
+
     RequestPermissions(RequestPermissionsEvent),
 
     RequestUserInput(RequestUserInputEvent),
