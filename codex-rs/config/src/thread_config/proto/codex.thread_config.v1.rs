@@ -88,6 +88,13 @@ pub struct ModelProvider {
     /// Keep fork-only fields outside the upstream allocation range.
     #[prost(bool, tag = "1000")]
     pub supports_responses_continuation: bool,
+    #[prost(message, optional, tag = "23")]
+    pub capabilities: ::core::option::Option<ModelProviderCapabilities>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ModelProviderCapabilities {
+    #[prost(bool, optional, tag = "1")]
+    pub cyber_access_programs: ::core::option::Option<bool>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StringMap {
