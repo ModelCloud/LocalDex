@@ -246,7 +246,6 @@ fn unknown_model_uses_builtin_instruction_template() {
     let model = model_info_from_slug("unknown-model");
 
     assert_eq!(render_model_instructions(&model), BASE_INSTRUCTIONS);
-    assert!(model.used_fallback_model_metadata);
 }
 
 #[test]
@@ -282,7 +281,6 @@ fn multidex_dsv41_flash_uses_native_metadata() {
     assert_eq!(model.input_modalities, vec![InputModality::Text]);
     assert!(model.include_skills_usage_instructions);
     assert!(!model.supports_search_tool);
-    assert!(!model.used_fallback_model_metadata);
 }
 
 #[test]
@@ -316,7 +314,6 @@ fn dsv41_flash_uses_deepseek_harness_prompt() {
             "{} must use the DeepSeek Harness prompt",
             model.slug
         );
-        assert!(!model.used_fallback_model_metadata);
     }
     assert_eq!(openrouter.slug, "deepseek/deepseek-v4.1-flash-1017");
     assert_eq!(openrouter.context_window, Some(262_144));
@@ -348,7 +345,6 @@ fn lithos_variants_use_1017_instructions_without_fallback_metadata() {
         let model = model_info_from_slug(slug);
         assert_eq!(model.slug, slug);
         assert!(model.display_name.starts_with("DeepSeek v4.1 Flash"));
-        assert!(!model.used_fallback_model_metadata);
         assert_eq!(render_model_instructions(&model), DEEPSEEK_INSTRUCTIONS);
         assert_eq!(model.default_reasoning_level, Some(ReasoningEffort::Max));
         assert_eq!(model.auto_compact_token_limit(), Some(900_000));

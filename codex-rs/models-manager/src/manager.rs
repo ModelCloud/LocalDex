@@ -177,7 +177,7 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
                     .model_catalog_with_origins(refresh_strategy, http_client_factory)
                     .await
                     .into_iter()
-                    .map(|entry| entry.model)
+                    .map(|entry| Arc::unwrap_or_clone(entry.model))
                     .collect(),
             }
         })
@@ -278,20 +278,12 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
     }
 
     // todo(aibrahim): look if we can tighten it to pub(crate)
-    /// Look up model metadata, applying remote overrides and config adjustments.
+    /// Resolve model metadata and its source, preserving provenance through config adjustments.
     fn get_model_info<'a>(
         &'a self,
         model: &'a str,
         config: &'a ModelsManagerConfig,
-    ) -> ModelsManagerFuture<'a, ModelInfo> {
-        Box::pin(
-            async move {
-                let remote_models = self.get_remote_models().await;
-                construct_model_info_from_candidates(model, &remote_models, config)
-            }
-            .instrument(tracing::info_span!("get_model_info", model = model)),
-        )
-    }
+    ) -> ModelsManagerFuture<'a, CatalogModel>;
 
     /// Refresh models if the provided ETag differs from the cached ETag.
     ///
@@ -343,6 +335,20 @@ impl ModelsManagerOverlay {
 }
 
 impl ModelsManager for ModelsManagerOverlay {
+    fn for_originator(&self, originator: &str) -> Option<SharedModelsManager> {
+        self.inner.for_originator(originator).map(|inner| {
+            Arc::new(Self::new(
+                inner,
+                self.additional_models.clone(),
+                self.default_model.clone(),
+            )) as SharedModelsManager
+        })
+    }
+
+    fn set_api_key_model_discovery_enabled(&self, enabled: bool) {
+        self.inner.set_api_key_model_discovery_enabled(enabled);
+    }
+
     fn model_catalog_with_origins(
         &self,
         refresh_strategy: RefreshStrategy,
@@ -359,41 +365,11 @@ impl ModelsManager for ModelsManagerOverlay {
                     .iter()
                     .cloned()
                     .map(|model| CatalogModel {
-                        model,
+                        model: model.into(),
                         origin: ModelOrigin::ExplicitConfig,
                     }),
             );
             catalog
-        })
-    }
-
-    fn for_originator(&self, originator: &str) -> Option<SharedModelsManager> {
-        self.inner.for_originator(originator).map(|inner| {
-            Arc::new(Self::new(
-                inner,
-                self.additional_models.clone(),
-                self.default_model.clone(),
-            )) as SharedModelsManager
-        })
-    }
-
-    fn set_api_key_model_discovery_enabled(&self, enabled: bool) {
-        self.inner.set_api_key_model_discovery_enabled(enabled);
-    }
-
-    fn raw_model_catalog(
-        &self,
-        refresh_strategy: RefreshStrategy,
-        http_client_factory: HttpClientFactory,
-    ) -> ModelsManagerFuture<'_, ModelsResponse> {
-        Box::pin(async move {
-            let catalog = self
-                .inner
-                .raw_model_catalog(refresh_strategy, http_client_factory)
-                .await;
-            ModelsResponse {
-                models: self.merge(catalog.models),
-            }
         })
     }
 
@@ -467,7 +443,7 @@ impl ModelsManager for ModelsManagerOverlay {
         &'a self,
         model: &'a str,
         config: &'a ModelsManagerConfig,
-    ) -> ModelsManagerFuture<'a, ModelInfo> {
+    ) -> ModelsManagerFuture<'a, CatalogModel> {
         if let Some(info) = self
             .additional_models
             .iter()
@@ -475,7 +451,10 @@ impl ModelsManager for ModelsManagerOverlay {
         {
             return Box::pin(std::future::ready(construct_model_info(
                 model,
-                Some(info.clone()),
+                Some(CatalogModel {
+                    model: info.clone().into(),
+                    origin: ModelOrigin::ExplicitConfig,
+                }),
                 config,
             )));
         }
@@ -728,18 +707,26 @@ impl ModelsManager for OpenAiModelsManager {
         &'a self,
         model: &'a str,
         config: &'a ModelsManagerConfig,
-    ) -> ModelsManagerFuture<'a, ModelInfo> {
+    ) -> ModelsManagerFuture<'a, CatalogModel> {
         Box::pin(async move {
             let remote = {
                 let entry = self.remote_models.read().await;
-                let models = self.models_for_entry(&entry.entry).into_models();
-                match &self.catalog_source {
-                    CatalogSource::Default => find_model_from_candidates(model, &models),
+                let selected = self.models_for_entry(&entry.entry);
+                let models = match &selected {
+                    SelectedCatalog::CurrentSnapshot(models)
+                    | SelectedCatalog::Fallback(models) => models,
+                };
+                let model = match &self.catalog_source {
+                    CatalogSource::Default => find_model_from_candidates(model, models),
                     CatalogSource::ExplicitProvider(_) => models
                         .iter()
                         .find(|candidate| candidate.slug == model)
                         .cloned(),
-                }
+                };
+                model.map(|model| CatalogModel {
+                    origin: entry.model_origin(&selected, &model.slug),
+                    model: model.into(),
+                })
             };
             construct_model_info(model, remote, config)
         })
@@ -1059,7 +1046,7 @@ impl ModelsManager for StaticModelsManager {
                 .iter()
                 .cloned()
                 .map(|model| CatalogModel {
-                    model,
+                    model: model.into(),
                     origin: self.origin,
                 })
                 .collect()
@@ -1070,10 +1057,10 @@ impl ModelsManager for StaticModelsManager {
         &'a self,
         model: &'a str,
         config: &'a ModelsManagerConfig,
-    ) -> ModelsManagerFuture<'a, ModelInfo> {
-        Box::pin(
-            async move { construct_model_info_from_candidates(model, &self.remote_models, config) },
-        )
+    ) -> ModelsManagerFuture<'a, CatalogModel> {
+        Box::pin(async move {
+            construct_model_info_from_candidates(model, &self.remote_models, self.origin, config)
+        })
     }
 
     fn get_default_model<'a>(
@@ -1209,27 +1196,29 @@ fn find_model_from_candidates(model: &str, candidates: &[ModelInfo]) -> Option<M
 pub(crate) fn construct_model_info_from_candidates(
     model: &str,
     candidates: &[ModelInfo],
+    origin: ModelOrigin,
     config: &ModelsManagerConfig,
-) -> ModelInfo {
-    let remote = find_model_from_candidates(model, candidates);
+) -> CatalogModel {
+    let remote = find_model_from_candidates(model, candidates).map(|model| CatalogModel {
+        model: model.into(),
+        origin,
+    });
     construct_model_info(model, remote, config)
 }
 
 fn construct_model_info(
     model: &str,
-    remote: Option<ModelInfo>,
+    remote: Option<CatalogModel>,
     config: &ModelsManagerConfig,
-) -> ModelInfo {
-    let model_info = if let Some(remote) = remote {
-        ModelInfo {
-            slug: model.to_string(),
-            used_fallback_model_metadata: false,
-            ..remote
-        }
-    } else {
-        model_info::model_info_from_slug(model)
-    };
-    model_info::with_config_overrides(model_info, config)
+) -> CatalogModel {
+    let mut resolved = remote.unwrap_or_else(|| CatalogModel {
+        model: model_info::model_info_from_slug(model).into(),
+        origin: ModelOrigin::Synthetic,
+    });
+    let mut metadata = Arc::unwrap_or_clone(resolved.model);
+    metadata.slug = model.to_owned();
+    resolved.model = model_info::with_config_overrides(metadata, config).into();
+    resolved
 }
 
 #[cfg(test)]

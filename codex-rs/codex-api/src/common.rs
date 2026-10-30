@@ -481,6 +481,10 @@ impl ResponseStreamReceiver {
     pub async fn recv(&mut self) -> Option<Result<ResponseEvent, ApiError>> {
         self.receiver.recv().await
     }
+
+    pub fn max_capacity(&self) -> usize {
+        self.receiver.max_capacity()
+    }
 }
 
 impl Stream for ResponseStreamReceiver {
