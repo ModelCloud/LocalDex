@@ -14,7 +14,6 @@ use ratatui::widgets::Block;
 use std::cell::Cell;
 
 struct ExternalWriterNotice {
-    command_center_available: bool,
     agents_navigation_key_available: bool,
     transcript_hint: Option<crate::key_hint::ShortcutHint>,
 }
@@ -95,21 +94,17 @@ impl ExternalWriterNotice {
             ("f".to_string(), "fork".to_string()),
         ];
         let escape = crate::key_hint::plain(KeyCode::Esc).display_label();
-        let mut quit_keys = vec![
+        let quit_keys = [
             crate::key_hint::ctrl(KeyCode::Char('c')).display_label(),
             crate::key_hint::plain(KeyCode::Char('q')).display_label(),
         ];
-        if self.command_center_available {
-            let key = if self.agents_navigation_key_available {
-                let left = crate::key_hint::plain(KeyCode::Left).display_label();
-                format!("{left}/{escape}")
-            } else {
-                escape
-            };
-            items.push((key, "command center".to_string()));
+        let key = if self.agents_navigation_key_available {
+            let left = crate::key_hint::plain(KeyCode::Left).display_label();
+            format!("{left}/{escape}")
         } else {
-            quit_keys.insert(/*index*/ 0, escape);
-        }
+            escape
+        };
+        items.push((key, "command center".to_string()));
         items.push((quit_keys.join("/"), "exit".to_string()));
         if let Some(hint) = self.transcript_hint {
             items.push((hint.display_label(), "transcript".to_string()));
@@ -127,6 +122,20 @@ impl ExternalWriterNotice {
 }
 
 impl ChatWidget {
+    pub(crate) fn prepare_composer_images(&mut self, protocol: Option<crate::pets::ImageProtocol>) {
+        self.composer_images = protocol
+            .filter(|_| {
+                !self.bottom_pane.composer_local_images().is_empty()
+                    && self.no_modal_or_popup_active()
+            })
+            .and_then(|protocol| {
+                crate::transcript_image::composer::ComposerImages::for_terminal(
+                    protocol,
+                    self.composer_images.take(),
+                )
+            });
+    }
+
     pub(crate) fn as_renderable(&self) -> RenderableItem<'_> {
         let backdrop = self.as_backdrop_renderable();
         match self.centered_dialog() {
@@ -261,7 +270,6 @@ impl ChatWidget {
             }))
         } else if self.external_writer_view && !self.bottom_pane.has_active_view() {
             RenderableItem::Owned(Box::new(ExternalWriterNotice {
-                command_center_available: self.bottom_pane.command_center_enabled(),
                 agents_navigation_key_available: self.agents_navigation_key_available(),
                 transcript_hint: self.bottom_pane.transcript_shortcut_hint(),
             }))
@@ -276,6 +284,7 @@ impl ChatWidget {
                 self.ambient_pet_wrap_reserved_cols()
             };
             options.rendered_selection = Some(&self.rendered_selection);
+            options.image_previews = self.composer_images.as_ref();
             options.warning_count = self.warning_display_state.count;
             options.textarea_right_reserve = right_reserve;
             options.separate_status_line = options.command_popup_placement

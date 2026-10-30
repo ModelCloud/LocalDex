@@ -3324,6 +3324,7 @@ version = "0.165.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "chrono",
  "clap",
  "codex-api",
  "codex-app-server",
@@ -3344,8 +3345,10 @@ dependencies = [
  "codex-utils-cli",
  "codex-utils-process",
  "codex-websocket-auth",
+ "futures",
  "http 1.4.0",
  "insta",
+ "jsonwebtoken",
  "pretty_assertions",
  "serde",
  "serde_json",
@@ -3356,6 +3359,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "wiremock",
 ]
 
 [[package]]
@@ -3993,6 +3997,7 @@ dependencies = [
  "url",
  "urlencoding",
  "webbrowser",
+ "windows-sys 0.61.2",
  "wiremock",
 ]
 
@@ -10401,9 +10406,9 @@ dependencies = [
 
 [[package]]
 name = "mio"
-version = "1.2.0"
+version = "1.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50b7e5b27aa02a74bac8c3f23f448f8d87ff11f92d3aac1a6ed369ee08cc56c1"
+checksum = "1788edb87fdc09c7e26304471e2f5be8cdefb1b6930d6e3985fc02ff53bf86ee"
 dependencies = [
  "libc",
  "log",

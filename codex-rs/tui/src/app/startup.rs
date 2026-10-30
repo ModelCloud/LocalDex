@@ -743,7 +743,6 @@ impl App {
                             config: &config,
                             local_settings: &local_settings,
                         },
-                        &app_server_target,
                         &target_session,
                         action,
                         resumed,
@@ -848,7 +847,6 @@ impl App {
                         config: &config,
                         local_settings: &local_settings,
                     },
-                    &app_server_target,
                     &target_session,
                     action,
                     forked,
@@ -927,7 +925,6 @@ impl App {
             &app_server_target,
             environment_manager.as_ref(),
         ));
-        chat_widget.set_command_center_enabled(app_server_target.supports_command_center());
         let thread_and_widget_ms = thread_and_widget_started_at.elapsed().as_millis();
         chat_widget.windows_sandbox_local_server = !app_server_target.uses_remote_workspace()
             && app_server.app_server_platform_os() == Some("windows");
@@ -1116,7 +1113,7 @@ See the Codex keymap documentation for supported actions and examples."
         }
         if start_in_agents_overview {
             app.open_agents_overview(&app_server);
-        } else if app.app_server_target.supports_command_center() {
+        } else {
             app.refresh_agents_overview_threads(&app_server);
         }
         if let Some(entry) = startup_hooks_browser {
@@ -1318,9 +1315,11 @@ See the Codex keymap documentation for supported actions and examples."
                 }
                 if app.pending_open_resume_picker {
                     app.pending_open_resume_picker = false;
-                    match Box::pin(
-                        app.open_resume_picker(tui, backends.session_at_mut(displayed_session)),
-                    )
+                    match Box::pin(app.open_resume_picker_for_backends(
+                        tui,
+                        &mut backends,
+                        displayed_session,
+                    ))
                     .await
                     {
                         Ok(AppRunControl::Continue) => {}
@@ -1701,7 +1700,8 @@ See the Codex keymap documentation for supported actions and examples."
             tracing::warn!(error = %err, "failed to shut down embedded app server");
         }
         let clear_pet_result = tui.clear_ambient_pet_image();
-        let clear_result = tui.terminal.clear();
+        let clear_images = tui.terminal.clear_frame_images(&mut tui.retained_images);
+        let clear_result = clear_images.and(tui.terminal.clear());
         if let Some(task) = app.daemon_restart.take()
             && let Err(err) = task.await.unwrap_or_else(|err| Err(err.into()))
         {

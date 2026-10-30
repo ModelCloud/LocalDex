@@ -235,6 +235,10 @@
 //! - When all placeholders for a size are cleared or deleted, the next paste of that size reuses
 //!   the base label without a suffix.
 //!
+//! On supported terminals the local draft references also have a strip of thumbnails.
+//! It shows the first attachments that fit and a count of those hidden. Removing a
+//! reference removes its preview through the same attachment bookkeeping used for submission.
+//!
 //! # Remote Image Rows (Up/Down/Delete)
 //!
 //! Remote image URLs are rendered as non-editable `[Image #N]` rows above the textarea (inside the
@@ -1785,7 +1789,7 @@ impl ChatComposer {
         );
         self.set_pending_pastes(pending_pastes);
         if !self.config.image_paste_enabled {
-            for image in self.attachments.local_images() {
+            for image in &self.attachments.local_images {
                 if let Some(element) = self.draft.textarea.text_elements().into_iter().find(|e| {
                     e.placeholder(self.draft.textarea.text()) == Some(image.placeholder.as_str())
                 }) {
@@ -1805,7 +1809,6 @@ impl ChatComposer {
         self.current_text_elements()
     }
 
-    #[cfg(test)]
     pub(crate) fn local_image_paths(&self) -> Vec<PathBuf> {
         self.attachments.local_image_paths()
     }
@@ -1815,8 +1818,8 @@ impl ChatComposer {
         self.footer.status_line_value.as_ref()
     }
 
-    pub(crate) fn local_images(&self) -> Vec<LocalImageAttachment> {
-        self.attachments.local_images()
+    pub(crate) fn local_images(&self) -> &[LocalImageAttachment] {
+        &self.attachments.local_images
     }
 
     #[cfg(test)]
@@ -1857,8 +1860,7 @@ impl ChatComposer {
     }
 
     pub fn take_recent_submission_images_with_placeholders(&mut self) -> Vec<LocalImageAttachment> {
-        self.attachments
-            .take_recent_submission_images_with_placeholders()
+        std::mem::take(&mut self.attachments.local_images)
     }
 
     /// Flushes any due paste-burst state.
@@ -4573,6 +4575,7 @@ impl ChatComposer {
             status,
             composer: composer_rect,
             remote_images: remote_images_rect,
+            thumbnails,
             textarea: textarea_rect,
             popup: popup_rect,
             footer: footer_rect,
@@ -4867,6 +4870,14 @@ impl ChatComposer {
         }
         let style = user_message_style();
         Block::default().style(style).render(composer_rect, buf);
+        if let Some(previews) = options.image_previews {
+            previews.render(
+                thumbnails,
+                buf,
+                &self.attachments.local_images,
+                &self.draft.textarea,
+            );
+        }
         if !remote_images_rect.is_empty() {
             let first = self
                 .attachments
@@ -5053,7 +5064,6 @@ mod mentions_layout_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::attachment_state::AttachedImage;
     use super::*;
     use crate::test_support::PathBufExt;
     use crate::test_support::test_path_buf;
@@ -11669,7 +11679,7 @@ mod tests {
             "remaining placeholder relabeled to #1"
         );
         assert_eq!(
-            vec![AttachedImage {
+            vec![LocalImageAttachment {
                 path: path2,
                 placeholder: "[Image #1]".to_string()
             }],
@@ -11732,7 +11742,7 @@ mod tests {
             format!("Test {placeholder1} test ")
         );
         assert_eq!(
-            vec![AttachedImage {
+            vec![LocalImageAttachment {
                 path: path2,
                 placeholder: placeholder1
             }],
@@ -12344,10 +12354,13 @@ mod tests {
 
         let placeholder = local_image_label_text(/*label_number*/ 1);
         composer.draft.textarea.insert_element(&placeholder);
-        composer.attachments.local_images.push(AttachedImage {
-            placeholder: placeholder.clone(),
-            path: PathBuf::from("img.png"),
-        });
+        composer
+            .attachments
+            .local_images
+            .push(LocalImageAttachment {
+                placeholder: placeholder.clone(),
+                path: PathBuf::from("img.png"),
+            });
         composer
             .draft
             .pending_pastes
@@ -12445,10 +12458,13 @@ mod tests {
 
         let placeholder = local_image_label_text(/*label_number*/ 1);
         composer.draft.textarea.insert_element(&placeholder);
-        composer.attachments.local_images.push(AttachedImage {
-            placeholder: placeholder.clone(),
-            path: PathBuf::from("img.png"),
-        });
+        composer
+            .attachments
+            .local_images
+            .push(LocalImageAttachment {
+                placeholder: placeholder.clone(),
+                path: PathBuf::from("img.png"),
+            });
 
         composer.apply_external_edit("No images here".to_string());
 
@@ -12557,10 +12573,13 @@ mod tests {
 
         let placeholder = local_image_label_text(/*label_number*/ 1);
         composer.draft.textarea.insert_element(&placeholder);
-        composer.attachments.local_images.push(AttachedImage {
-            placeholder: placeholder.clone(),
-            path: PathBuf::from("img.png"),
-        });
+        composer
+            .attachments
+            .local_images
+            .push(LocalImageAttachment {
+                placeholder: placeholder.clone(),
+                path: PathBuf::from("img.png"),
+            });
 
         composer.apply_external_edit(format!("{placeholder} extra {placeholder}"));
 
