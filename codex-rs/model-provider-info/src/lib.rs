@@ -889,6 +889,7 @@ other non-default provider fields are not supported"
         provider.capabilities = Some(ModelProviderCapabilities {
             external_web_access: Some(false),
             remote_compaction: Some(RemoteCompactionSupport::Unsupported),
+            ..Default::default()
         });
         provider
     }
