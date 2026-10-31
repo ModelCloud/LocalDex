@@ -12569,6 +12569,87 @@ async fn remote_compaction_v2_retains_only_the_selected_step(first_attempt: Firs
     recv_terminal_event(&events, TerminalEventKind::TurnAborted).await;
 }
 
+/// A provider hand-off must compact with the model the user just selected.
+///
+/// Compacting with the previous provider replays the full history to the endpoint the
+/// user switched away from. That request fails whenever the old endpoint is unreachable,
+/// unauthorized, or no longer the intended owner of the conversation, which surfaces as a
+/// switch failure before the new model ever runs a token. The replacement model has to
+/// read this history on its next sampling request anyway, so it is the only safe compactor.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn provider_switch_compacts_with_the_selected_model() {
+    let server = responses::start_mock_server().await;
+    let (session, mut turn, events) = make_remote_compaction_session(&server.uri()).await;
+    // A compaction-compatibility change is the ordinary trigger when a thread moves
+    // between endpoints, so pin one to keep the test on that path.
+    update_turn_settings_for_test(
+        Arc::get_mut(&mut turn).expect("unshared turn"),
+        |settings| {
+            Arc::make_mut(&mut settings.model_info).comp_hash = Some("new".to_string());
+        },
+    );
+    session
+        .record_conversation_items(
+            &turn,
+            turn.model_info(),
+            &[user_message("before compaction")],
+        )
+        .await;
+
+    // The previous turn ran on a different provider. It points at the same mock so a
+    // regression shows up as the wrong model in the request rather than a transport error.
+    let mut previous_provider_info =
+        built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
+    previous_provider_info.name = "previous-provider".to_string();
+    previous_provider_info.base_url = Some(format!("{}/v1", server.uri()));
+    previous_provider_info.supports_websockets = false;
+    session
+        .set_previous_turn_settings(Some(PreviousTurnSettings {
+            model: "gpt-5.4".to_string(),
+            comp_hash: Some("old".to_string()),
+            cyber_access_program: None,
+            realtime_active: Some(turn.realtime_active),
+        }))
+        .await;
+    session.state.lock().await.previous_turn_provider = Some((
+        "previous-provider".to_string(),
+        create_model_provider(previous_provider_info, /*auth_manager*/ None),
+    ));
+
+    let compaction = ResponseTemplate::new(/*status*/ 200)
+        .insert_header("content-type", "text/event-stream")
+        .set_body_string(responses::sse(vec![
+            json!({
+                "type": "response.output_item.done",
+                "item": { "type": "compaction", "encrypted_content": "summary" },
+            }),
+            responses::ev_completed("compact-response"),
+        ]));
+    let requests = responses::mount_response_sequence(&server, vec![compaction]).await;
+
+    let mut client_session = session.services.model_client.new_session();
+    crate::session::turn::run_pre_sampling_compact_for_test(
+        &session,
+        &turn,
+        &mut client_session,
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("compaction succeeds");
+
+    assert_eq!(
+        requests
+            .requests()
+            .iter()
+            .map(|request| request.body_json()["model"].clone())
+            .collect::<Vec<_>>(),
+        vec![json!("gpt-5.2")],
+        "compaction must target the newly selected model, not the previous provider"
+    );
+    session.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    drop(events);
+}
+
 #[test_case::test_case(true; "runtime_provider_provenance")]
 #[test_case::test_case(false; "pure_openai_without_runtime_provenance")]
 #[tokio::test]
