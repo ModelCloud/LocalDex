@@ -1483,6 +1483,17 @@ async fn run_pre_sampling_compact(
     Ok(())
 }
 
+/// Test hook for the pre-sampling compaction decision.
+#[cfg(test)]
+pub(crate) async fn run_pre_sampling_compact_for_test(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    client_session: &mut ModelClientSession,
+    cancellation_token: &CancellationToken,
+) -> CodexResult<()> {
+    run_pre_sampling_compact(sess, turn_context, client_session, cancellation_token).await
+}
+
 /// Returns true only when both turns declare compaction compatibility hashes and they differ.
 /// A missing hash does not provide enough information to trigger compaction.
 fn comp_hash_changed(previous: Option<&str>, current: Option<&str>) -> bool {
@@ -1580,6 +1591,34 @@ async fn maybe_run_previous_model_inline_compact(
     // MultiDex and explicit custom providers. Generic cold-resume workflows keep
     // upstream's same-provider model/program restoration.
     let previous_provider = sess.state.lock().await.previous_turn_provider.clone();
+    // A provider hand-off must compact with the newly selected model. Compacting with the
+    // previous provider replays the whole history to the endpoint the user just switched
+    // away from, and that request fails whenever the old endpoint is unreachable,
+    // unauthorized, or simply no longer the intended owner of this conversation. The
+    // replacement model already has to be able to read this history on the next sampling
+    // request, so summarizing it there is the only version the switch can rely on.
+    let provider_changed = match previous_provider.as_ref() {
+        Some((provider_id, _)) => *provider_id != turn_context.config.model_provider_id,
+        None => false,
+    };
+    if provider_changed {
+        // Sanitizers on the destination adapter make foreign history portable; the
+        // current model is also the one that will consume the summary.
+        let step_context = sess
+            .capture_step_context(Arc::clone(turn_context), cancellation_token)
+            .await?;
+        return run_auto_compact(
+            sess,
+            Arc::clone(&step_context),
+            step_context,
+            client_session,
+            reason,
+            CompactionPhase::PreTurn,
+            /*candidate*/ None,
+        )
+        .await
+        .map(|_| ());
+    }
     if let Some((provider_id, provider)) = previous_provider {
         let mut config = (*previous_model_turn_context.config).clone();
         if let Some(required_provider) = config.config_layer_stack.required_model_provider()
