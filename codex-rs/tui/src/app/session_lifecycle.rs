@@ -1479,11 +1479,7 @@ impl App {
                     .await;
                 }
             }
-            Err(err) => {
-                self.add_session_picker_error(format!(
-                    "Failed to attach to resumed app-server thread: {err}"
-                ));
-            }
+            Err(err) => return Err(err),
         }
 
         Ok(AppRunControl::Continue)
