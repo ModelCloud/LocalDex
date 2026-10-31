@@ -55,6 +55,11 @@ message ModelProvider {
   optional string credential_file = 22;
   // Keep fork-only fields outside the upstream allocation range.
   bool supports_responses_continuation = 1000;
+  optional ModelProviderCapabilities capabilities = 23;
+}
+
+message ModelProviderCapabilities {
+  optional bool cyber_access_programs = 1;
 }
 
 message StringMap {

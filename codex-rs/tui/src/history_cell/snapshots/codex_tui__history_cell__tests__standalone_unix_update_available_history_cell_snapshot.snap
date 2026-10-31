@@ -3,9 +3,9 @@ source: tui/src/history_cell/tests.rs
 expression: rendered
 ---
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ ✨ Update available! 0.165.0 -> 9.9.9                                                                      │
+│ ✨ Update available! 0.164.0 -> 9.9.9                                                                      │
 │ Run sh -c 's=$(curl -fsSL                                                                                  │
-│ https://raw.githubusercontent.com/ModelCloud/MultiDex/main/scripts/install/install-multidex.sh) && eval    │
+│ https://raw.githubusercontent.com/ModelCloud/MultiDex/main/scripts/install/install-multidex.sh) && sh -c   │
 │ "$s"' to update.                                                                                           │
 │                                                                                                            │
 │ See full release notes:                                                                                    │

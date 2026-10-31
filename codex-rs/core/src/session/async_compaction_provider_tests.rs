@@ -82,6 +82,7 @@ async fn multidex_base_client_does_not_override_background_turn_provider(change_
             total_tokens: 70_000,
             ..Default::default()
         }),
+        /*includes_reasoning*/ false,
     )
     .await
     .expect("record usage");

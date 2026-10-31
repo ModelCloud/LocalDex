@@ -87,6 +87,7 @@ impl ChatWidget {
                 self.on_thread_settings_updated(notification);
             }
             ServerNotification::TurnStarted(notification) => {
+                self.clear_prompt_suggestion();
                 if self
                     .bottom_pane
                     .dismiss_view_by_id(safety_recourse::VIEW_ID)
@@ -95,7 +96,6 @@ impl ChatWidget {
                     self.on_modal_or_popup_closed();
                 }
                 self.safety_recourse = None;
-                self.clear_prompt_suggestion();
                 if from_replay {
                     self.restore_realtime_transcripts_before_turn(&notification.turn.id);
                 } else {
@@ -386,6 +386,7 @@ impl ChatWidget {
             | ServerNotification::ThreadStarted(_)
             | ServerNotification::ThreadStatusChanged(_)
             | ServerNotification::ThreadReadStateChanged(_)
+            | ServerNotification::ThreadSectionChanged(_)
             | ServerNotification::ThreadReverted(_)
             | ServerNotification::ThreadQueueChanged(_)
             | ServerNotification::ThreadPredictionUpdated(_)
